@@ -1,0 +1,8 @@
+---
+import AdminLayout from "../layouts/AdminLayout.astro";
+import SettingsManager from "../components/SettingsManager";
+---
+
+<AdminLayout title="Settings" breadcrumbs={[{ label: "Settings" }]}>
+    <SettingsManager client:load />
+</AdminLayout>

@@ -1,0 +1,246 @@
+---
+import AdminLayout from "../layouts/AdminLayout.astro";
+---
+
+<AdminLayout title="Customers">
+    <div class="dashboard-bg min-h-screen">
+        <div class="relative z-10 p-6 lg:p-8 space-y-8">
+            <!-- Header -->
+            <div class="animate-slide-up delay-1">
+                <div
+                    class="flex flex-col lg:flex-row lg:items-end justify-between gap-6"
+                >
+                    <div>
+                        <div class="flex items-center gap-3 mb-2">
+                            <svg
+                                class="w-5 h-5"
+                                style="color: var(--accent);"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path
+                                    d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"
+                                ></path>
+                                <circle cx="9" cy="7" r="4"></circle>
+                                <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+                                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                            </svg>
+                            <span
+                                class="text-xs font-semibold uppercase tracking-widest"
+                                style="color: var(--text-muted);"
+                            >
+                                Customer Insights
+                            </span>
+                        </div>
+                        <h1
+                            class="font-display text-4xl font-bold tracking-tight"
+                            style="color: var(--text-primary);"
+                        >
+                            Customers
+                        </h1>
+                        <p
+                            class="mt-2 text-lg"
+                            style="color: var(--text-secondary);"
+                        >
+                            View customer profiles, order history, and
+                            engagement
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <button
+                            class="px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all"
+                            style="background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary);"
+                        >
+                            <svg
+                                class="w-4 h-4"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path
+                                    d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
+                                ></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" x2="12" y1="15" y2="3"></line>
+                            </svg>
+                            Export
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats Cards -->
+            <div
+                class="grid grid-cols-2 lg:grid-cols-4 gap-4 animate-slide-up delay-2"
+            >
+                <div class="kpi-card group">
+                    <div class="flex items-center gap-4">
+                        <div
+                            class="icon-container icon-amber group-hover:scale-110 transition-transform"
+                        >
+                            <svg
+                                class="w-5 h-5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path
+                                    d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"
+                                ></path>
+                                <circle cx="9" cy="7" r="4"></circle>
+                            </svg>
+                        </div>
+                        <div>
+                            <p class="metric-value">156</p>
+                            <p
+                                class="text-xs font-medium"
+                                style="color: var(--text-muted);"
+                            >
+                                Total Customers
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="kpi-card group">
+                    <div class="flex items-center gap-4">
+                        <div
+                            class="icon-container icon-green group-hover:scale-110 transition-transform"
+                        >
+                            <svg
+                                class="w-5 h-5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"
+                                ></path>
+                                <polyline points="22 4 12 14.01 9 11.01"
+                                ></polyline>
+                            </svg>
+                        </div>
+                        <div>
+                            <p
+                                class="metric-value"
+                                style="color: var(--success);"
+                            >
+                                42
+                            </p>
+                            <p
+                                class="text-xs font-medium"
+                                style="color: var(--text-muted);"
+                            >
+                                Active This Week
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="kpi-card group">
+                    <div class="flex items-center gap-4">
+                        <div
+                            class="icon-container icon-blue group-hover:scale-110 transition-transform"
+                        >
+                            <svg
+                                class="w-5 h-5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <polygon
+                                    points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
+                                ></polygon>
+                            </svg>
+                        </div>
+                        <div>
+                            <p class="metric-value" style="color: var(--info);">
+                                28
+                            </p>
+                            <p
+                                class="text-xs font-medium"
+                                style="color: var(--text-muted);"
+                            >
+                                Loyal (5+ Orders)
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="kpi-card group">
+                    <div class="flex items-center gap-4">
+                        <div
+                            class="icon-container icon-orange group-hover:scale-110 transition-transform"
+                        >
+                            <svg
+                                class="w-5 h-5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path d="M12 20V10"></path>
+                                <path d="M18 20V4"></path>
+                                <path d="M6 20v-4"></path>
+                            </svg>
+                        </div>
+                        <div>
+                            <p class="metric-value">₹845</p>
+                            <p
+                                class="text-xs font-medium"
+                                style="color: var(--text-muted);"
+                            >
+                                Avg. Order Value
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Content Area -->
+            <div
+                class="rounded-2xl p-8 flex flex-col items-center justify-center animate-slide-up delay-3"
+                style="background: var(--bg-secondary); border: 1px solid var(--border); min-height: 400px;"
+            >
+                <div
+                    class="w-20 h-20 rounded-2xl flex items-center justify-center mb-6 transition-transform hover:scale-110"
+                    style="background: var(--bg-tertiary); border: 1px solid var(--border);"
+                >
+                    <svg
+                        class="w-10 h-10"
+                        style="color: var(--text-muted);"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        stroke-width="2"
+                    >
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"
+                        ></path>
+                        <circle cx="9" cy="7" r="4"></circle>
+                        <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                    </svg>
+                </div>
+                <h3
+                    class="font-display text-xl font-semibold mb-2"
+                    style="color: var(--text-primary);"
+                >
+                    Customer Management Coming Soon
+                </h3>
+                <p
+                    class="text-sm text-center max-w-md"
+                    style="color: var(--text-muted);"
+                >
+                    This feature is under development. You will be able to view
+                    customer profiles, order history, loyalty points, and send
+                    targeted notifications here.
+                </p>
+            </div>
+        </div>
+    </div>
+</AdminLayout>

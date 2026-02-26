@@ -1,0 +1,629 @@
+---
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  breadcrumbs?: { label: string; href?: string }[];
+}
+
+const { title, breadcrumbs = [] } = Astro.props;
+const currentPath = Astro.url.pathname;
+
+const navItems = [
+  { href: "/", label: "Dashboard", icon: "LayoutDashboard" },
+  {
+    label: "Products",
+    icon: "Package",
+    submenu: [
+      { href: "/products", label: "All Products" },
+      { href: "/products?action=add", label: "Add Product" },
+      { href: "/products?action=import", label: "Bulk Import" },
+    ],
+  },
+  {
+    label: "Product Hierarchy",
+    icon: "Tags",
+    submenu: [
+      { href: "/categories", label: "Categories" },
+      { href: "/subcategories", label: "Subcategories" },
+      { href: "/item-groups", label: "Item Groups" },
+    ],
+  },
+  {
+    label: "Inventory",
+    icon: "Warehouse",
+    submenu: [
+      { href: "/inventory", label: "Stock Levels" },
+      { href: "/inventory?filter=low", label: "Low Stock Alerts" },
+    ],
+  },
+  {
+    label: "Orders",
+    icon: "ShoppingCart",
+    submenu: [
+      { href: "/orders", label: "Live Orders" },
+      { href: "/orders?status=completed", label: "Completed Orders" },
+      { href: "/orders?status=returns", label: "Returns & Replacements" },
+    ],
+  },
+  { href: "/pricing", label: "Pricing & Offers", icon: "Percent" },
+  { href: "/customers", label: "Customers", icon: "Users" },
+  { href: "/delivery", label: "Delivery & Stores", icon: "Truck" },
+  { href: "/analytics", label: "Reports & Analytics", icon: "BarChart3" },
+  { href: "/settings", label: "Settings", icon: "Settings" },
+];
+
+function isActive(item: any): boolean {
+  if (item.href) {
+    return currentPath === item.href || currentPath.startsWith(item.href + "?");
+  }
+  if (item.submenu) {
+    return item.submenu.some(
+      (sub: any) =>
+        currentPath === sub.href ||
+        currentPath.startsWith(sub.href.split("?")[0]),
+    );
+  }
+  return false;
+}
+---
+
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title} | ShravanKirana Admin</title>
+    <link rel="preconnect" href="https://api.fontshare.com" />
+  </head>
+  <body
+    class="h-full"
+    style="background: var(--bg-primary); color: var(--text-primary);"
+  >
+    <div class="flex h-full" id="app-container">
+      <!-- Sidebar -->
+      <aside
+        id="sidebar"
+        class="hidden lg:flex lg:flex-col lg:w-72 lg:fixed lg:inset-y-0 transition-all duration-300"
+        style="background: var(--bg-secondary); border-right: 1px solid var(--border);"
+      >
+        <!-- Logo -->
+        <div
+          class="flex items-center gap-3 px-6 py-5"
+          style="border-bottom: 1px solid var(--border);"
+        >
+          <div
+            class="flex items-center justify-center w-10 h-10 rounded-xl shadow-lg"
+            style="background: var(--accent-gradient);"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="w-5 h-5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              style="color: var(--bg-primary);"
+            >
+              <circle cx="8" cy="21" r="1"></circle>
+              <circle cx="19" cy="21" r="1"></circle>
+              <path
+                d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"
+              ></path>
+            </svg>
+          </div>
+          <div class="sidebar-text">
+            <h1
+              class="text-lg font-display font-bold"
+              style="color: var(--text-primary);"
+            >
+              ShravanKirana
+            </h1>
+            <p class="text-xs" style="color: var(--text-muted);">
+              Admin Console
+            </p>
+          </div>
+        </div>
+
+        <!-- Navigation -->
+        <nav class="flex-1 px-4 py-5 space-y-1 overflow-y-auto">
+          <p
+            class="sidebar-text px-3 text-[10px] font-semibold uppercase tracking-widest mb-4"
+            style="color: var(--text-muted);"
+          >
+            Navigation
+          </p>
+          {
+            navItems.map((item) =>
+              item.submenu ? (
+                <div class="nav-group">
+                  <button
+                    type="button"
+                    class={`nav-parent w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-sm font-medium transition-all`}
+                    style={
+                      isActive(item)
+                        ? "background: var(--accent-glow); color: var(--accent);"
+                        : "color: var(--text-secondary);"
+                    }
+                    data-expanded={isActive(item) ? "true" : "false"}
+                  >
+                    <span class="flex items-center gap-3">
+                      <span class="nav-icon" data-icon={item.icon} />
+                      <span class="sidebar-text">{item.label}</span>
+                    </span>
+                    <svg
+                      class="sidebar-text w-4 h-4 transition-transform nav-chevron"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  </button>
+                  <div
+                    class={`nav-submenu pl-10 space-y-1 mt-1 ${isActive(item) ? "" : "hidden"}`}
+                  >
+                    {item.submenu.map((sub: any) => {
+                      // For exact match: check if current path matches the href exactly
+                      // or if href has query params, check if current path matches including query
+                      const subBase = sub.href.split("?")[0];
+                      const subQuery = sub.href.includes("?")
+                        ? sub.href.split("?")[1]
+                        : null;
+                      const currentQuery = currentPath.includes("?")
+                        ? currentPath.split("?")[1]
+                        : null;
+                      const currentBase = currentPath.split("?")[0];
+
+                      const isSubActive = subQuery
+                        ? currentBase === subBase && currentQuery === subQuery
+                        : currentPath === sub.href && !currentQuery;
+
+                      return (
+                        <a
+                          href={sub.href}
+                          class="sidebar-text block px-3 py-2 text-sm rounded-lg transition-all"
+                          style={
+                            isSubActive
+                              ? "color: var(--accent); background: var(--accent-glow);"
+                              : "color: var(--text-muted);"
+                          }
+                        >
+                          {sub.label}
+                        </a>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <a
+                  href={item.href}
+                  class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all nav-link"
+                  style={
+                    isActive(item)
+                      ? "background: var(--accent-glow); color: var(--accent);"
+                      : "color: var(--text-secondary);"
+                  }
+                >
+                  <span class="nav-icon" data-icon={item.icon} />
+                  <span class="sidebar-text">{item.label}</span>
+                  {item.href === "/" && (
+                    <span
+                      class="sidebar-text ml-auto px-2 py-0.5 text-[10px] font-semibold rounded-md"
+                      style="background: var(--success-light); color: var(--success);"
+                    >
+                      LIVE
+                    </span>
+                  )}
+                </a>
+              ),
+            )
+          }
+        </nav>
+
+        <!-- User Card -->
+        <div class="p-4" style="border-top: 1px solid var(--border);">
+          <div
+            class="flex items-center gap-3 p-3 rounded-xl"
+            style="background: var(--bg-tertiary);"
+          >
+            <div
+              class="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold"
+              style="background: var(--accent-gradient); color: var(--bg-primary);"
+            >
+              A
+            </div>
+            <div class="sidebar-text flex-1">
+              <p
+                class="text-sm font-semibold"
+                style="color: var(--text-primary);"
+              >
+                Admin
+              </p>
+              <p class="text-xs" style="color: var(--text-muted);">
+                Store Manager
+              </p>
+            </div>
+            <button
+              class="sidebar-text p-2 rounded-lg transition-colors hover:bg-[var(--bg-elevated)]"
+              style="color: var(--text-muted);"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="w-4 h-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16,17 21,12 16,7"></polyline>
+                <line x1="21" x2="9" y1="12" y2="12"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Content -->
+      <div
+        class="lg:pl-72 flex-1 flex flex-col min-h-screen transition-all duration-300"
+        id="main-content"
+      >
+        <!-- Top Header -->
+        <header
+          class="sticky top-0 z-40 flex items-center justify-between h-16 px-4 lg:px-8"
+          style="background: var(--bg-secondary); border-bottom: 1px solid var(--border);"
+        >
+          <div class="flex items-center gap-4">
+            <!-- Mobile menu toggle -->
+            <button
+              id="mobile-menu-btn"
+              class="lg:hidden p-2 rounded-lg transition-colors"
+              style="color: var(--text-secondary);"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="w-5 h-5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <line x1="4" x2="20" y1="12" y2="12"></line>
+                <line x1="4" x2="20" y1="6" y2="6"></line>
+                <line x1="4" x2="20" y1="18" y2="18"></line>
+              </svg>
+            </button>
+
+            <!-- Sidebar collapse toggle -->
+            <button
+              id="sidebar-toggle"
+              class="hidden lg:flex p-2 rounded-lg transition-colors hover:bg-[var(--bg-tertiary)]"
+              style="color: var(--text-muted);"
+              title="Toggle sidebar"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="w-5 h-5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect width="18" height="18" x="3" y="3" rx="2"></rect>
+                <path d="M9 3v18"></path>
+              </svg>
+            </button>
+
+            <!-- Breadcrumb -->
+            <nav class="hidden md:flex items-center gap-2 text-sm">
+              <a
+                href="/"
+                style="color: var(--text-muted);"
+                class="hover:text-[var(--accent)] transition-colors"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="w-4 h-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
+                  ></path>
+                  <polyline points="9,22 9,12 15,12 15,22"></polyline>
+                </svg>
+              </a>
+              <svg
+                class="w-4 h-4"
+                style="color: var(--text-muted);"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="m9 18 6-6-6-6"></path>
+              </svg>
+              <span class="font-medium" style="color: var(--text-primary);"
+                >{title}</span
+              >
+            </nav>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <!-- Search -->
+            <div
+              class="hidden sm:flex items-center gap-2 px-4 py-2 rounded-xl"
+              style="background: var(--bg-tertiary);"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="w-4 h-4"
+                style="color: var(--text-muted);"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="11" cy="11" r="8"></circle>
+                <path d="m21 21-4.3-4.3"></path>
+              </svg>
+              <input
+                type="text"
+                placeholder="Search..."
+                class="bg-transparent text-sm w-40 lg:w-52 focus:outline-none"
+                style="color: var(--text-primary);"
+              />
+              <kbd
+                class="hidden lg:inline-flex items-center px-2 py-0.5 text-[10px] font-medium rounded"
+                style="color: var(--text-muted); background: var(--bg-elevated);"
+              >
+                ⌘K
+              </kbd>
+            </div>
+
+            <!-- Notifications -->
+            <button
+              class="relative p-2.5 rounded-xl transition-colors hover:bg-[var(--bg-tertiary)]"
+              style="color: var(--text-secondary);"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="w-5 h-5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path>
+                <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path>
+              </svg>
+              <span
+                class="absolute top-2 right-2 w-2 h-2 rounded-full"
+                style="background: var(--danger); box-shadow: 0 0 8px var(--danger);"
+              ></span>
+            </button>
+
+            <!-- Profile -->
+            <div class="relative" id="profile-dropdown">
+              <button
+                class="flex items-center gap-2 p-1.5 pr-3 rounded-xl transition-colors hover:bg-[var(--bg-tertiary)]"
+                id="profile-btn"
+              >
+                <div
+                  class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold"
+                  style="background: var(--accent-gradient); color: var(--bg-primary);"
+                >
+                  A
+                </div>
+                <span
+                  class="hidden md:block text-sm font-medium"
+                  style="color: var(--text-primary);">Admin</span
+                >
+                <svg
+                  class="hidden md:block w-4 h-4"
+                  style="color: var(--text-muted);"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="m6 9 6 6 6-6"></path>
+                </svg>
+              </button>
+              <div
+                id="profile-menu"
+                class="hidden absolute right-0 mt-2 w-56 rounded-xl shadow-2xl py-2 z-50"
+                style="background: var(--bg-elevated); border: 1px solid var(--border);"
+              >
+                <div
+                  class="px-4 py-3"
+                  style="border-bottom: 1px solid var(--border);"
+                >
+                  <p
+                    class="text-sm font-semibold"
+                    style="color: var(--text-primary);"
+                  >
+                    Admin User
+                  </p>
+                  <p class="text-xs" style="color: var(--text-muted);">
+                    admin@shravankirana.com
+                  </p>
+                </div>
+                <a
+                  href="/settings"
+                  class="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-[var(--bg-tertiary)]"
+                  style="color: var(--text-secondary);"
+                >
+                  <svg
+                    class="w-4 h-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path
+                      d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
+                    ></path>
+                  </svg>
+                  Settings
+                </a>
+                <a
+                  href="/login"
+                  onclick="localStorage.removeItem('adminToken'); localStorage.removeItem('adminUser');"
+                  class="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors"
+                  style="color: var(--danger);"
+                >
+                  <svg
+                    class="w-4 h-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                    <polyline points="16,17 21,12 16,7"></polyline>
+                    <line x1="21" x2="9" y1="12" y2="12"></line>
+                  </svg>
+                  Logout
+                </a>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <!-- Page Content -->
+        <main class="flex-1">
+          <slot />
+        </main>
+      </div>
+    </div>
+
+    <!-- Mobile Overlay -->
+    <div
+      id="mobile-overlay"
+      class="fixed inset-0 z-40 hidden lg:hidden"
+      style="background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);"
+    >
+    </div>
+
+    <script>
+      const iconPaths: Record<string, string> = {
+        LayoutDashboard:
+          '<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',
+        Package:
+          '<path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>',
+        Tags: '<path d="m15 5 6.3 6.3a2.4 2.4 0 0 1 0 3.4L17 19"/><path d="M9.586 5.586A2 2 0 0 0 8.172 5H3a1 1 0 0 0-1 1v5.172a2 2 0 0 0 .586 1.414L8.29 18.29a2.426 2.426 0 0 0 3.42 0l3.58-3.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="6.5" cy="9.5" r=".5" fill="currentColor"/>',
+        Warehouse:
+          '<path d="M22 8.35V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8.35A2 2 0 0 1 3.26 6.5l8-3.2a2 2 0 0 1 1.48 0l8 3.2A2 2 0 0 1 22 8.35Z"/><path d="M6 18h12"/><path d="M6 14h12"/><rect width="12" height="12" x="6" y="10"/>',
+        ShoppingCart:
+          '<circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>',
+        Percent:
+          '<line x1="19" x2="5" y1="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>',
+        Users:
+          '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+        Truck:
+          '<path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/>',
+        BarChart3:
+          '<path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
+        Settings:
+          '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+      };
+
+      document.querySelectorAll(".nav-icon").forEach((el) => {
+        const icon = el.getAttribute("data-icon");
+        if (icon && iconPaths[icon]) {
+          el.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconPaths[icon]}</svg>`;
+        }
+      });
+
+      // Hover effects for nav links
+      document.querySelectorAll(".nav-link").forEach((el) => {
+        const htmlEl = el as HTMLElement;
+        el.addEventListener("mouseenter", () => {
+          if (!htmlEl.style.background.includes("var(--accent-glow)")) {
+            htmlEl.style.background = "var(--bg-tertiary)";
+          }
+        });
+        el.addEventListener("mouseleave", () => {
+          if (!htmlEl.style.background.includes("var(--accent-glow)")) {
+            htmlEl.style.background = "transparent";
+          }
+        });
+      });
+
+      // Sidebar toggle
+      const sidebar = document.getElementById("sidebar");
+      const mainContent = document.getElementById("main-content");
+      const sidebarToggle = document.getElementById("sidebar-toggle");
+
+      sidebarToggle?.addEventListener("click", () => {
+        sidebar?.classList.toggle("lg:w-72");
+        sidebar?.classList.toggle("lg:w-20");
+        mainContent?.classList.toggle("lg:pl-72");
+        mainContent?.classList.toggle("lg:pl-20");
+        document.querySelectorAll(".sidebar-text").forEach((el) => {
+          el.classList.toggle("lg:hidden");
+        });
+        document.querySelectorAll(".nav-submenu").forEach((el) => {
+          el.classList.toggle("lg:hidden");
+        });
+      });
+
+      // Nav group toggle
+      document.querySelectorAll(".nav-parent").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const submenu = btn.nextElementSibling;
+          const chevron = btn.querySelector(".nav-chevron");
+          submenu?.classList.toggle("hidden");
+          chevron?.classList.toggle("rotate-180");
+        });
+      });
+
+      // Profile dropdown
+      const profileBtn = document.getElementById("profile-btn");
+      const profileMenu = document.getElementById("profile-menu");
+
+      profileBtn?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        profileMenu?.classList.toggle("hidden");
+      });
+
+      document.addEventListener("click", () => {
+        profileMenu?.classList.add("hidden");
+      });
+
+      // Mobile menu
+      const mobileMenuBtn = document.getElementById("mobile-menu-btn");
+      const mobileOverlay = document.getElementById("mobile-overlay");
+
+      mobileMenuBtn?.addEventListener("click", () => {
+        sidebar?.classList.toggle("hidden");
+        sidebar?.classList.toggle("fixed");
+        sidebar?.classList.toggle("inset-y-0");
+        sidebar?.classList.toggle("left-0");
+        sidebar?.classList.toggle("z-50");
+        sidebar?.classList.toggle("w-72");
+        mobileOverlay?.classList.toggle("hidden");
+      });
+
+      mobileOverlay?.addEventListener("click", () => {
+        sidebar?.classList.add("hidden");
+        sidebar?.classList.remove(
+          "fixed",
+          "inset-y-0",
+          "left-0",
+          "z-50",
+          "w-72",
+        );
+        mobileOverlay?.classList.add("hidden");
+      });
+    </script>
+  </body>
+</html>
