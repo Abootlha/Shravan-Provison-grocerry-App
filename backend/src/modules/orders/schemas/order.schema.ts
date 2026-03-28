@@ -4,9 +4,10 @@ import { Document, Types } from 'mongoose';
 export type OrderDocument = Order & Document;
 
 export enum OrderStatus {
-    PLACED = 'PLACED',
+    PENDING = 'PENDING',
     CONFIRMED = 'CONFIRMED',
     PACKED = 'PACKED',
+    ASSIGNED = 'ASSIGNED',
     OUT_FOR_DELIVERY = 'OUT_FOR_DELIVERY',
     DELIVERED = 'DELIVERED',
     CANCELLED = 'CANCELLED',
@@ -29,94 +30,165 @@ export enum PaymentStatus {
 @Schema({ _id: false })
 export class OrderItem {
     @Prop({ type: Types.ObjectId, ref: 'Product', required: true })
-    productId: Types.ObjectId;
+    productId!: Types.ObjectId;
 
     @Prop({ required: true })
-    name: string;
+    name!: string;
 
     @Prop({ required: true })
-    quantity: number;
+    quantity!: number;
 
     @Prop({ required: true })
-    price: number;
+    price!: number;
 
     @Prop()
-    image: string;
+    image?: string;
 }
+
+@Schema({ _id: false })
+export class TimelineEntry {
+    @Prop({ type: String, enum: OrderStatus, required: true })
+    status!: OrderStatus;
+
+    @Prop({ type: Date, required: true })
+    timestamp!: Date;
+
+    @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+    changedBy!: Types.ObjectId;
+}
+
+export const TimelineEntrySchema = SchemaFactory.createForClass(TimelineEntry);
 
 @Schema({ _id: false })
 export class DeliveryAddress {
     @Prop({ required: true })
-    type: string;
+    type!: string;
 
     @Prop({ required: true })
-    address: string;
+    address!: string;
 
     @Prop({ required: true })
-    city: string;
+    city!: string;
 
     @Prop({ required: true })
-    pincode: string;
+    pincode!: string;
+
+    @Prop({
+        type: {
+            type: String,
+            enum: ['Point'],
+            default: 'Point'
+        },
+        coordinates: {
+            type: [Number],
+            required: true
+        }
+    })
+    coordinates!: {
+        type: 'Point';
+        coordinates: [number, number]; // [longitude, latitude]
+    };
 }
 
 @Schema({ timestamps: true })
 export class Order {
     @Prop({ required: true, unique: true, index: true })
-    orderId: string; // e.g., "ORD-2024-001"
+    orderId!: string; // e.g., "ORD-2024-001"
 
     @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true })
-    userId: Types.ObjectId;
+    userId!: Types.ObjectId;
 
     @Prop({ type: [OrderItem], required: true })
-    items: OrderItem[];
+    items!: OrderItem[];
 
     @Prop({ required: true })
-    itemTotal: number;
+    itemTotal!: number;
 
     @Prop({ default: 0 })
-    deliveryFee: number;
+    deliveryFee!: number;
 
     @Prop({ default: 0 })
-    packagingFee: number;
+    packagingFee!: number;
 
     @Prop({ default: 0 })
-    discount: number;
+    discount!: number;
 
     @Prop({ required: true })
-    totalAmount: number;
+    totalAmount!: number;
 
     @Prop({ type: DeliveryAddress, required: true })
-    deliveryAddress: DeliveryAddress;
+    deliveryAddress!: DeliveryAddress;
 
     @Prop({ type: String, enum: PaymentMethod, required: true })
-    paymentMethod: PaymentMethod;
+    paymentMethod!: PaymentMethod;
 
     @Prop({ type: String, enum: PaymentStatus, default: PaymentStatus.PENDING })
-    paymentStatus: PaymentStatus;
+    paymentStatus!: PaymentStatus;
 
-    @Prop({ type: String, enum: OrderStatus, default: OrderStatus.PLACED, index: true })
-    orderStatus: OrderStatus;
+    @Prop({ type: String, enum: OrderStatus, default: OrderStatus.PENDING, index: true })
+    orderStatus!: OrderStatus;
+
+    @Prop({ type: [TimelineEntry], default: [] })
+    timeline!: TimelineEntry[];
+
+    @Prop({ type: Types.ObjectId, ref: 'User', index: true })
+    riderId?: Types.ObjectId;
 
     @Prop()
-    deliveryInstructions: string;
+    deliveryInstructions?: string;
 
     @Prop()
-    estimatedDeliveryTime: Date;
+    estimatedDeliveryTime?: Date;
+
+    @Prop()
+    actualDeliveryTime?: Date;
+
+    @Prop()
+    cancellationReason?: string;
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);
 
 // Indexes for efficient queries
+OrderSchema.index({ userId: 1 });
+OrderSchema.index({ orderStatus: 1 });
+OrderSchema.index({ riderId: 1 });
+OrderSchema.index({ orderStatus: 1, createdAt: 1 }); // Compound index for stale order queries
 OrderSchema.index({ userId: 1, createdAt: -1 });
-OrderSchema.index({ orderStatus: 1, createdAt: -1 });
 OrderSchema.index({ createdAt: -1 });
+
+// Pre-save hook for referential integrity validation
+OrderSchema.pre('save', async function() {
+    const order = this as OrderDocument;
+    const UserModel = this.db.model('User');
+
+    // Validate userId references existing User
+    if (order.userId) {
+        const user = await UserModel.findById(order.userId).lean() as { role?: string } | null;
+        if (!user) {
+            throw new Error(`Invalid userId: User with ID ${order.userId} does not exist`);
+        }
+    }
+
+    // Validate riderId references existing User with rider role
+    if (order.riderId) {
+        const rider = await UserModel.findById(order.riderId).lean() as { role?: string } | null;
+        if (!rider) {
+            throw new Error(`Invalid riderId: User with ID ${order.riderId} does not exist`);
+        }
+        if (rider.role !== 'rider') {
+            throw new Error(`Invalid riderId: User with ID ${order.riderId} is not a rider`);
+        }
+    }
+});
 
 // Valid status transitions
 export const ORDER_STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-    [OrderStatus.PLACED]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
+    [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
     [OrderStatus.CONFIRMED]: [OrderStatus.PACKED, OrderStatus.CANCELLED],
-    [OrderStatus.PACKED]: [OrderStatus.OUT_FOR_DELIVERY],
-    [OrderStatus.OUT_FOR_DELIVERY]: [OrderStatus.DELIVERED],
+    [OrderStatus.PACKED]: [OrderStatus.ASSIGNED, OrderStatus.CANCELLED],
+    [OrderStatus.ASSIGNED]: [OrderStatus.OUT_FOR_DELIVERY, OrderStatus.CANCELLED],
+    [OrderStatus.OUT_FOR_DELIVERY]: [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
     [OrderStatus.DELIVERED]: [],
     [OrderStatus.CANCELLED]: [],
 };

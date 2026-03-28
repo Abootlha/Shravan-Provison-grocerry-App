@@ -3,6 +3,7 @@ import cartReducer from './slices/cartSlice';
 import authReducer from './slices/authSlice';
 import locationReducer from './slices/locationSlice';
 import languageReducer from './slices/languageSlice';
+import orderTrackingReducer from './slices/orderTrackingSlice';
 
 export const store = configureStore({
     reducer: {
@@ -10,6 +11,7 @@ export const store = configureStore({
         auth: authReducer,
         location: locationReducer,
         language: languageReducer,
+        orderTracking: orderTrackingReducer,
     },
     middleware: (getDefaultMiddleware) =>
         getDefaultMiddleware({

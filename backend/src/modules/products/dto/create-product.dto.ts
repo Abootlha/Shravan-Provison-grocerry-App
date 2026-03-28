@@ -4,7 +4,7 @@ import { ValidateHierarchy } from '../validators/hierarchy.validator';
 export class CreateProductDto {
     @IsNotEmpty()
     @IsString()
-    name: string;
+    name!: string;
 
     @IsOptional()
     @IsString()
@@ -16,21 +16,21 @@ export class CreateProductDto {
 
     @IsNotEmpty()
     @IsMongoId()
-    categoryId: string;
+    categoryId!: string;
 
     @IsNotEmpty()
     @IsMongoId()
     @ValidateHierarchy()
-    subcategoryId: string;
+    subcategoryId!: string;
 
     @IsNotEmpty()
     @IsMongoId()
-    itemGroupId: string;
+    itemGroupId!: string;
 
     @IsNotEmpty()
     @IsNumber()
     @Min(0)
-    price: number;
+    price!: number;
 
     @IsOptional()
     @IsNumber()
@@ -39,12 +39,12 @@ export class CreateProductDto {
 
     @IsNotEmpty()
     @IsString()
-    unit: string;
+    unit!: string;
 
     @IsNotEmpty()
     @IsNumber()
     @Min(0)
-    stock: number;
+    stock!: number;
 
     @IsOptional()
     @IsString()

@@ -12,41 +12,41 @@ export enum CategoryType {
 @Schema({ timestamps: true })
 export class Category {
     @Prop({ required: true, index: true })
-    name: string;
+    name!: string;
 
     @Prop() // Hindi name field
-    nameHi: string;
+    nameHi?: string;
 
     @Prop({ required: true })
-    icon: string;
+    icon!: string;
 
     @Prop({ required: true })
-    color: string;
+    color!: string;
 
     @Prop()
-    image: string;
+    image?: string;
 
     @Prop({ default: true, index: true })
-    isActive: boolean;
+    isActive!: boolean;
 
     @Prop({ default: 0 })
-    sortOrder: number;
+    sortOrder!: number;
 
     // Hierarchy fields
     @Prop({ type: String, enum: CategoryType, default: CategoryType.CATEGORY, index: true })
-    type: CategoryType;
+    type!: CategoryType;
 
     @Prop({ type: Types.ObjectId, ref: 'Category', index: true })
-    parentId: Types.ObjectId;
+    parentId?: Types.ObjectId;
 
     @Prop({ default: 0 })
-    level: number; // 0 = category, 1 = subcategory
+    level!: number; // 0 = category, 1 = subcategory
 
     @Prop()
-    description: string;
+    description?: string;
 
     @Prop() // Hindi description field
-    descriptionHi: string;
+    descriptionHi?: string;
 }
 
 export const CategorySchema = SchemaFactory.createForClass(Category);

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
     View,
     Text,
@@ -6,143 +6,675 @@ import {
     SafeAreaView,
     StatusBar,
     TouchableOpacity,
+    ActivityIndicator,
     Animated,
+    Dimensions,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { COLORS, SHADOWS } from '../constants';
+import { useSelector, useDispatch } from 'react-redux';
+import { COLORS } from '../constants';
+import { API_URL } from '../services/config';
+import socketService from '../services/socketService';
+import OrderTrackingMap from '../components/OrderTrackingMap';
+import TrackingBottomSheet from '../components/TrackingBottomSheet';
+import {
+    fetchRoute,
+    generateFallbackRoute,
+    calculateBearing,
+} from '../services/directionsService';
+import {
+    setCurrentOrder,
+    clearCurrentOrder,
+    clearRiderLocation,
+    setError,
+    setRouteCoordinates,
+    setRouteInfo,
+    setStoreLocation,
+    setRiderHeading,
+} from '../store/slices/orderTrackingSlice';
 
-const OrderTrackingScreen = ({ navigation }) => {
-    const [currentStep, setCurrentStep] = useState(0);
-    const progressAnim = new Animated.Value(0);
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-    const steps = [
-        { id: 0, title: 'Order Placed', icon: 'check-circle', time: '12:30 PM' },
-        { id: 1, title: 'Order Confirmed', icon: 'store-check', time: '12:31 PM' },
-        { id: 2, title: 'Preparing', icon: 'package-variant', time: '12:33 PM' },
-        { id: 3, title: 'Out for Delivery', icon: 'bike-fast', time: '' },
-        { id: 4, title: 'Delivered', icon: 'home-check', time: '' },
-    ];
+const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
+    const dispatch = useDispatch();
+    const { orderId } = navRoute.params || {};
 
+    const {
+        currentOrder,
+        riderLocation,
+        previousRiderLocation,
+        riderHeading,
+        routeCoordinates,
+        routeInfo,
+        storeLocation,
+        connectionStatus,
+        error,
+        isLoading,
+    } = useSelector((state) => state.orderTracking);
+
+    const { token } = useSelector((state) => state.auth);
+    const [mapReady, setMapReady] = useState(false);
+    const headerOpacity = useRef(new Animated.Value(0)).current;
+
+    // ─── Connect to socket & fetch order ──────────
     useEffect(() => {
-        const timer = setInterval(() => {
-            setCurrentStep((prev) => (prev < 3 ? prev + 1 : prev));
-        }, 3000);
-        return () => clearInterval(timer);
+        if (!orderId) {
+            navigation.goBack();
+            return;
+        }
+
+        Animated.timing(headerOpacity, {
+            toValue: 1,
+            duration: 400,
+            useNativeDriver: true,
+        }).start();
+
+        // Connect socket
+        if (token) {
+            socketService.connect(token);
+            socketService.joinOrderRoom(orderId);
+        }
+
+        fetchOrderDetails();
+
+        return () => {
+            if (orderId) {
+                socketService.leaveOrderRoom(orderId);
+            }
+            dispatch(clearCurrentOrder());
+            dispatch(clearRiderLocation());
+        };
+    }, [orderId, token]);
+
+    // ─── Fetch route when rider location changes ──
+    useEffect(() => {
+        if (!riderLocation || !currentOrder?.deliveryAddress?.coordinates?.coordinates) return;
+
+        // Only fetch route when out for delivery
+        if (currentOrder.orderStatus !== 'OUT_FOR_DELIVERY' && currentOrder.orderStatus !== 'ASSIGNED') return;
+
+        const customerCoords = {
+            latitude: currentOrder.deliveryAddress.coordinates.coordinates[1],
+            longitude: currentOrder.deliveryAddress.coordinates.coordinates[0],
+        };
+
+        fetchRouteData(riderLocation, customerCoords);
+    }, [riderLocation?.latitude, riderLocation?.longitude, currentOrder?.orderStatus]);
+
+    // ─── Calculate rider heading on location change ──
+    useEffect(() => {
+        if (riderLocation && previousRiderLocation) {
+            const bearing = calculateBearing(previousRiderLocation, riderLocation);
+            dispatch(setRiderHeading(bearing));
+        }
+    }, [riderLocation]);
+
+    // ─── Set store location from settings (hardcoded for now) ──
+    useEffect(() => {
+        // In production, this would come from the store settings API
+        // For now, use a default store location (Gorakhpur)
+        dispatch(setStoreLocation({
+            latitude: 26.7606,
+            longitude: 83.3732,
+        }));
     }, []);
 
-    return (
-        <SafeAreaView style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor={COLORS.secondary} />
+    const fetchOrderDetails = async () => {
+        try {
+            const response = await fetch(`${API_URL}/orders/${orderId}`, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
 
-            {/* Header */}
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.navigate('Home')}>
-                    <MaterialCommunityIcons name="close" size={24} color={COLORS.white} />
-                </TouchableOpacity>
-                <Text style={styles.headerTitle}>Order Tracking</Text>
-                <TouchableOpacity>
-                    <MaterialCommunityIcons name="headset" size={24} color={COLORS.white} />
-                </TouchableOpacity>
-            </View>
+            if (!response.ok) {
+                throw new Error(`Failed to fetch order: ${response.status}`);
+            }
 
-            {/* ETA Card */}
-            <View style={styles.etaCard}>
-                <View style={styles.etaIcon}>
-                    <MaterialCommunityIcons name="clock-fast" size={40} color={COLORS.secondary} />
+            const data = await response.json();
+            const order = data.order || data;
+            dispatch(setCurrentOrder(order));
+        } catch (err) {
+            dispatch(setError(err.message || 'Failed to load order details'));
+        }
+    };
+
+    const fetchRouteData = async (origin, destination) => {
+        try {
+            const result = await fetchRoute(origin, destination);
+            if (result) {
+                dispatch(setRouteCoordinates(result.coordinates));
+                dispatch(setRouteInfo({
+                    distance: result.distance,
+                    duration: result.duration,
+                    distanceValue: result.distanceValue,
+                    durationValue: result.durationValue,
+                }));
+            } else {
+                // Use straight-line fallback
+                const fallback = generateFallbackRoute(origin, destination);
+                dispatch(setRouteCoordinates(fallback));
+            }
+        } catch (err) {
+            // Silent fail — straight-line fallback will be used by the map component
+            console.warn('Failed to fetch route:', err);
+        }
+    };
+
+    const getCustomerLocation = () => {
+        if (!currentOrder?.deliveryAddress?.coordinates?.coordinates) return null;
+        return {
+            latitude: currentOrder.deliveryAddress.coordinates.coordinates[1],
+            longitude: currentOrder.deliveryAddress.coordinates.coordinates[0],
+        };
+    };
+
+    const shouldShowMap = () => {
+        if (!currentOrder) return false;
+        return ['ASSIGNED', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(currentOrder.orderStatus);
+    };
+
+    // ─── Loading State ────────────────────────────
+    if (isLoading || !currentOrder) {
+        return (
+            <SafeAreaView style={styles.loadingContainer}>
+                <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
+                <View style={styles.loadingContent}>
+                    <View style={styles.loadingIconContainer}>
+                        <ActivityIndicator size="large" color={COLORS.secondary} />
+                    </View>
+                    <Text style={styles.loadingTitle}>Finding your order</Text>
+                    <Text style={styles.loadingSubtitle}>Setting up live tracking...</Text>
                 </View>
-                <Text style={styles.etaTitle}>Arriving in</Text>
-                <Text style={styles.etaTime}>10-15 mins</Text>
-                <Text style={styles.etaSubtitle}>Your order is being prepared</Text>
-            </View>
+            </SafeAreaView>
+        );
+    }
 
-            {/* Progress Steps */}
-            <View style={styles.progressSection}>
-                {steps.map((step, index) => (
-                    <View key={step.id} style={styles.stepItem}>
-                        <View style={styles.stepLeft}>
-                            <View style={[
-                                styles.stepIcon,
-                                index <= currentStep ? styles.stepIconActive : styles.stepIconInactive
-                            ]}>
-                                <MaterialCommunityIcons
-                                    name={step.icon}
-                                    size={20}
-                                    color={index <= currentStep ? COLORS.white : COLORS.textSecondary}
-                                />
-                            </View>
-                            {index < steps.length - 1 && (
-                                <View style={[
-                                    styles.stepLine,
-                                    index < currentStep ? styles.stepLineActive : styles.stepLineInactive
-                                ]} />
-                            )}
-                        </View>
-                        <View style={styles.stepContent}>
-                            <Text style={[
-                                styles.stepTitle,
-                                index <= currentStep && styles.stepTitleActive
-                            ]}>{step.title}</Text>
-                            {step.time ? <Text style={styles.stepTime}>{step.time}</Text> : null}
+    // ─── Pre-delivery State (PENDING, CONFIRMED, PACKED) ──
+    if (!shouldShowMap()) {
+        return (
+            <SafeAreaView style={styles.container}>
+                <StatusBar barStyle="light-content" backgroundColor={COLORS.secondary} />
+
+                {/* Compact Header */}
+                <View style={styles.header}>
+                    <TouchableOpacity
+                        style={styles.backBtn}
+                        onPress={() => navigation.goBack()}
+                    >
+                        <MaterialCommunityIcons name="arrow-left" size={22} color={COLORS.white} />
+                    </TouchableOpacity>
+                    <Text style={styles.headerTitle}>Order Tracking</Text>
+                    <View style={styles.headerRight}>
+                        <View style={[
+                            styles.connectionBadge,
+                            connectionStatus === 'connected' && styles.connectionBadgeOnline,
+                        ]}>
+                            <MaterialCommunityIcons
+                                name={connectionStatus === 'connected' ? 'wifi' : 'wifi-off'}
+                                size={16}
+                                color={connectionStatus === 'connected' ? '#4CAF50' : '#F44336'}
+                            />
                         </View>
                     </View>
-                ))}
-            </View>
-
-            {/* Delivery Partner */}
-            <View style={styles.partnerCard}>
-                <View style={styles.partnerAvatar}>
-                    <MaterialCommunityIcons name="account" size={30} color={COLORS.white} />
                 </View>
-                <View style={styles.partnerInfo}>
-                    <Text style={styles.partnerName}>Delivery Partner</Text>
-                    <Text style={styles.partnerSubtitle}>Will be assigned shortly</Text>
-                </View>
-                <TouchableOpacity style={styles.callButton}>
-                    <MaterialCommunityIcons name="phone" size={20} color={COLORS.secondary} />
-                </TouchableOpacity>
-            </View>
 
-            {/* Bottom Button */}
-            <View style={styles.bottomBar}>
-                <TouchableOpacity style={styles.homeButton} onPress={() => navigation.navigate('Home')}>
-                    <Text style={styles.homeButtonText}>Back to Home</Text>
+                {/* Pre-delivery animation area */}
+                <View style={styles.preDeliveryContainer}>
+                    <PreDeliveryAnimation orderStatus={currentOrder.orderStatus} />
+                </View>
+
+                {/* Bottom sheet for pre-delivery */}
+                <TrackingBottomSheet
+                    order={currentOrder}
+                    riderLocation={riderLocation}
+                    routeInfo={routeInfo}
+                    connectionStatus={connectionStatus}
+                />
+            </SafeAreaView>
+        );
+    }
+
+    // ─── Map Tracking State (ASSIGNED, OUT_FOR_DELIVERY, DELIVERED) ──
+    return (
+        <SafeAreaView style={styles.container}>
+            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+
+            {/* Full-screen Map */}
+            <OrderTrackingMap
+                riderLocation={riderLocation}
+                customerLocation={getCustomerLocation()}
+                storeLocation={storeLocation}
+                routeCoordinates={routeCoordinates}
+                riderHeading={riderHeading}
+                orderStatus={currentOrder.orderStatus}
+                onMapReady={() => setMapReady(true)}
+            />
+
+            {/* Floating Header */}
+            <Animated.View style={[styles.floatingHeader, { opacity: headerOpacity }]}>
+                <TouchableOpacity
+                    style={styles.floatingBackBtn}
+                    onPress={() => navigation.goBack()}
+                >
+                    <MaterialCommunityIcons name="arrow-left" size={22} color={COLORS.text} />
                 </TouchableOpacity>
-            </View>
+
+                <View style={styles.floatingHeaderCenter}>
+                    <Text style={styles.floatingHeaderTitle}>Live Tracking</Text>
+                    <View style={styles.liveIndicator}>
+                        <View style={[
+                            styles.liveDot,
+                            connectionStatus === 'connected' && styles.liveDotOnline,
+                        ]} />
+                        <Text style={styles.liveText}>
+                            {connectionStatus === 'connected' ? 'LIVE' : 'CONNECTING'}
+                        </Text>
+                    </View>
+                </View>
+
+                <View style={styles.floatingHeaderRight} />
+            </Animated.View>
+
+            {/* Error Banner */}
+            {error && (
+                <View style={styles.errorBanner}>
+                    <MaterialCommunityIcons name="alert-circle" size={16} color="#F44336" />
+                    <Text style={styles.errorText} numberOfLines={1}>{error}</Text>
+                </View>
+            )}
+
+            {/* Bottom Sheet */}
+            <TrackingBottomSheet
+                order={currentOrder}
+                riderLocation={riderLocation}
+                routeInfo={routeInfo}
+                connectionStatus={connectionStatus}
+            />
         </SafeAreaView>
     );
 };
 
+// ─── Pre-delivery Animation Component ─────────────
+const PreDeliveryAnimation = ({ orderStatus }) => {
+    const pulseAnim = useRef(new Animated.Value(1)).current;
+    const rotateAnim = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        Animated.loop(
+            Animated.sequence([
+                Animated.timing(pulseAnim, {
+                    toValue: 1.15,
+                    duration: 1200,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(pulseAnim, {
+                    toValue: 1,
+                    duration: 1200,
+                    useNativeDriver: true,
+                }),
+            ])
+        ).start();
+
+        Animated.loop(
+            Animated.timing(rotateAnim, {
+                toValue: 1,
+                duration: 8000,
+                useNativeDriver: true,
+            })
+        ).start();
+    }, []);
+
+    const spin = rotateAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['0deg', '360deg'],
+    });
+
+    const getStatusConfig = () => {
+        switch (orderStatus) {
+            case 'PENDING':
+                return {
+                    icon: 'clock-outline',
+                    title: 'Order Placed!',
+                    subtitle: 'Waiting for store confirmation',
+                    color: '#0C831F',
+                    bgColor: '#E8F5E9',
+                };
+            case 'CONFIRMED':
+                return {
+                    icon: 'store',
+                    title: 'Order Confirmed',
+                    subtitle: 'Store is preparing your items',
+                    color: '#FF9800',
+                    bgColor: '#FFF3E0',
+                };
+            case 'PACKED':
+                return {
+                    icon: 'package-variant-closed',
+                    title: 'Order Packed!',
+                    subtitle: 'Looking for a delivery partner',
+                    color: '#2196F3',
+                    bgColor: '#E3F2FD',
+                };
+            default:
+                return {
+                    icon: 'clock-outline',
+                    title: 'Processing',
+                    subtitle: 'Please wait...',
+                    color: '#666',
+                    bgColor: '#F5F5F5',
+                };
+        }
+    };
+
+    const config = getStatusConfig();
+
+    return (
+        <View style={styles.preDeliveryContent}>
+            {/* Animated ring */}
+            <Animated.View
+                style={[
+                    styles.animatedRing,
+                    { borderColor: config.color + '30', transform: [{ rotate: spin }] },
+                ]}
+            />
+
+            {/* Center icon */}
+            <Animated.View
+                style={[
+                    styles.preDeliveryIcon,
+                    { backgroundColor: config.bgColor, transform: [{ scale: pulseAnim }] },
+                ]}
+            >
+                <MaterialCommunityIcons name={config.icon} size={48} color={config.color} />
+            </Animated.View>
+
+            <Text style={[styles.preDeliveryTitle, { color: config.color }]}>
+                {config.title}
+            </Text>
+            <Text style={styles.preDeliverySubtitle}>
+                {config.subtitle}
+            </Text>
+
+            {/* Animated dots */}
+            <View style={styles.dotsContainer}>
+                {[0, 1, 2].map((i) => (
+                    <DotAnimation key={i} delay={i * 300} color={config.color} />
+                ))}
+            </View>
+        </View>
+    );
+};
+
+// Animated bouncing dot
+const DotAnimation = ({ delay, color }) => {
+    const anim = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        const timeout = setTimeout(() => {
+            Animated.loop(
+                Animated.sequence([
+                    Animated.timing(anim, {
+                        toValue: 1,
+                        duration: 400,
+                        useNativeDriver: true,
+                    }),
+                    Animated.timing(anim, {
+                        toValue: 0,
+                        duration: 400,
+                        useNativeDriver: true,
+                    }),
+                    Animated.delay(200),
+                ])
+            ).start();
+        }, delay);
+
+        return () => clearTimeout(timeout);
+    }, []);
+
+    return (
+        <Animated.View
+            style={[
+                styles.dot,
+                {
+                    backgroundColor: color,
+                    opacity: anim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.3, 1],
+                    }),
+                    transform: [
+                        {
+                            translateY: anim.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: [0, -8],
+                            }),
+                        },
+                    ],
+                },
+            ]}
+        />
+    );
+};
+
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: COLORS.background },
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: COLORS.secondary, paddingHorizontal: 16, paddingVertical: 16 },
-    headerTitle: { fontSize: 18, fontWeight: '700', color: COLORS.white },
-    etaCard: { backgroundColor: COLORS.white, margin: 16, padding: 24, borderRadius: 16, alignItems: 'center', ...SHADOWS.medium },
-    etaIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#E8F5E9', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-    etaTitle: { fontSize: 14, color: COLORS.textSecondary },
-    etaTime: { fontSize: 32, fontWeight: '800', color: COLORS.secondary, marginTop: 4 },
-    etaSubtitle: { fontSize: 14, color: COLORS.textSecondary, marginTop: 8 },
-    progressSection: { backgroundColor: COLORS.white, marginHorizontal: 16, padding: 20, borderRadius: 16, ...SHADOWS.light },
-    stepItem: { flexDirection: 'row', minHeight: 60 },
-    stepLeft: { alignItems: 'center', width: 40 },
-    stepIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-    stepIconActive: { backgroundColor: COLORS.secondary },
-    stepIconInactive: { backgroundColor: COLORS.lightGray },
-    stepLine: { flex: 1, width: 3, marginVertical: 4 },
-    stepLineActive: { backgroundColor: COLORS.secondary },
-    stepLineInactive: { backgroundColor: COLORS.lightGray },
-    stepContent: { flex: 1, marginLeft: 12, paddingBottom: 16 },
-    stepTitle: { fontSize: 14, color: COLORS.textSecondary, fontWeight: '500' },
-    stepTitleActive: { color: COLORS.text, fontWeight: '600' },
-    stepTime: { fontSize: 12, color: COLORS.textSecondary, marginTop: 4 },
-    partnerCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.white, marginHorizontal: 16, marginTop: 16, padding: 16, borderRadius: 16, ...SHADOWS.light },
-    partnerAvatar: { width: 50, height: 50, borderRadius: 25, backgroundColor: COLORS.secondary, alignItems: 'center', justifyContent: 'center' },
-    partnerInfo: { flex: 1, marginLeft: 12 },
-    partnerName: { fontSize: 15, fontWeight: '600', color: COLORS.text },
-    partnerSubtitle: { fontSize: 12, color: COLORS.textSecondary, marginTop: 2 },
-    callButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E8F5E9', alignItems: 'center', justifyContent: 'center' },
-    bottomBar: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, backgroundColor: COLORS.white, ...SHADOWS.medium },
-    homeButton: { backgroundColor: COLORS.secondary, paddingVertical: 16, borderRadius: 12, alignItems: 'center' },
-    homeButtonText: { color: COLORS.white, fontSize: 16, fontWeight: '700' },
+    container: {
+        flex: 1,
+        backgroundColor: '#F5F5F5',
+    },
+
+    // ─── Loading ──────────────────
+    loadingContainer: {
+        flex: 1,
+        backgroundColor: COLORS.white,
+    },
+    loadingContent: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    loadingIconContainer: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: '#E8F5E9',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 20,
+    },
+    loadingTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: COLORS.text,
+        marginTop: 8,
+    },
+    loadingSubtitle: {
+        fontSize: 14,
+        color: COLORS.textSecondary,
+        marginTop: 4,
+    },
+
+    // ─── Header (Pre-delivery) ────
+    header: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        backgroundColor: COLORS.secondary,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+    },
+    backBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    headerTitle: {
+        fontSize: 17,
+        fontWeight: '700',
+        color: COLORS.white,
+    },
+    headerRight: {
+        width: 36,
+        alignItems: 'flex-end',
+    },
+    connectionBadge: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: 'rgba(255,255,255,0.15)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    connectionBadgeOnline: {
+        backgroundColor: 'rgba(76, 175, 80, 0.15)',
+    },
+
+    // ─── Floating Header (Map mode) ──
+    floatingHeader: {
+        position: 'absolute',
+        top: 50,
+        left: 16,
+        right: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: 'rgba(255,255,255,0.95)',
+        borderRadius: 16,
+        paddingHorizontal: 6,
+        paddingVertical: 6,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.12,
+        shadowRadius: 12,
+        elevation: 8,
+    },
+    floatingBackBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        backgroundColor: '#F5F5F5',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    floatingHeaderCenter: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+    },
+    floatingHeaderTitle: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: COLORS.text,
+    },
+    liveIndicator: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFF3E0',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 12,
+        gap: 4,
+    },
+    liveDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: '#F44336',
+    },
+    liveDotOnline: {
+        backgroundColor: '#4CAF50',
+    },
+    liveText: {
+        fontSize: 10,
+        fontWeight: '800',
+        color: '#FF9800',
+        letterSpacing: 1,
+    },
+    floatingHeaderRight: {
+        width: 40,
+    },
+
+    // ─── Error Banner ─────────────
+    errorBanner: {
+        position: 'absolute',
+        top: 110,
+        left: 16,
+        right: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFEBEE',
+        padding: 10,
+        borderRadius: 12,
+        gap: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 4,
+    },
+    errorText: {
+        flex: 1,
+        fontSize: 12,
+        color: '#F44336',
+        fontWeight: '500',
+    },
+
+    // ─── Pre-delivery ─────────────
+    preDeliveryContainer: {
+        flex: 1,
+        backgroundColor: COLORS.white,
+    },
+    preDeliveryContent: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingBottom: 200,
+    },
+    animatedRing: {
+        position: 'absolute',
+        width: 160,
+        height: 160,
+        borderRadius: 80,
+        borderWidth: 3,
+        borderStyle: 'dashed',
+    },
+    preDeliveryIcon: {
+        width: 100,
+        height: 100,
+        borderRadius: 50,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+        elevation: 8,
+    },
+    preDeliveryTitle: {
+        fontSize: 22,
+        fontWeight: '800',
+    },
+    preDeliverySubtitle: {
+        fontSize: 14,
+        color: '#999',
+        marginTop: 6,
+        fontWeight: '500',
+    },
+    dotsContainer: {
+        flexDirection: 'row',
+        gap: 6,
+        marginTop: 20,
+    },
+    dot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+    },
 });
 
 export default OrderTrackingScreen;

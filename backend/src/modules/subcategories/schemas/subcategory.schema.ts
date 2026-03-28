@@ -6,34 +6,34 @@ export type SubcategoryDocument = Subcategory & Document;
 @Schema({ timestamps: true })
 export class Subcategory {
     @Prop({ required: true, index: true })
-    name: string;
+    name!: string;
 
     @Prop() // Hindi name field
-    nameHi: string;
+    nameHi?: string;
 
     @Prop({ required: true })
-    icon: string;
+    icon!: string;
 
     @Prop({ required: true })
-    color: string;
+    color!: string;
 
     @Prop()
-    image: string;
+    image?: string;
 
     @Prop({ type: Types.ObjectId, ref: 'Category', required: true, index: true })
-    parentId: Types.ObjectId;
+    parentId!: Types.ObjectId;
 
     @Prop({ default: true, index: true })
-    isActive: boolean;
+    isActive!: boolean;
 
     @Prop({ default: 0 })
-    sortOrder: number;
+    sortOrder!: number;
 
     @Prop()
-    description: string;
+    description?: string;
 
     @Prop() // Hindi description field
-    descriptionHi: string;
+    descriptionHi?: string;
 }
 
 export const SubcategorySchema = SchemaFactory.createForClass(Subcategory);

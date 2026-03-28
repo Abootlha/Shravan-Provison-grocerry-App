@@ -6,23 +6,23 @@ export type BrandDocument = Brand & Document;
 @Schema({ timestamps: true })
 export class Brand {
     @Prop({ required: true, unique: true, index: true })
-    name: string;
+    name!: string;
 
     @Prop()
-    logo: string;
+    logo?: string;
 
     @Prop({ default: true })
-    isActive: boolean;
+    isActive!: boolean;
 
     @Prop()
-    website: string;
+    website?: string;
 
     @Prop()
-    description: string;
+    description?: string;
 
     // For sorting popular brands first
     @Prop({ default: 0 })
-    sortOrder: number;
+    sortOrder!: number;
 }
 
 export const BrandSchema = SchemaFactory.createForClass(Brand);

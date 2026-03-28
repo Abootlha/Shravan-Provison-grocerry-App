@@ -6,55 +6,88 @@ export type UserDocument = User & Document;
 export enum UserRole {
     CUSTOMER = 'customer',
     ADMIN = 'admin',
+    RIDER = 'rider',
 }
 
 @Schema({ _id: false })
 export class Address {
     @Prop({ required: true })
-    type: string; // home, office, other
+    type!: string; // home, office, other
 
     @Prop({ required: true })
-    address: string;
+    address!: string;
 
     @Prop({ required: true })
-    city: string;
+    city!: string;
 
     @Prop({ required: true })
-    pincode: string;
+    pincode!: string;
 
     @Prop({ default: false })
-    isDefault: boolean;
+    isDefault!: boolean;
+
+    @Prop()
+    latitude?: number;
+
+    @Prop()
+    longitude?: number;
 }
 
 @Schema({ timestamps: true })
 export class User {
     @Prop({ required: true })
-    name: string;
+    name!: string;
 
     @Prop({ unique: true, sparse: true })
-    phone: string;
+    phone?: string;
 
     @Prop()
-    email: string;
+    email?: string;
 
     // Admin authentication fields
     @Prop({ unique: true, sparse: true })
-    username: string;
+    username?: string;
 
     @Prop()
-    password: string; // Hashed password for admin users
+    password?: string; // Hashed password for admin users
 
     @Prop({ type: String, enum: UserRole, default: UserRole.CUSTOMER })
-    role: UserRole;
+    role!: UserRole;
 
     @Prop({ type: [Address], default: [] })
-    addresses: Address[];
+    addresses!: Address[];
 
     @Prop()
-    refreshToken: string;
+    refreshToken?: string;
 
     @Prop({ default: true })
-    isActive: boolean;
+    isActive!: boolean;
+
+    // Rider-specific fields
+    @Prop({ default: false })
+    isAvailable!: boolean;
+
+    @Prop({ default: false })
+    isOnline!: boolean;
+
+    @Prop({
+        type: {
+            type: String,
+            enum: ['Point'],
+            default: 'Point'
+        },
+        coordinates: {
+            type: [Number],
+            default: [0, 0]
+        }
+    })
+    currentLocation!: {
+        type: 'Point';
+        coordinates: [number, number]; // [longitude, latitude]
+    };
+
+    @Prop({ type: Date })
+    lastLocationUpdate?: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
@@ -63,3 +96,5 @@ export const UserSchema = SchemaFactory.createForClass(User);
 UserSchema.index({ phone: 1 }, { unique: true, sparse: true });
 UserSchema.index({ username: 1 }, { unique: true, sparse: true });
 UserSchema.index({ role: 1 });
+UserSchema.index({ currentLocation: '2dsphere' });
+UserSchema.index({ isOnline: 1, isAvailable: 1 });

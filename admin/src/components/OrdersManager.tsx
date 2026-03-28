@@ -21,11 +21,10 @@ interface Order {
     createdAt: string;
     deliveryAddress?: { street?: string; city?: string; pincode?: string };
 }
-
-const STATUS_OPTIONS = ['PLACED', 'CONFIRMED', 'PACKED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'];
+const STATUS_OPTIONS = ['PENDING', 'CONFIRMED', 'PACKED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'];
 
 const STATUS_CONFIG: Record<string, { color: string; glow: string; icon: React.ReactNode; label: string }> = {
-    PLACED: { color: '#3B82F6', glow: 'rgba(59, 130, 246, 0.2)', icon: <Clock className="w-4 h-4" />, label: 'Placed' },
+    PENDING: { color: '#3B82F6', glow: 'rgba(59, 130, 246, 0.2)', icon: <Clock className="w-4 h-4" />, label: 'Placed' },
     CONFIRMED: { color: '#8B5CF6', glow: 'rgba(139, 92, 246, 0.2)', icon: <CheckCircle className="w-4 h-4" />, label: 'Confirmed' },
     PACKED: { color: '#F97316', glow: 'rgba(249, 115, 22, 0.2)', icon: <Package className="w-4 h-4" />, label: 'Packed' },
     OUT_FOR_DELIVERY: { color: '#E6A23C', glow: 'rgba(230, 162, 60, 0.2)', icon: <Truck className="w-4 h-4" />, label: 'Out for Delivery' },
@@ -40,17 +39,43 @@ export default function OrdersManager() {
     const [page, setPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
     const [statusFilter, setStatusFilter] = useState<string>('');
+    const [pageMode, setPageMode] = useState<'live' | 'completed' | 'returns'>('live');
     const [search, setSearch] = useState('');
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
     const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
 
     useEffect(() => {
+        // Parse URL params
+        const query = new URLSearchParams(window.location.search);
+        const urlStatus = query.get('status');
+
+        if (urlStatus === 'completed') {
+            setPageMode('completed');
+            setStatusFilter('DELIVERED,CANCELLED'); // Show both by default in completed
+        } else if (urlStatus === 'returns') {
+            setPageMode('returns');
+            setStatusFilter('CANCELLED'); // Just an example, maybe there's a RETURNED status later
+        } else {
+            setPageMode('live');
+            setStatusFilter(''); // Default to 'All' live orders
+        }
+    }, []);
+
+    useEffect(() => {
         fetchOrders();
-    }, [page, statusFilter]);
+    }, [page, statusFilter, pageMode]);
 
     async function fetchOrders() {
         try {
-            const data = await api.getOrders({ page, status: statusFilter || undefined });
+            // If we're in 'live' mode and no specific status is selected,
+            // we want to fetch all LIVE statuses (not DELIVERED or CANCELLED)
+            let queryStatus = statusFilter;
+
+            if (pageMode === 'live' && !statusFilter) {
+                queryStatus = 'PENDING,CONFIRMED,PACKED,OUT_FOR_DELIVERY';
+            }
+
+            const data = await api.getOrders({ page, status: queryStatus || undefined });
             setOrders(data.orders || []);
             setTotalPages(data.pagination?.pages || 1);
         } catch (error) {
@@ -90,7 +115,7 @@ export default function OrdersManager() {
 
     // Animated Timeline
     function OrderTimeline({ currentStatus }: { currentStatus: string }) {
-        const steps = ['PLACED', 'CONFIRMED', 'PACKED', 'OUT_FOR_DELIVERY', 'DELIVERED'];
+        const steps = ['PENDING', 'CONFIRMED', 'PACKED', 'OUT_FOR_DELIVERY', 'DELIVERED'];
         const currentIndex = steps.indexOf(currentStatus);
         const isCancelled = currentStatus === 'CANCELLED';
 
@@ -168,14 +193,14 @@ export default function OrdersManager() {
                             <div className="flex items-center gap-3 mb-2">
                                 <Zap className="w-5 h-5" style={{ color: 'var(--accent)' }} />
                                 <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
-                                    Live Operations
+                                    {pageMode === 'live' ? 'Live Operations' : pageMode === 'completed' ? 'History' : 'Returns'}
                                 </span>
                             </div>
                             <h1 className="font-display text-4xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
-                                Orders
+                                {pageMode === 'live' ? 'Live Orders' : pageMode === 'completed' ? 'Completed Orders' : 'Returns & Replacements'}
                             </h1>
                             <p className="mt-2 text-lg" style={{ color: 'var(--text-secondary)' }}>
-                                Manage and track customer orders
+                                {pageMode === 'live' ? 'Manage and track live customer orders' : 'View order history'}
                             </p>
                         </div>
                         <div className="flex items-center gap-3">
@@ -215,17 +240,27 @@ export default function OrdersManager() {
                 {/* Status Filter Pills */}
                 <div className="flex gap-3 flex-wrap animate-slide-up delay-2">
                     <button
-                        onClick={() => { setStatusFilter(''); setPage(1); }}
+                        onClick={() => {
+                            if (pageMode === 'live') setStatusFilter('');
+                            else if (pageMode === 'completed') setStatusFilter('DELIVERED,CANCELLED');
+                            else setStatusFilter('');
+                            setPage(1);
+                        }}
                         className="px-4 py-2 rounded-xl text-sm font-semibold transition-all"
                         style={{
-                            background: !statusFilter ? 'var(--accent)' : 'var(--bg-tertiary)',
-                            color: !statusFilter ? 'var(--bg-primary)' : 'var(--text-secondary)',
-                            border: '1px solid ' + (!statusFilter ? 'var(--accent)' : 'var(--border)')
+                            background: (!statusFilter || statusFilter === 'DELIVERED,CANCELLED') ? 'var(--accent)' : 'var(--bg-tertiary)',
+                            color: (!statusFilter || statusFilter === 'DELIVERED,CANCELLED') ? 'var(--bg-primary)' : 'var(--text-secondary)',
+                            border: '1px solid ' + ((!statusFilter || statusFilter === 'DELIVERED,CANCELLED') ? 'var(--accent)' : 'var(--border)')
                         }}
                     >
                         All ({orders.length})
                     </button>
-                    {['PLACED', 'CONFIRMED', 'PACKED', 'OUT_FOR_DELIVERY'].map((status) => {
+                    {(pageMode === 'live'
+                        ? ['PENDING', 'CONFIRMED', 'PACKED', 'OUT_FOR_DELIVERY']
+                        : pageMode === 'completed'
+                            ? ['DELIVERED', 'CANCELLED']
+                            : ['CANCELLED']
+                    ).map((status) => {
                         const config = STATUS_CONFIG[status];
                         const isActive = statusFilter === status;
                         return (
@@ -270,7 +305,7 @@ export default function OrdersManager() {
                             </div>
                         ) : (
                             filteredOrders.map((order, index) => {
-                                const config = STATUS_CONFIG[order.orderStatus] || STATUS_CONFIG.PLACED;
+                                const config = STATUS_CONFIG[order.orderStatus] || STATUS_CONFIG.PENDING;
                                 return (
                                     <div
                                         key={order._id}
@@ -374,7 +409,7 @@ export default function OrdersManager() {
                             </thead>
                             <tbody>
                                 {filteredOrders.map((order) => {
-                                    const config = STATUS_CONFIG[order.orderStatus] || STATUS_CONFIG.PLACED;
+                                    const config = STATUS_CONFIG[order.orderStatus] || STATUS_CONFIG.PENDING;
                                     return (
                                         <tr key={order._id}>
                                             <td>

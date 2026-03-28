@@ -98,7 +98,7 @@ async function migrateProductHierarchy() {
                 console.log(`  ✅ Migrated: ${category.name} → ${subcategory.name} → ${itemGroup.name}\n`);
                 migratedCount++;
             } catch (error) {
-                console.error(`  ❌ Error migrating product ${product.name}:`, error.message);
+                console.error(`  ❌ Error migrating product ${product.name}:`, (error as Error).message);
                 errorCount++;
             }
         }

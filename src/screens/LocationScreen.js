@@ -49,6 +49,8 @@ const LocationScreen = ({ navigation }) => {
                     city: addr.city,
                     pincode: addr.pincode,
                     isDefault: addr.isDefault,
+                    latitude: addr.latitude,
+                    longitude: addr.longitude,
                 }));
                 dispatch(setSavedAddresses(formattedAddresses));
 
@@ -90,13 +92,34 @@ const LocationScreen = ({ navigation }) => {
             const [address] = await Location.reverseGeocodeAsync({ latitude, longitude });
 
             if (address) {
+                const addressText = `${address.street || ''} ${address.name || ''}`.trim() || 'Current Location';
+                const city = address.city || address.subregion || '';
+                const pincode = address.postalCode || '';
+
+                // Save to backend with lat/lng
+                try {
+                    await UserService.addAddress({
+                        type: 'Home',
+                        address: addressText,
+                        city,
+                        pincode,
+                        isDefault: true,
+                        latitude,
+                        longitude,
+                    });
+                } catch (e) {
+                    // Continue even if save fails
+                }
+
                 const formattedAddress = {
                     id: 'current',
                     type: 'Current Location',
-                    address: `${address.street || ''} ${address.name || ''}`.trim() || 'Current Location',
-                    city: address.city || address.subregion || '',
-                    pincode: address.postalCode || '',
+                    address: addressText,
+                    city,
+                    pincode,
                     isDefault: false,
+                    latitude,
+                    longitude,
                     coords: { latitude, longitude },
                 };
 
@@ -123,10 +146,69 @@ const LocationScreen = ({ navigation }) => {
         navigation.goBack();
     };
 
-    const handleSearchSubmit = () => {
-        if (searchQuery.trim()) {
-            // Navigate to AddAddress screen with search query
+    const handleSearchSubmit = async () => {
+        if (!searchQuery.trim()) return;
+
+        dispatch(setLoading(true));
+        try {
+            // Geocode the search text to get lat/lng
+            const results = await Location.geocodeAsync(searchQuery.trim());
+            if (results && results.length > 0) {
+                const { latitude, longitude } = results[0];
+
+                // Reverse geocode to get full address details
+                const [address] = await Location.reverseGeocodeAsync({ latitude, longitude });
+                const addressText = address
+                    ? [address.name, address.street, address.district].filter(Boolean).join(', ')
+                    : searchQuery.trim();
+                const city = address?.city || address?.subregion || '';
+                const pincode = address?.postalCode || '';
+
+                // Save to backend with lat/lng
+                try {
+                    const response = await UserService.addAddress({
+                        type: 'Other',
+                        address: addressText,
+                        city,
+                        pincode,
+                        isDefault: true,
+                        latitude,
+                        longitude,
+                    });
+
+                    if (response?.addresses) {
+                        // Refresh saved addresses
+                        await fetchSavedAddresses();
+                    }
+                } catch (e) {
+                    // Fallback: navigate to AddAddress screen
+                    navigation.navigate('AddAddress', { searchQuery: searchQuery.trim() });
+                    return;
+                }
+
+                const formattedAddress = {
+                    id: `search-${Date.now()}`,
+                    type: 'Other',
+                    address: addressText,
+                    city,
+                    pincode,
+                    isDefault: true,
+                    latitude,
+                    longitude,
+                    coords: { latitude, longitude },
+                };
+
+                dispatch(setSelectedAddress(formattedAddress));
+                setSearchQuery('');
+                Alert.alert('Address Saved', `${addressText}, ${city} has been saved with coordinates.`);
+            } else {
+                // Fallback to AddAddress screen for manual entry
+                navigation.navigate('AddAddress', { searchQuery: searchQuery.trim() });
+            }
+        } catch (error) {
             navigation.navigate('AddAddress', { searchQuery: searchQuery.trim() });
+        } finally {
+            dispatch(setLoading(false));
         }
     };
 

@@ -8,6 +8,7 @@ interface Props {
 
 const { title, breadcrumbs = [] } = Astro.props;
 const currentPath = Astro.url.pathname;
+const currentSearch = Astro.url.search; // e.g., "?status=completed" or ""
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: "LayoutDashboard" },
@@ -55,14 +56,21 @@ const navItems = [
 
 function isActive(item: any): boolean {
   if (item.href) {
-    return currentPath === item.href || currentPath.startsWith(item.href + "?");
+    if (item.href.includes("?")) {
+      return currentPath + currentSearch === item.href;
+    }
+    return (
+      currentPath === item.href ||
+      (currentPath + currentSearch).startsWith(item.href + "?")
+    );
   }
   if (item.submenu) {
-    return item.submenu.some(
-      (sub: any) =>
-        currentPath === sub.href ||
-        currentPath.startsWith(sub.href.split("?")[0]),
-    );
+    return item.submenu.some((sub: any) => {
+      if (sub.href.includes("?")) {
+        return currentPath + currentSearch === sub.href;
+      }
+      return currentPath === sub.href;
+    });
   }
   return false;
 }
@@ -167,20 +175,10 @@ function isActive(item: any): boolean {
                     class={`nav-submenu pl-10 space-y-1 mt-1 ${isActive(item) ? "" : "hidden"}`}
                   >
                     {item.submenu.map((sub: any) => {
-                      // For exact match: check if current path matches the href exactly
-                      // or if href has query params, check if current path matches including query
-                      const subBase = sub.href.split("?")[0];
-                      const subQuery = sub.href.includes("?")
-                        ? sub.href.split("?")[1]
-                        : null;
-                      const currentQuery = currentPath.includes("?")
-                        ? currentPath.split("?")[1]
-                        : null;
-                      const currentBase = currentPath.split("?")[0];
-
-                      const isSubActive = subQuery
-                        ? currentBase === subBase && currentQuery === subQuery
-                        : currentPath === sub.href && !currentQuery;
+                      // For exact match: check if current path+search matches the href exactly
+                      const isSubActive = sub.href.includes("?")
+                        ? currentPath + currentSearch === sub.href
+                        : currentPath === sub.href && !currentSearch;
 
                       return (
                         <a

@@ -6,34 +6,34 @@ export type StoreSettingsDocument = StoreSettings & Document;
 @Schema({ _id: false })
 export class StoreLocation {
     @Prop({ required: true })
-    latitude: number;
+    latitude!: number;
 
     @Prop({ required: true })
-    longitude: number;
+    longitude!: number;
 
     @Prop({ required: true })
-    address: string;
+    address!: string;
 }
 
 @Schema({ timestamps: true })
 export class StoreSettings {
     @Prop({ required: true, unique: true, default: 'main' })
-    storeId: string;
+    storeId!: string;
 
     @Prop({ required: true, default: 'Shravan Kirana Store' })
-    storeName: string;
+    storeName!: string;
 
     @Prop({ type: StoreLocation, required: true })
-    location: StoreLocation;
+    location!: StoreLocation;
 
     @Prop({ required: true, default: 4 })
-    serviceRadiusKm: number; // Maximum delivery distance in kilometers
+    serviceRadiusKm!: number; // Maximum delivery distance in kilometers
 
     @Prop({ default: true })
-    isActive: boolean;
+    isActive!: boolean;
 
     @Prop({ default: 10 })
-    estimatedDeliveryMinutes: number;
+    estimatedDeliveryMinutes!: number;
 }
 
 export const StoreSettingsSchema = SchemaFactory.createForClass(StoreSettings);

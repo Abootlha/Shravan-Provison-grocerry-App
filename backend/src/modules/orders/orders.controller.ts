@@ -1,8 +1,10 @@
-import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards, Request, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { OrderStatus, PaymentMethod } from './schemas/order.schema';
+import { UpdateStatusDto, AssignRiderDto } from './dto';
+import { UserRole } from '../users/schemas/user.schema';
 
 @Controller('orders')
 @UseGuards(JwtAuthGuard)
@@ -16,6 +18,7 @@ export class OrdersController {
             deliveryAddress: any;
             paymentMethod: PaymentMethod;
             deliveryInstructions?: string;
+            items?: any[];
         },
     ) {
         const order = await this.ordersService.createOrder(req.user.userId, body);
@@ -35,9 +38,33 @@ export class OrdersController {
         );
     }
 
+    @Get('user/:userId')
+    async getOrdersByUserId(
+        @Request() req: any,
+        @Param('userId') userId: string,
+    ) {
+        // Verify ownership or admin role
+        if (req.user.userId !== userId && req.user.role !== UserRole.ADMIN) {
+            throw new ForbiddenException('You can only access your own orders');
+        }
+
+        const orders = await this.ordersService.findByUserId(userId);
+        return { orders };
+    }
+
     @Get(':id')
     async getOrder(@Request() req: any, @Param('id') id: string) {
         const order = await this.ordersService.findById(id);
+
+        if (!order) {
+            throw new NotFoundException('Order not found');
+        }
+
+        // Verify ownership or admin role
+        if (order.userId.toString() !== req.user.userId && req.user.role !== UserRole.ADMIN) {
+            throw new ForbiddenException('You can only access your own orders');
+        }
+
         return { order };
     }
 
@@ -52,6 +79,50 @@ export class OrdersController {
         const history = await this.ordersService.getStatusHistory(orderId);
         return { history };
     }
+
+    @Patch(':id/status')
+    async updateOrderStatus(
+        @Request() req: any,
+        @Param('id') id: string,
+        @Body() updateStatusDto: UpdateStatusDto,
+    ) {
+        const order = await this.ordersService.findById(id);
+
+        if (!order) {
+            throw new NotFoundException('Order not found');
+        }
+
+        // Role-based authorization
+        // Riders can only update their assigned orders
+        if (req.user.role === UserRole.RIDER) {
+            if (!order.riderId || order.riderId.toString() !== req.user.userId) {
+                throw new ForbiddenException('You can only update orders assigned to you');
+            }
+        }
+        // Customers cannot update order status
+        else if (req.user.role === UserRole.CUSTOMER) {
+            throw new ForbiddenException('Customers cannot update order status');
+        }
+        // Admins can update any order (no additional check needed)
+
+        const updatedOrder = await this.ordersService.updateStatus(
+            id,
+            updateStatusDto.status,
+            req.user.userId,
+        );
+
+        return { order: updatedOrder };
+    }
+
+    @Patch(':id/assign-rider')
+    @UseGuards(AdminGuard)
+    async assignRider(
+        @Param('id') id: string,
+        @Body() assignRiderDto: AssignRiderDto,
+    ) {
+        const order = await this.ordersService.assignRider(id, assignRiderDto.riderId);
+        return { order };
+    }
 }
 
 // Admin controller for order management
@@ -62,7 +133,7 @@ export class AdminOrdersController {
 
     @Get()
     async getAllOrders(
-        @Query('status') status?: OrderStatus,
+        @Query('status') status?: string,
         @Query('page') page?: string,
         @Query('limit') limit?: string,
         @Query('startDate') startDate?: string,
@@ -87,7 +158,6 @@ export class AdminOrdersController {
             id,
             body.status,
             req.user.userId,
-            body.note,
         );
         return { order };
     }

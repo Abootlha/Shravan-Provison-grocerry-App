@@ -6,25 +6,25 @@ export type ItemGroupDocument = ItemGroup & Document;
 @Schema({ timestamps: true })
 export class ItemGroup {
     @Prop({ required: true, index: true })
-    name: string;
+    name!: string;
 
     @Prop({ type: Types.ObjectId, ref: 'Subcategory', required: true, index: true })
-    subcategoryId: Types.ObjectId;
+    subcategoryId!: Types.ObjectId;
 
     @Prop()
-    image: string;
+    image?: string;
 
     @Prop()
-    description: string;
+    description?: string;
 
     @Prop({ default: true, index: true })
-    isActive: boolean;
+    isActive!: boolean;
 
     @Prop({ default: 0 })
-    sortOrder: number;
+    sortOrder!: number;
 
     @Prop({ type: [String], default: [] })
-    tags: string[];
+    tags!: string[];
 }
 
 export const ItemGroupSchema = SchemaFactory.createForClass(ItemGroup);

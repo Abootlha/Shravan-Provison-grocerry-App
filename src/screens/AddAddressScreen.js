@@ -195,6 +195,8 @@ const AddAddressScreen = ({ navigation, route }) => {
                 city: addressDetails.city,
                 pincode: addressDetails.pincode,
                 isDefault: true,
+                latitude: selectedLocation.latitude,
+                longitude: selectedLocation.longitude,
             });
 
             if (response?.addresses) {
@@ -206,6 +208,8 @@ const AddAddressScreen = ({ navigation, route }) => {
                     city: savedAddress.city,
                     pincode: savedAddress.pincode,
                     isDefault: savedAddress.isDefault,
+                    latitude: savedAddress.latitude,
+                    longitude: savedAddress.longitude,
                     coords: selectedLocation,
                 };
 

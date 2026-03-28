@@ -160,6 +160,14 @@ export const api = {
             method: 'PATCH',
             body: JSON.stringify({ status }),
         }),
+    assignRider: (orderId: string, riderId: string) =>
+        apiRequest(`/orders/${orderId}/assign-rider`, {
+            method: 'PATCH',
+            body: JSON.stringify({ riderId }),
+        }),
+
+    // Riders
+    getAvailableRiders: () => apiRequest('/riders/available'),
 
     // Analytics
     getDailyAnalytics: (date?: string) =>

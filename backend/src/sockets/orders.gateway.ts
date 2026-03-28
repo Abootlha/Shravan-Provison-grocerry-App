@@ -8,7 +8,6 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
-import { RedisService } from '../common/utils/redis.service';
 import Redis from 'ioredis';
 import { ConfigService } from '@nestjs/config';
 
@@ -20,7 +19,7 @@ import { ConfigService } from '@nestjs/config';
 })
 export class OrdersGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
     @WebSocketServer()
-    server: Server;
+    server!: Server;
 
     private logger = new Logger('OrdersGateway');
     private subscriber: Redis;

@@ -59,12 +59,12 @@ export class CartService {
 
         if (existingItem) {
             existingItem.quantity += quantity;
-            existingItem.price = product.price; // Update to current price
+            existingItem.price = product.price ?? 0; // Update to current price
         } else {
             cart.items.push({
                 productId: new Types.ObjectId(productId),
                 quantity,
-                price: product.price,
+                price: product.price ?? 0,
             });
         }
 
@@ -92,7 +92,7 @@ export class CartService {
         if (!item) throw new NotFoundException('Item not in cart');
 
         item.quantity = quantity;
-        item.price = product.price;
+        item.price = product.price ?? 0;
         await cart.save();
 
         await this.redisService.del(RedisService.Keys.cart(userId));
@@ -134,7 +134,7 @@ export class CartService {
             if (product.stock < item.quantity) {
                 throw new BadRequestException(`Insufficient stock for ${product.name}`);
             }
-            item.price = product.price;
+            item.price = product.price ?? 0;
         }
 
         await cart.save();

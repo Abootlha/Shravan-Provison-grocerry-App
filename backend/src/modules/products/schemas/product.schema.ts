@@ -42,197 +42,197 @@ export enum ReturnPolicyTemplate {
 // Sub-schemas
 class Pricing {
     @Prop({ required: true })
-    mrp: number;
+    mrp!: number;
 
     @Prop({ required: true })
-    sellingPrice: number;
+    sellingPrice!: number;
 
     @Prop({ default: 0 })
-    gst: number;
+    gst!: number;
 }
 
 class PackInfo {
     @Prop({ required: true })
-    unit: string; // "250ml", "500g", "1L"
+    unit!: string; // "250ml", "500g", "1L"
 
     @Prop()
-    weight: number; // In grams for logistics
+    weight?: number; // In grams for logistics
 }
 
 class Attributes {
     @Prop({ type: String, enum: FatProfile, default: FatProfile.NA })
-    fatProfile: FatProfile;
+    fatProfile!: FatProfile;
 
     @Prop({ type: String, enum: StorageType, default: StorageType.AMBIENT })
-    storage: StorageType;
+    storage!: StorageType;
 
     @Prop({ type: [String], enum: DietaryType, default: [] })
-    dietary: DietaryType[];
+    dietary!: DietaryType[];
 }
 
 class Nutrition {
     @Prop({ default: 0 })
-    protein: number;
+    protein!: number;
 
     @Prop({ default: 0 })
-    carbs: number;
+    carbs!: number;
 
     @Prop({ default: 0 })
-    sugar: number;
+    sugar!: number;
 
     @Prop({ default: 0 })
-    fat: number;
+    fat!: number;
 
     @Prop({ default: 0 })
-    transFat: number;
+    transFat!: number;
 
     @Prop({ default: '100g' })
-    servingSize: string;
+    servingSize!: string;
 }
 
 class Templates {
     @Prop({ type: String, enum: DisclaimerTemplate, default: DisclaimerTemplate.DEFAULT })
-    disclaimerId: DisclaimerTemplate;
+    disclaimerId!: DisclaimerTemplate;
 
     @Prop({ type: String, enum: ReturnPolicyTemplate, default: ReturnPolicyTemplate.STANDARD_7D })
-    returnPolicyId: ReturnPolicyTemplate;
+    returnPolicyId!: ReturnPolicyTemplate;
 }
 
 // SKU Variant sub-schema (for Blinkit-style product variants)
 @Schema()
 export class ProductVariant {
     @Prop({ required: true })
-    sku: string;
+    sku!: string;
 
     @Prop({ required: true })
-    unit: string; // "250ml", "500ml", "1L"
+    unit!: string; // "250ml", "500ml", "1L"
 
     @Prop({ required: true })
-    mrp: number;
+    mrp!: number;
 
     @Prop({ required: true })
-    sellingPrice: number;
+    sellingPrice!: number;
 
     @Prop({ default: 0 })
-    stock: number;
+    stock!: number;
 
     @Prop()
-    barcode: string;
+    barcode?: string;
 
     @Prop({ default: false })
-    isDefault: boolean;
+    isDefault!: boolean;
 
     @Prop({ default: true })
-    isActive: boolean;
+    isActive!: boolean;
 }
 
 @Schema({ timestamps: true })
 export class Product {
     // Identity
     @Prop({ required: true, text: true })
-    name: string;
+    name!: string;
 
     @Prop() // Hindi name field
-    nameHi: string;
+    nameHi?: string;
 
     @Prop({ index: true })
-    brand: string;
+    brand?: string;
 
     @Prop() // Hindi brand field
-    brandHi: string;
+    brandHi?: string;
 
     @Prop({ unique: true, sparse: true, index: true })
-    barcode: string; // EAN/UPC (for default variant)
+    barcode?: string; // EAN/UPC (for default variant)
 
     @Prop()
-    sku: string; // Auto-generated
+    sku?: string; // Auto-generated
 
     // Hierarchy references
     @Prop({ type: Types.ObjectId, ref: 'Category', required: true, index: true })
-    categoryId: Types.ObjectId;
+    categoryId!: Types.ObjectId;
 
     @Prop({ type: Types.ObjectId, ref: 'Subcategory', required: true, index: true })
-    subcategoryId: Types.ObjectId;
+    subcategoryId!: Types.ObjectId;
 
     @Prop({ type: Types.ObjectId, ref: 'ItemGroup', required: true, index: true })
-    itemGroupId: Types.ObjectId;
+    itemGroupId!: Types.ObjectId;
 
     // Legacy field (kept for backward compatibility)
     @Prop()
-    subcategory: string;
+    subcategory?: string;
 
     // Pricing (default/single variant)
     @Prop({ type: Pricing, default: {} })
-    pricing: Pricing;
+    pricing!: Pricing;
 
     // Legacy support - map to pricing
     @Prop()
-    price: number;
+    price?: number;
 
     @Prop()
-    originalPrice: number;
+    originalPrice?: number;
 
     // Pack Info (default/single variant)
     @Prop({ type: PackInfo, default: {} })
-    pack: PackInfo;
+    pack!: PackInfo;
 
     // Legacy support
     @Prop()
-    unit: string;
+    unit?: string;
 
     // Inventory (default/single variant)
     @Prop({ required: true, default: 0 })
-    stock: number;
+    stock!: number;
 
     @Prop({ default: false })
-    isPerishable: boolean;
+    isPerishable!: boolean;
 
     @Prop({ default: 0 })
-    shelfLife: number; // Days
+    shelfLife!: number; // Days
 
     // Product Variants (SKUs) - Blinkit style
     @Prop({ type: [ProductVariant], default: [] })
-    variants: ProductVariant[];
+    variants!: ProductVariant[];
 
     // Structured Attributes
     @Prop({ type: Attributes, default: {} })
-    attributes: Attributes;
+    attributes!: Attributes;
 
     // Nutrition (numeric only)
     @Prop({ type: Nutrition, default: {} })
-    nutrition: Nutrition;
+    nutrition!: Nutrition;
 
     // Templates
     @Prop({ type: Templates, default: {} })
-    templates: Templates;
+    templates!: Templates;
 
     // Media
     @Prop({ type: [String], default: [] })
-    images: string[];
+    images!: string[];
 
     // Legacy support
     @Prop()
-    image: string;
+    image?: string;
 
     @Prop()
-    description: string;
+    description?: string;
 
     @Prop() // Hindi description field
-    descriptionHi: string;
+    descriptionHi?: string;
 
     // Status
     @Prop({ default: true, index: true })
-    isAvailable: boolean;
+    isAvailable!: boolean;
 
     // Analytics
     @Prop({ default: 0 })
-    rating: number;
+    rating!: number;
 
     @Prop({ default: 0 })
-    reviewCount: number;
+    reviewCount!: number;
 
     @Prop({ default: 0 })
-    soldCount: number;
+    soldCount!: number;
 }
 
 export const ProductSchema = SchemaFactory.createForClass(Product);
@@ -295,7 +295,7 @@ ProductSchema.pre('save', function () {
     if (!doc.sku && doc.barcode) {
         doc.sku = `SKU-${doc.barcode}`;
     } else if (!doc.sku) {
-        doc.sku = `SKU-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        doc.sku = `SKU-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
     }
 
     // Sync stock from default variant if variants exist

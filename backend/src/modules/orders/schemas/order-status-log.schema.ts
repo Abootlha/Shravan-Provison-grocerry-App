@@ -7,19 +7,19 @@ export type OrderStatusLogDocument = OrderStatusLog & Document;
 @Schema({ timestamps: true })
 export class OrderStatusLog {
     @Prop({ type: Types.ObjectId, ref: 'Order', required: true, index: true })
-    orderId: Types.ObjectId;
+    orderId!: Types.ObjectId;
 
     @Prop({ type: String, enum: OrderStatus })
-    previousStatus: OrderStatus;
+    previousStatus?: OrderStatus;
 
     @Prop({ type: String, enum: OrderStatus, required: true })
-    newStatus: OrderStatus;
+    newStatus!: OrderStatus;
 
     @Prop({ type: Types.ObjectId, ref: 'User', required: true })
-    changedBy: Types.ObjectId;
+    changedBy!: Types.ObjectId;
 
     @Prop()
-    note: string;
+    note?: string;
 }
 
 export const OrderStatusLogSchema = SchemaFactory.createForClass(OrderStatusLog);

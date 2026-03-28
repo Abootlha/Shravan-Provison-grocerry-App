@@ -24,6 +24,8 @@ const getApiUrl = () => {
 
 const API_BASE_URL = getApiUrl();
 
+export const API_URL = API_BASE_URL; // Export for direct use
+
 export const API_CONFIG = {
     baseURL: API_BASE_URL,
     timeout: 30000, // Increased to 30 seconds to handle large responses

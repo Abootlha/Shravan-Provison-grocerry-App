@@ -7,17 +7,17 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 class SendOtpDto {
     @IsString()
     @Length(10, 15)
-    phone: string;
+    phone!: string;
 }
 
 class VerifyOtpDto {
     @IsString()
     @Length(10, 15)
-    phone: string;
+    phone!: string;
 
     @IsString()
     @Length(4, 6)
-    otp: string;
+    otp!: string;
 
     @IsOptional()
     @IsString()
@@ -26,15 +26,15 @@ class VerifyOtpDto {
 
 class RefreshTokenDto {
     @IsString()
-    refreshToken: string;
+    refreshToken!: string;
 }
 
 class AdminLoginDto {
     @IsString()
-    username: string;
+    username!: string;
 
     @IsString()
-    password: string;
+    password!: string;
 }
 
 // Cookie config
