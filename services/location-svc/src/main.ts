@@ -9,7 +9,10 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
 
   const grpcPort = configService.get<number>('GRPC_PORT', 3007);
-  const httpPort = configService.get<number>('HTTP_PORT', 8087);
+  const httpPort =
+    configService.get<number>('HTTP_PORT') ||
+    configService.get<number>('PORT') ||
+    8009;
 
   app.useGlobalPipes(
     new ValidationPipe({

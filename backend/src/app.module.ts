@@ -45,9 +45,15 @@ import configuration from './config/configuration';
     // MongoDB
     MongooseModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: async (configService: ConfigService) => ({
-        uri: configService.get<string>('database.uri'),
-      }),
+      useFactory: async (configService: ConfigService) => {
+        const uri = configService.get<string>('database.uri');
+        const dbName = configService.get<string>('database.name');
+
+        return {
+          uri,
+          ...(dbName ? { dbName } : {}),
+        };
+      },
       inject: [ConfigService],
     }),
 
@@ -86,4 +92,3 @@ import configuration from './config/configuration';
   ],
 })
 export class AppModule { }
-

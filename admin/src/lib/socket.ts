@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 
-const SOCKET_URL = process.env.SOCKET_URL || 'http://localhost:3000';
+const SOCKET_URL = import.meta.env.PUBLIC_TRACKING_SERVICE_URL || 'http://localhost:3000';
 
 class SocketClient {
     private socket: Socket | null = null;

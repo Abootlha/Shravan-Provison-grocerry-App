@@ -1,6 +1,6 @@
 import { io } from 'socket.io-client';
-import { Platform } from 'react-native';
 import { store } from '../store';
+import { TRACKING_URL } from './config';
 import {
     setConnectionStatus,
     updateOrderStatus,
@@ -20,19 +20,7 @@ class SocketService {
     }
 
     getTrackingWsUrl() {
-        const LOCAL_IP = '192.168.1.7';
-
-        if (!__DEV__) {
-            return 'wss://api.shravankirana.com/tracking';
-        }
-
-        if (Platform.OS === 'web') {
-            return 'ws://localhost:3008/tracking';
-        } else if (Platform.OS === 'ios') {
-            return `ws://${LOCAL_IP}:3008/tracking`;
-        } else {
-            return `ws://${LOCAL_IP}:3008/tracking`;
-        }
+        return TRACKING_URL;
     }
 
     connect(token) {
@@ -120,7 +108,12 @@ class SocketService {
         this.socket.on('riderLocationUpdate', (data) => {
             console.log('Rider location update received:', data);
             store.dispatch(updateRiderLocation({
-                location: data.location,
+                location: {
+                    latitude: data.lat,
+                    longitude: data.lng,
+                    heading: data.heading,
+                    speed: data.speed,
+                },
                 timestamp: data.timestamp,
             }));
         });
@@ -128,7 +121,7 @@ class SocketService {
         this.socket.on('etaUpdate', (data) => {
             console.log('ETA update received:', data);
             store.dispatch(updateETA({
-                estimatedDeliveryTime: data.estimatedDeliveryTime,
+                estimatedDeliveryTime: data.eta,
                 durationMinutes: data.durationMinutes,
                 distanceRemaining: data.distanceRemaining,
             }));
@@ -159,14 +152,7 @@ class SocketService {
             return;
         }
 
-        this.socket.emit('joinOrderRoom', { orderId }, (response) => {
-            if (response?.error) {
-                console.error('Failed to join order room:', response.error);
-                store.dispatch(setError(response.error));
-            } else {
-                console.log('Successfully joined order room:', orderId);
-            }
-        });
+        this.socket.emit('joinOrderRoom', { orderId });
     }
 
     leaveOrderRoom(orderId) {
@@ -179,16 +165,10 @@ class SocketService {
 
         console.log('Leaving order room:', targetOrderId);
 
-        this.socket.emit('leaveOrderRoom', { orderId: targetOrderId }, (response) => {
-            if (response?.error) {
-                console.error('Failed to leave order room:', response.error);
-            } else {
-                console.log('Successfully left order room:', targetOrderId);
-                if (this.currentOrderId === targetOrderId) {
-                    this.currentOrderId = null;
-                }
-            }
-        });
+        this.socket.emit('leaveOrderRoom', { orderId: targetOrderId });
+        if (this.currentOrderId === targetOrderId) {
+            this.currentOrderId = null;
+        }
     }
 
     disconnect() {

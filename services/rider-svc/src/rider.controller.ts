@@ -9,6 +9,14 @@ export class RiderController {
 
   constructor(private readonly riderService: RiderService) {}
 
+  @Get()
+  async findAll(@Query('status') status?: 'available' | 'busy' | 'offline') {
+    this.logger.log(`Listing riders with status filter: ${status || 'all'}`);
+    return {
+      riders: await this.riderService.findAll(status),
+    };
+  }
+
   @Post()
   async create(@Body('userId') userId: string, @Body('vehicleType') vehicleType?: string) {
     this.logger.log(`Creating rider for user: ${userId}`);

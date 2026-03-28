@@ -17,8 +17,7 @@ import { CommonActions } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, SHADOWS } from '../constants';
 import { logout } from '../store/slices/authSlice';
-import api from '../services/api';
-import { ENDPOINTS } from '../services/config';
+import { AuthService } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
 
 const ProfileScreen = ({ navigation }) => {
@@ -35,12 +34,13 @@ const ProfileScreen = ({ navigation }) => {
         setIsLoggingOut(true);
 
         try {
-            // Call logout API to invalidate session on server (all devices)
-            // Backend will clear cookies
-            await api.post(ENDPOINTS.LOGOUT);
+            const refreshToken = await AsyncStorage.getItem('customerRefreshToken');
+            await AuthService.logout(refreshToken || undefined);
         } catch (error) {
             console.log('Logout API error (proceeding anyway):', error.message);
         }
+
+        await AsyncStorage.multiRemove(['customerUser', 'customerAccessToken', 'customerRefreshToken']);
 
         // Clear Redux state
         dispatch(logout());

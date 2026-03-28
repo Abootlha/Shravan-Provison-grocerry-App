@@ -70,14 +70,6 @@ export default function Dashboard() {
 
     async function fetchData() {
         try {
-            // Check if we have a token before making API calls
-            const token = localStorage.getItem('adminToken');
-            if (!token) {
-                console.warn('No admin token found, redirecting to login');
-                window.location.href = '/login';
-                return;
-            }
-
             const [analytics, ordersData] = await Promise.all([
                 api.getDailyAnalytics().catch(err => {
                     console.error('Analytics error:', err);
@@ -99,11 +91,8 @@ export default function Dashboard() {
     }
 
     useEffect(() => {
-        // Only fetch if we have auth token
-        if (typeof window !== 'undefined' && localStorage.getItem('adminToken')) {
+        if (typeof window !== 'undefined') {
             fetchData();
-        } else if (typeof window !== 'undefined') {
-            window.location.href = '/login';
         }
     }, []);
 

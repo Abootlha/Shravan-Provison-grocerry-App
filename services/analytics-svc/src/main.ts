@@ -16,7 +16,8 @@ async function bootstrap() {
 
   app.enableCors();
   await app.startAllMicroservices();
-  await app.listen(process.env.HTTP_PORT || 8091);
-  console.log(`Analytics Service running on HTTP: ${process.env.HTTP_PORT || 8091}, gRPC: ${process.env.GRPC_PORT || 3011}`);
+  const httpPort = process.env.HTTP_PORT || process.env.PORT || '8011';
+  await app.listen(httpPort);
+  console.log(`Analytics Service running on HTTP: ${httpPort}, gRPC: ${process.env.GRPC_PORT || 3011}`);
 }
 bootstrap();

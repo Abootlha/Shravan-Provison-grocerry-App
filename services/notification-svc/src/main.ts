@@ -8,7 +8,10 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
 
   const grpcPort = configService.get<number>('GRPC_PORT', 3010);
-  const httpPort = configService.get<number>('HTTP_PORT', 8090);
+  const httpPort =
+    configService.get<number>('HTTP_PORT') ||
+    configService.get<number>('PORT') ||
+    8008;
   const rabbitmqUrl = configService.get<string>('RABBITMQ_URL', 'amqp://localhost:5672');
 
   app.connectMicroservice<MicroserviceOptions>({

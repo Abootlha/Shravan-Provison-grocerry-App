@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { ValidationPipe, Logger } from '@nestjs/common';
-import { NestExpressApplication } from '@nestjs/platform-express';
+import { NestExpressApplication, ExpressAdapter } from '@nestjs/platform-express';
 import { join } from 'path';
 import { AppModule } from './app.module';
 
@@ -10,7 +10,7 @@ async function bootstrap() {
   const port = parseInt(process.env.PORT || '8001', 10);
   const grpcPort = port + 1;
 
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, new ExpressAdapter());
 
   app.useGlobalPipes(
     new ValidationPipe({

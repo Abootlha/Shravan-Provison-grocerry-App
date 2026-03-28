@@ -42,7 +42,10 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api/v1');
 
-  const httpPort = configService.get<number>('HTTP_PORT') || 3006;
+  const httpPort =
+    configService.get<number>('HTTP_PORT') ||
+    configService.get<number>('PORT') ||
+    8006;
   await app.listen(httpPort, '0.0.0.0');
 
   console.log(`🚀 Cart Service running on: http://0.0.0.0:${httpPort}/api/v1`);

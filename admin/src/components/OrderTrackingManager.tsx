@@ -110,7 +110,7 @@ export default function OrderTrackingManager() {
 
         setConnectionStatus('connecting');
 
-        const socket = io('http://localhost:3000/tracking', {
+        const socket = io(import.meta.env.PUBLIC_TRACKING_SERVICE_URL || 'http://localhost:3000', {
             auth: { token },
             transports: ['websocket'],
             reconnection: true,

@@ -1,9 +1,17 @@
-export const API_BASE_URL = __DEV__
-  ? 'http://localhost:3000'
+export const AUTH_SERVICE_URL = __DEV__
+  ? 'http://localhost:8001'
+  : 'https://api.shravankirana.com';
+
+export const RIDER_SERVICE_URL = __DEV__
+  ? 'http://localhost:8003'
+  : 'https://api.shravankirana.com';
+
+export const ORDER_SERVICE_URL = __DEV__
+  ? 'http://localhost:8004'
   : 'https://api.shravankirana.com';
 
 export const SOCKET_URL = __DEV__
-  ? 'http://localhost:3000'
+  ? 'http://localhost:8010'
   : 'https://api.shravankirana.com';
 
 export const LOCATION_UPDATE_INTERVAL = 3000;

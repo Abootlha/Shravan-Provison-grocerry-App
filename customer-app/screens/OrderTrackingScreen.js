@@ -13,7 +13,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
 import { COLORS } from '../constants';
-import { API_URL, TRACKING_URL } from '../services/config';
+import { OrderService } from '../services';
 import socketService from '../services/socketService';
 import OrderTrackingMap from '../components/OrderTrackingMap';
 import TrackingBottomSheet from '../components/TrackingBottomSheet';
@@ -113,18 +113,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
 
     const fetchOrderDetails = async () => {
         try {
-            const response = await fetch(`${API_URL}/orders/${orderId}`, {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                },
-            });
-
-            if (!response.ok) {
-                throw new Error(`Failed to fetch order: ${response.status}`);
-            }
-
-            const data = await response.json();
+            const data = await OrderService.getOrderById(orderId);
             const order = data.order || data;
             dispatch(setCurrentOrder(order));
         } catch (err) {

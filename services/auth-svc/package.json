@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/main.js",
-    "start:dev": "ts-node src/main.ts"
+    "start:dev": "ts-node --files src/main.ts"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.9.0",
@@ -21,7 +21,9 @@
     "2factor": "^1.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.0",
+    "iconv-lite": "^0.7.2",
     "ioredis": "^5.3.0",
+    "iterare": "1.2.0",
     "mongoose": "^8.0.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",

@@ -11,7 +11,16 @@ import {
     Plus, Pencil, Search, Package, X, Scan, Camera, StopCircle, Upload, Link, ImageIcon,
     Filter, ChevronLeft, ChevronRight, MoreHorizontal, Eye, Trash2, CheckCircle, XCircle, Boxes
 } from 'lucide-react';
-import { Html5Qrcode } from 'html5-qrcode';
+
+type Html5QrcodeInstance = {
+    start: (
+        cameraConfig: { facingMode: string },
+        config: { fps: number; qrbox: { width: number; height: number } },
+        onSuccess: (decodedText: string) => void,
+        onError?: (errorMessage: string) => void
+    ) => Promise<void>;
+    stop: () => Promise<void>;
+};
 
 interface Product {
     _id: string;
@@ -82,7 +91,7 @@ export default function ProductsManager() {
     const [scannerReady, setScannerReady] = useState(false);
     const [imageMode, setImageMode] = useState<'url' | 'file'>('url');
     const [imagePreview, setImagePreview] = useState<string>('');
-    const scannerRef = useRef<Html5Qrcode | null>(null);
+    const scannerRef = useRef<Html5QrcodeInstance | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const [form, setForm] = useState({
@@ -291,6 +300,7 @@ export default function ProductsManager() {
         setShowScanner(true);
         setScannerReady(false);
         try {
+            const { Html5Qrcode } = await import('html5-qrcode');
             scannerRef.current = new Html5Qrcode('barcode-reader');
             await scannerRef.current.start(
                 { facingMode: 'environment' },
@@ -300,6 +310,7 @@ export default function ProductsManager() {
             );
             setScannerReady(true);
         } catch (err) {
+            console.error('Scanner failed to start:', err);
             alert('Could not access camera.');
             setShowScanner(false);
         }

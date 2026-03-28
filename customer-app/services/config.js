@@ -1,68 +1,43 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
-const LOCAL_IP = '192.168.1.7';
+const LOCAL_IP = Constants.expoConfig?.extra?.LOCAL_IP || '192.168.1.7';
 
-const getApiUrl = () => {
+const getServiceBaseUrl = (port) => {
     if (!__DEV__) {
-        return 'https://api.shravankirana.com/api/v1';
+        return `https://api.shravankirana.com`;
     }
 
     if (Platform.OS === 'web') {
-        return 'http://localhost:3000/api/v1';
-    } else if (Platform.OS === 'ios') {
-        return `http://${LOCAL_IP}:3000/api/v1`;
-    } else {
-        return `http://${LOCAL_IP}:3000/api/v1`;
+        return `http://localhost:${port}`;
     }
+
+    return `http://${LOCAL_IP}:${port}`;
 };
 
-const getTrackingWsUrl = () => {
-    if (!__DEV__) {
-        return 'wss://api.shravankirana.com/tracking';
-    }
+export const AUTH_URL = Constants.expoConfig?.extra?.AUTH_SERVICE_URL || getServiceBaseUrl(8001);
+export const USER_URL = Constants.expoConfig?.extra?.USER_SERVICE_URL || getServiceBaseUrl(8002);
+export const RIDER_URL = Constants.expoConfig?.extra?.RIDER_SERVICE_URL || getServiceBaseUrl(8003);
+export const ORDER_URL = Constants.expoConfig?.extra?.ORDER_SERVICE_URL || getServiceBaseUrl(8004);
+export const PRODUCT_URL = Constants.expoConfig?.extra?.PRODUCT_SERVICE_URL || `${getServiceBaseUrl(8005)}/api/v1`;
+export const CART_URL = Constants.expoConfig?.extra?.CART_SERVICE_URL || `${getServiceBaseUrl(8006)}/api/v1`;
+export const LOCATION_URL = Constants.expoConfig?.extra?.LOCATION_SERVICE_URL || getServiceBaseUrl(8009);
 
-    if (Platform.OS === 'web') {
-        return 'ws://localhost:3008/tracking';
-    } else if (Platform.OS === 'ios') {
-        return `ws://${LOCAL_IP}:3008/tracking`;
-    } else {
-        return `ws://${LOCAL_IP}:3008/tracking`;
-    }
-};
+export const TRACKING_URL = __DEV__
+    ? (Platform.OS === 'web' ? 'ws://localhost:8010' : `ws://${LOCAL_IP}:8010`)
+    : 'wss://api.shravankirana.com';
 
-const getLocationSvcUrl = () => {
-    if (!__DEV__) {
-        return 'https://api.shravankirana.com/location';
-    }
-
-    if (Platform.OS === 'web') {
-        return 'http://localhost:3005';
-    } else if (Platform.OS === 'ios') {
-        return `http://${LOCAL_IP}:3005`;
-    } else {
-        return `http://${LOCAL_IP}:3005`;
-    }
-};
-
-const API_BASE_URL = getApiUrl();
-const TRACKING_WS_URL = getTrackingWsUrl();
-const LOCATION_SVC_URL = getLocationSvcUrl();
-
-export const API_URL = API_BASE_URL;
-export const TRACKING_URL = TRACKING_WS_URL;
-export const LOCATION_URL = LOCATION_SVC_URL;
+export const API_URL = ORDER_URL;
 
 export const API_CONFIG = {
-    baseURL: API_BASE_URL,
     timeout: 30000,
 };
 
 export const MAPMYINDIA_CONFIG = {
     apiKey: Constants.expoConfig?.extra?.MAPMYINDIA_API_KEY || process.env.MAPMYINDIA_API_KEY || '',
-    baseUrl: 'https://apis.mapmyindia.com/advancedmaps/v1',
-    directionsUrl: 'https://apis.mapmyindia.com/routing/v1/driving',
-    geocodeUrl: 'https://apis.mapmyindia.com/advancedmaps/v1/geocode',
+    baseUrl: 'https://apis.mappls.com/advancedmaps/v1',
+    directionsUrl: 'https://apis.mappls.com/advancedmaps/v1/route_adv/driving',
+    geocodeUrl: 'https://atlas.mappls.com/api/places/geocode',
 };
 
 export const ENDPOINTS = {
@@ -73,12 +48,13 @@ export const ENDPOINTS = {
         LOGOUT: '/auth/logout',
     },
     user: {
-        PROFILE: '/users/me',
-        ADDRESSES: '/users/addresses',
+        PROFILE: (userId) => `/users/${userId}`,
+        ADDRESSES: (userId) => `/users/${userId}/addresses`,
+        REMOVE_ADDRESS: (userId, addressIndex) => `/users/${userId}/addresses/${addressIndex}`,
     },
     categories: {
         LIST: '/categories',
-        SUBCATEGORIES: '/subcategories',
+        SUBCATEGORIES: (categoryId) => `/categories/${categoryId}/subcategories`,
     },
     products: {
         LIST: '/products',
@@ -94,17 +70,14 @@ export const ENDPOINTS = {
     orders: {
         LIST: '/orders',
         DETAIL: (id) => `/orders/${id}`,
-        STATUS: (orderId) => `/orders/${orderId}/status`,
-        HISTORY: (orderId) => `/orders/${orderId}/history`,
+        USER: (userId) => `/orders/user/${userId}`,
+        STATUS: '/orders/status',
     },
     location: {
         GEOCODE: '/geocode',
         REVERSE_GEOCODE: '/reverse-geocode',
-        SEARCH: '/search',
-    },
-    settings: {
-        STORE: '/settings/store',
-        CHECK_SERVICEABILITY: '/settings/check-serviceability',
+        ROUTE: '/route/calculate',
+        ETA: '/eta/calculate',
     },
 };
 

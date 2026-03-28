@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     View,
     Text,
@@ -7,57 +7,67 @@ import {
     StyleSheet,
     SafeAreaView,
     StatusBar,
-    Image,
+    ActivityIndicator,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSelector } from 'react-redux';
 import { Header, EmptyState } from '../components';
 import { COLORS, SHADOWS } from '../constants';
-
-// Mock orders data
-const ORDERS = [
-    {
-        id: '1',
-        orderNumber: 'ORD-2024-001',
-        date: '30 Dec, 2024',
-        status: 'Delivered',
-        items: 5,
-        total: 350,
-        deliveryTime: '12:30 PM',
-    },
-    {
-        id: '2',
-        orderNumber: 'ORD-2024-002',
-        date: '28 Dec, 2024',
-        status: 'Delivered',
-        items: 3,
-        total: 180,
-        deliveryTime: '6:45 PM',
-    },
-    {
-        id: '3',
-        orderNumber: 'ORD-2024-003',
-        date: '25 Dec, 2024',
-        status: 'Delivered',
-        items: 8,
-        total: 620,
-        deliveryTime: '10:15 AM',
-    },
-];
+import { OrderService } from '../services';
 
 const OrdersHistoryScreen = ({ navigation }) => {
+    const { user } = useSelector((state) => state.auth);
+    const [orders, setOrders] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        let active = true;
+
+        const loadOrders = async () => {
+            try {
+                if (!user?.id) {
+                    setOrders([]);
+                    return;
+                }
+
+                const response = await OrderService.getOrders(user.id);
+                if (!active) return;
+
+                const normalized = Array.isArray(response) ? response : response.orders || [];
+                setOrders(normalized);
+            } catch (error) {
+                console.error('Failed to load order history:', error);
+                if (active) {
+                    setOrders([]);
+                }
+            } finally {
+                if (active) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        loadOrders();
+        return () => {
+            active = false;
+        };
+    }, [user?.id]);
+
     const handleBackPress = () => {
         navigation.goBack();
     };
 
     const getStatusColor = (status) => {
-        switch (status) {
-            case 'Delivered':
+        switch (status?.toUpperCase()) {
+            case 'DELIVERED':
                 return { bg: '#E8F5E9', text: COLORS.secondary };
-            case 'In Transit':
+            case 'OUT_FOR_DELIVERY':
                 return { bg: '#E3F2FD', text: '#1976D2' };
-            case 'Processing':
+            case 'PACKED':
+            case 'CONFIRMED':
+            case 'PENDING':
                 return { bg: '#FFF3E0', text: '#FF9800' };
-            case 'Cancelled':
+            case 'CANCELLED':
                 return { bg: '#FFEBEE', text: COLORS.error };
             default:
                 return { bg: COLORS.lightGray, text: COLORS.textSecondary };
@@ -65,18 +75,23 @@ const OrdersHistoryScreen = ({ navigation }) => {
     };
 
     const renderOrder = ({ item }) => {
-        const statusColor = getStatusColor(item.status);
+        const statusColor = getStatusColor(item.orderStatus);
+        const itemCount = item.items?.reduce((sum, entry) => sum + (entry.quantity || 0), 0) || 0;
+        const date = item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '';
+        const deliveryTime = item.estimatedDeliveryTime
+            ? new Date(item.estimatedDeliveryTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : '--';
 
         return (
             <TouchableOpacity style={styles.orderCard}>
                 <View style={styles.orderHeader}>
                     <View>
-                        <Text style={styles.orderNumber}>{item.orderNumber}</Text>
-                        <Text style={styles.orderDate}>{item.date}</Text>
+                        <Text style={styles.orderNumber}>{item.orderId}</Text>
+                        <Text style={styles.orderDate}>{date}</Text>
                     </View>
                     <View style={[styles.statusBadge, { backgroundColor: statusColor.bg }]}>
                         <Text style={[styles.statusText, { color: statusColor.text }]}>
-                            {item.status}
+                            {item.orderStatus}
                         </Text>
                     </View>
                 </View>
@@ -90,7 +105,7 @@ const OrdersHistoryScreen = ({ navigation }) => {
                             size={18}
                             color={COLORS.textSecondary}
                         />
-                        <Text style={styles.detailText}>{item.items} items</Text>
+                        <Text style={styles.detailText}>{itemCount} items</Text>
                     </View>
                     <View style={styles.detailItem}>
                         <MaterialCommunityIcons
@@ -98,7 +113,7 @@ const OrdersHistoryScreen = ({ navigation }) => {
                             size={18}
                             color={COLORS.textSecondary}
                         />
-                        <Text style={styles.detailText}>{item.deliveryTime}</Text>
+                        <Text style={styles.detailText}>{deliveryTime}</Text>
                     </View>
                     <View style={styles.detailItem}>
                         <MaterialCommunityIcons
@@ -106,7 +121,7 @@ const OrdersHistoryScreen = ({ navigation }) => {
                             size={18}
                             color={COLORS.textSecondary}
                         />
-                        <Text style={styles.detailText}>₹{item.total}</Text>
+                        <Text style={styles.detailText}>₹{item.totalAmount}</Text>
                     </View>
                 </View>
 
@@ -142,11 +157,15 @@ const OrdersHistoryScreen = ({ navigation }) => {
                 onBackPress={handleBackPress}
             />
 
-            {ORDERS.length > 0 ? (
+            {loading ? (
+                <View style={styles.emptyContainer}>
+                    <ActivityIndicator size="large" color={COLORS.secondary} />
+                </View>
+            ) : orders.length > 0 ? (
                 <FlatList
-                    data={ORDERS}
+                    data={orders}
                     renderItem={renderOrder}
-                    keyExtractor={(item) => item.id}
+                    keyExtractor={(item) => item.id || item.orderId}
                     contentContainerStyle={styles.ordersList}
                     showsVerticalScrollIndicator={false}
                 />
@@ -168,6 +187,11 @@ const styles = StyleSheet.create({
     },
     ordersList: {
         padding: 16,
+    },
+    emptyContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     orderCard: {
         backgroundColor: COLORS.white,

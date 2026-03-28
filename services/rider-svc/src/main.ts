@@ -16,7 +16,7 @@ async function bootstrap() {
   app.enableCors();
 
   const grpcPort = process.env.GRPC_PORT || '3003';
-  const httpPort = process.env.HTTP_PORT || '8083';
+  const httpPort = process.env.HTTP_PORT || process.env.PORT || '8003';
 
   app.connectMicroservice<MicroserviceOptions>({
     transport: Transport.GRPC,

@@ -1,13 +1,14 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
-import { API_BASE_URL } from '../utils/constants';
+import { AUTH_SERVICE_URL, ORDER_SERVICE_URL, RIDER_SERVICE_URL } from '../utils/constants';
 import { storage } from './storage';
+import type { Rider } from '../types/rider';
 
 class ApiClient {
   private client: AxiosInstance;
 
-  constructor() {
+  constructor(baseURL: string) {
     this.client = axios.create({
-      baseURL: API_BASE_URL,
+      baseURL,
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
@@ -57,44 +58,162 @@ class ApiClient {
   }
 }
 
-export const apiClient = new ApiClient();
+const authClient = new ApiClient(AUTH_SERVICE_URL);
+const riderClient = new ApiClient(RIDER_SERVICE_URL);
+const orderClient = new ApiClient(ORDER_SERVICE_URL);
+
+const normalizeRider = (record: any): Rider => ({
+  id: record._id || record.id || record.userId,
+  name: record.name || record.user?.name || 'Rider',
+  phone: record.phone || record.user?.phone || '',
+  email: record.email || record.user?.email,
+  vehicle: {
+    type: record.vehicleType === 'bicycle' ? 'cycle' : record.vehicleType === 'car' ? 'scooter' : 'bike',
+    number: record.vehicleNumber,
+  },
+  documents: {},
+  isOnline: Boolean(record.isOnline),
+  rating: record.stats?.avgRating || 0,
+  totalDeliveries: record.stats?.totalDeliveries || 0,
+  acceptanceRate: record.stats?.acceptanceRate || 0,
+  createdAt: record.createdAt || new Date().toISOString(),
+});
+
+const normalizeOrder = (order: any) => ({
+  id: order.orderId || order.id,
+  orderNumber: order.orderId || order.id,
+  status: (order.orderStatus || 'pending').toLowerCase(),
+  pickup: {
+    name: 'Store',
+    phone: '',
+    address: {
+      full: order.deliveryAddress?.address || 'Store pickup',
+      coordinates: {
+        latitude: order.deliveryAddress?.coordinates?.coordinates?.[1] || 0,
+        longitude: order.deliveryAddress?.coordinates?.coordinates?.[0] || 0,
+      },
+    },
+  },
+  delivery: {
+    name: order.customerName || 'Customer',
+    phone: order.customerPhone || '',
+    address: {
+      full: order.deliveryAddress?.address || '',
+      coordinates: {
+        latitude: order.deliveryAddress?.coordinates?.coordinates?.[1] || 0,
+        longitude: order.deliveryAddress?.coordinates?.coordinates?.[0] || 0,
+      },
+    },
+  },
+  items: (order.items || []).map((item: any) => ({
+    id: item.productId || item.id,
+    name: item.name,
+    quantity: item.quantity,
+    price: item.price,
+  })),
+  totalAmount: order.totalAmount || 0,
+  deliveryFee: order.deliveryFee || 0,
+  createdAt: order.createdAt || new Date().toISOString(),
+  estimatedTime: order.estimatedDeliveryTime ? Date.parse(order.estimatedDeliveryTime) : undefined,
+});
+
+const getOrCreateRiderProfile = async (userId: string): Promise<Rider> => {
+  try {
+    const existing = await riderClient.get<any>(`/riders/user/${userId}`);
+    return normalizeRider(existing);
+  } catch {
+    const created = await riderClient.post<any>('/riders', { userId });
+    return normalizeRider(created);
+  }
+};
 
 export const authApi = {
   sendOtp: (phone: string) =>
-    apiClient.post<{ success: boolean; message: string }>('/auth/send-otp', { phone }),
+    authClient.post<{ success: boolean; message: string }>('/auth/send-otp', { phone }),
 
-  verifyOtp: (phone: string, otp: string) =>
-    apiClient.post<{ token: string; user: unknown }>('/auth/verify-otp', { phone, otp }),
+  verifyOtp: async (phone: string, otp: string) => {
+    const response = await authClient.post<any>('/auth/verify-otp', { phone, otp });
+    const token = response.tokens?.accessToken || response.accessToken;
+    const rider = await getOrCreateRiderProfile(response.userId || response.user?.id);
+    return { token, user: rider };
+  },
 };
 
 export const riderApi = {
-  getMe: () => apiClient.get('/riders/me'),
+  getMe: async () => {
+    const user = await storage.getUser<Rider>();
+    if (!user?.id) return null;
+    const rider = await riderClient.get<any>(`/riders/${user.id}`);
+    return normalizeRider(rider);
+  },
 
-  updateAvailability: (isOnline: boolean) =>
-    apiClient.patch<{ isOnline: boolean }>('/riders/availability', { isOnline }),
+  updateAvailability: async (isOnline: boolean) => {
+    const user = await storage.getUser<Rider>();
+    if (!user?.id) {
+      throw new Error('Rider not found');
+    }
+    const rider = await riderClient.put<any>(`/riders/${user.id}/availability`, {
+      isOnline,
+      isAvailable: isOnline,
+    });
+    return normalizeRider(rider);
+  },
 
-  getEarnings: (period: 'daily' | 'weekly' | 'monthly') =>
-    apiClient.get<{
-      today: number;
-      week: number;
-      month: number;
+  getEarnings: async (_period: 'daily' | 'weekly' | 'monthly') => {
+    const user = await storage.getUser<Rider>();
+    if (!user?.id) {
+      throw new Error('Rider not found');
+    }
+    const stats = await riderClient.get<any>(`/riders/${user.id}/metrics`);
+    return {
+      today: 0,
+      week: 0,
+      month: 0,
       stats: {
-        deliveries: number;
-        rating: number;
-        acceptanceRate: number;
-      };
-    }>('/riders/earnings', { period }),
+        deliveries: stats.totalDeliveries || 0,
+        rating: stats.avgRating || 0,
+        acceptanceRate: stats.acceptanceRate || 0,
+      },
+    };
+  },
 };
 
 export const orderApi = {
-  getAvailable: () => apiClient.get('/orders/available'),
+  getAvailable: async () => {
+    const orders = await orderClient.get<any[]>('/orders');
+    return (orders || []).map(normalizeOrder);
+  },
 
-  accept: (orderId: string) =>
-    apiClient.post<{ order: unknown }>(`/orders/${orderId}/accept`),
+  accept: async (orderId: string) => {
+    const user = await storage.getUser<Rider>();
+    if (!user?.id) {
+      throw new Error('Rider not found');
+    }
+    const order = await orderClient.patch<any>('/orders/assign-rider', {
+      orderId,
+      riderId: user.id,
+    });
+    return { order: normalizeOrder(order) };
+  },
 
-  reject: (orderId: string) =>
-    apiClient.post<{ success: boolean }>(`/orders/${orderId}/reject`),
+  reject: async (_orderId: string) =>
+    ({ success: true }),
 
-  updateStatus: (orderId: string, status: string, location?: { latitude: number; longitude: number }) =>
-    apiClient.patch<{ order: unknown }>(`/orders/${orderId}/status`, { status, location }),
+  updateStatus: async (orderId: string, status: string, _location?: { latitude: number; longitude: number }) => {
+    const statusMap: Record<string, string> = {
+      accepted: 'ASSIGNED',
+      picked_up: 'OUT_FOR_DELIVERY',
+      in_transit: 'OUT_FOR_DELIVERY',
+      delivered: 'DELIVERED',
+      cancelled: 'CANCELLED',
+      pending: 'PENDING',
+      assigned: 'ASSIGNED',
+    };
+
+    const order = await orderClient.patch<any>('/orders/status', {
+      orderId,
+      newStatus: statusMap[status] || status.toUpperCase(),
+    });
+    return { order: normalizeOrder(order) };
+  },
 };

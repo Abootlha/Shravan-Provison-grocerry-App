@@ -14,8 +14,7 @@ import {
     ActivityIndicator,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import api from '../services/api';
-import { ENDPOINTS } from '../services/config';
+import { AuthService } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
 
 const { width, height } = Dimensions.get('window');
@@ -110,13 +109,13 @@ const LoginScreen = ({ navigation }) => {
         ]).start();
 
         try {
-            const response = await api.post(ENDPOINTS.SEND_OTP, { phone: phoneNumber });
+            const response = await AuthService.sendOtp(phoneNumber);
 
-            if (response.data.message) {
+            if (response.message) {
                 navigation.navigate('OTP', { phoneNumber });
             }
         } catch (error) {
-            const errorMessage = error.response?.data?.message || 'Failed to send OTP. Please try again.';
+            const errorMessage = error.response?.data?.message || error.message || 'Failed to send OTP. Please try again.';
             Alert.alert('Error', errorMessage);
         } finally {
             setIsLoading(false);

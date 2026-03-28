@@ -26,6 +26,27 @@ export class RidersService {
   ) {}
 
   /**
+   * Find riders with optional status filter.
+   */
+  async findAll(status?: string): Promise<User[]> {
+    const query: Record<string, any> = {
+      role: UserRole.RIDER,
+    };
+
+    if (status === 'available') {
+      query.isAvailable = true;
+      query.isOnline = true;
+    } else if (status === 'busy') {
+      query.isAvailable = false;
+      query.isOnline = true;
+    } else if (status === 'offline') {
+      query.isOnline = false;
+    }
+
+    return this.userModel.find(query).lean().exec();
+  }
+
+  /**
    * Update rider availability status
    */
   async updateAvailability(riderId: string, isAvailable: boolean): Promise<User> {

@@ -1,42 +1,46 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { api } from '../lib/api';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
 import { Mail, Lock, ArrowRight, ShoppingCart } from 'lucide-react';
 
 export default function LoginForm() {
-    const [username, setUsername] = useState('');
-    const [password, setPassword] = useState('');
+    const usernameRef = useRef<HTMLInputElement>(null);
+    const passwordRef = useRef<HTMLInputElement>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
-    async function handleLogin(e: React.FormEvent) {
-        e.preventDefault();
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        const token = localStorage.getItem('adminToken');
+        if (token) {
+            window.location.replace('/');
+        }
+    }, []);
+
+    async function submitLogin() {
+        const username = usernameRef.current?.value?.trim() || '';
+        const password = passwordRef.current?.value || '';
+
+        if (!username || !password || loading) {
+            setError('Please enter username and password.');
+            return;
+        }
+
         setLoading(true);
         setError('');
 
         try {
-            const API_BASE_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8001';
-            const response = await fetch(`${API_BASE_URL}/auth/admin/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password }),
-                credentials: 'include',
-            });
-
-            if (!response.ok) {
-                const data = await response.json();
-                throw new Error(data.message || 'Invalid credentials');
-            }
-
-            const data = await response.json();
+            const data = await api.login(username, password);
             
             localStorage.setItem('adminToken', data.accessToken);
             localStorage.setItem('adminUser', JSON.stringify(data.user));
             localStorage.setItem('adminRefreshToken', data.refreshToken);
             localStorage.setItem('adminLoginTime', Date.now().toString());
-            
-            window.location.href = '/';
+
+            window.location.replace('/');
         } catch (err: any) {
             setError(err.message || 'Login failed. Please check your credentials.');
         } finally {
@@ -90,7 +94,14 @@ export default function LoginForm() {
                             </div>
                         )}
 
-                        <form onSubmit={handleLogin} className="space-y-4">
+                        <form
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                void submitLogin();
+                            }}
+                            action="#"
+                            className="space-y-4"
+                        >
                             <div>
                                 <label 
                                     className="text-sm font-medium mb-2 block" 
@@ -105,11 +116,12 @@ export default function LoginForm() {
                                     />
                                     <Input
                                         type="text"
-                                        value={username}
-                                        onChange={(e) => setUsername(e.target.value)}
+                                        ref={usernameRef}
                                         className="pl-11 h-12"
                                         placeholder="Enter username or email"
+                                        defaultValue="admin"
                                         required
+                                        autoComplete="username"
                                     />
                                 </div>
                             </div>
@@ -128,17 +140,21 @@ export default function LoginForm() {
                                     />
                                     <Input
                                         type="password"
-                                        value={password}
-                                        onChange={(e) => setPassword(e.target.value)}
+                                        ref={passwordRef}
                                         className="pl-11 h-12"
                                         placeholder="Enter password"
+                                        defaultValue="admin123"
                                         required
+                                        autoComplete="current-password"
                                     />
                                 </div>
                             </div>
 
                             <Button 
-                                type="submit" 
+                                type="button"
+                                onClick={() => {
+                                    void submitLogin();
+                                }}
                                 disabled={loading} 
                                 className="w-full h-12 text-base"
                                 style={{ 

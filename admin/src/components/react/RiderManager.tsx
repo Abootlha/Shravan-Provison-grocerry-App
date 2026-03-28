@@ -48,14 +48,7 @@ export default function RiderManager({ onAssignRider, orderId, selectedRiderId }
 
     async function fetchRiders() {
         try {
-            const token = localStorage.getItem('adminToken');
-            if (!token) {
-                window.location.href = '/login';
-                return;
-            }
-
-            const endpoint = statusFilter === 'all' ? '/riders' : `/riders?status=${statusFilter}`;
-            const data = await apiRequest(endpoint);
+            const data = await api.getRiders(statusFilter === 'all' ? undefined : statusFilter);
             setRiders(data.riders || data || []);
         } catch (error) {
             console.error('Error fetching riders:', error);
@@ -65,23 +58,8 @@ export default function RiderManager({ onAssignRider, orderId, selectedRiderId }
         }
     }
 
-    async function apiRequest(endpoint: string) {
-        const API_BASE_URL = process.env.API_URL || 'http://localhost:3000/api/v1';
-        const token = localStorage.getItem('adminToken');
-
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-            },
-        });
-
-        if (!response.ok) throw new Error(`API Error: ${response.status}`);
-        return response.json();
-    }
-
     useEffect(() => {
-        if (localStorage.getItem('adminToken')) {
+        if (typeof window !== 'undefined') {
             fetchRiders();
         }
     }, [statusFilter]);

@@ -12,8 +12,6 @@ import { useSelector, useDispatch } from 'react-redux';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loginSuccess } from '../store/slices/authSlice';
 import { loadLanguage } from '../store/slices/languageSlice';
-import api from '../services/api';
-import { ENDPOINTS } from '../services/config';
 
 const { width, height } = Dimensions.get('window');
 
@@ -117,14 +115,19 @@ const SplashScreen = ({ navigation }) => {
             }
 
             try {
-                // Try to fetch user profile to validate session (cookies sent automatically)
-                const response = await api.get(ENDPOINTS.PROFILE);
-                const user = response.data;
+                const userJson = await AsyncStorage.getItem('customerUser');
+                const token = await AsyncStorage.getItem('customerAccessToken');
+                const refreshToken = await AsyncStorage.getItem('customerRefreshToken');
 
-                // Session is valid, restore auth state
+                if (!userJson || !token) {
+                    throw new Error('No saved session');
+                }
+
+                const user = JSON.parse(userJson);
                 dispatch(loginSuccess({
                     user,
-                    token: 'cookie-based',
+                    token,
+                    refreshToken,
                 }));
 
                 navigation.replace('Main');

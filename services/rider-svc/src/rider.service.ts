@@ -81,6 +81,26 @@ export class RiderService {
     return rider;
   }
 
+  async findAll(status?: 'available' | 'busy' | 'offline'): Promise<Rider[]> {
+    const filter: Record<string, unknown> = {};
+
+    if (status === 'available') {
+      filter.isOnline = true;
+      filter.isAvailable = true;
+    } else if (status === 'busy') {
+      filter.isOnline = true;
+      filter.isAvailable = false;
+    } else if (status === 'offline') {
+      filter.isOnline = false;
+    }
+
+    return this.riderModel
+      .find(filter)
+      .populate('userId', 'name phone email')
+      .sort({ updatedAt: -1 })
+      .lean();
+  }
+
   async updateLocation(riderId: string, locationDto: UpdateLocationDto): Promise<{ success: boolean; throttled?: boolean }> {
     if (!Types.ObjectId.isValid(riderId)) {
       throw new NotFoundException('Invalid rider ID');

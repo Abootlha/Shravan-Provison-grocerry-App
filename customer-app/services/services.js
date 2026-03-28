@@ -1,147 +1,148 @@
-import api from './api';
+import {
+    authApi,
+    userApi,
+    productApi,
+    cartApi,
+    orderApi,
+    locationApi,
+} from './api';
 import { ENDPOINTS } from './config';
+
+const getCurrentUser = async () => {
+    const phone = globalThis?.__SHRAVAN_PHONE__;
+    const userId = globalThis?.__SHRAVAN_USER_ID__;
+    return { phone, userId };
+};
 
 export const AuthService = {
     sendOtp: async (phone) => {
-        const response = await api.post(ENDPOINTS.SEND_OTP, { phone });
+        const response = await authApi.post(ENDPOINTS.auth.SEND_OTP, { phone });
         return response.data;
     },
 
-    verifyOtp: async (phone, otp, name) => {
-        const response = await api.post(ENDPOINTS.VERIFY_OTP, { phone, otp, name });
-        // Tokens are now stored in HTTP-only cookies by the backend
+    verifyOtp: async (phone, otp) => {
+        const response = await authApi.post(ENDPOINTS.auth.VERIFY_OTP, { phone, otp });
         return response.data;
     },
 
-    logout: async () => {
-        // Backend clears cookies
-        await api.post(ENDPOINTS.LOGOUT);
-    },
-
-    getStoredUser: async () => {
-        // User is fetched from API, not localStorage
-        try {
-            const response = await api.get(ENDPOINTS.PROFILE);
-            return response.data;
-        } catch {
-            return null;
-        }
-    },
-
-    isAuthenticated: async () => {
-        // Check by calling profile endpoint - cookies sent automatically
-        try {
-            await api.get(ENDPOINTS.PROFILE);
-            return true;
-        } catch {
-            return false;
-        }
+    logout: async (refreshToken) => {
+        await authApi.post(ENDPOINTS.auth.LOGOUT, { refreshToken });
     },
 };
 
 export const ProductService = {
     getCategories: async () => {
-        const response = await api.get(ENDPOINTS.CATEGORIES);
-        return response.data.categories;
+        const response = await productApi.get(ENDPOINTS.categories.LIST);
+        return response.data.categories || [];
     },
 
-    getSubcategories: async (params = {}) => {
-        const response = await api.get(ENDPOINTS.SUBCATEGORIES, { params });
-        return response.data;
+    getSubcategories: async ({ parentId }) => {
+        const response = await productApi.get(ENDPOINTS.categories.SUBCATEGORIES(parentId));
+        return response.data.subcategories || [];
     },
 
     getProducts: async (params = {}) => {
-        const response = await api.get(ENDPOINTS.PRODUCTS, { params });
+        const response = await productApi.get(ENDPOINTS.products.LIST, { params });
         return response.data;
     },
 
     getProductById: async (id) => {
-        const response = await api.get(ENDPOINTS.PRODUCT_DETAIL(id));
+        const response = await productApi.get(ENDPOINTS.products.DETAIL(id));
         return response.data.product;
     },
 
     searchProducts: async (query) => {
-        const response = await api.get(ENDPOINTS.PRODUCTS, { params: { search: query } });
+        const response = await productApi.get(ENDPOINTS.products.LIST, { params: { search: query } });
         return response.data;
     },
 };
 
 export const CartService = {
     getCart: async () => {
-        const response = await api.get(ENDPOINTS.CART);
+        const response = await cartApi.get(ENDPOINTS.cart.GET);
         return response.data;
     },
 
     addToCart: async (productId, quantity = 1) => {
-        const response = await api.post(ENDPOINTS.CART_ADD, { productId, quantity });
+        const response = await cartApi.post(ENDPOINTS.cart.ADD, { productId, quantity });
         return response.data;
     },
 
     updateQuantity: async (productId, quantity) => {
-        const response = await api.put(ENDPOINTS.CART_UPDATE, { productId, quantity });
+        const response = await cartApi.put(ENDPOINTS.cart.UPDATE, { productId, quantity });
         return response.data;
     },
 
     removeFromCart: async (productId) => {
-        const response = await api.delete(ENDPOINTS.CART_REMOVE(productId));
+        const response = await cartApi.delete(ENDPOINTS.cart.REMOVE(productId));
         return response.data;
     },
 
     clearCart: async () => {
-        const response = await api.delete(ENDPOINTS.CART_CLEAR);
+        const response = await cartApi.delete(ENDPOINTS.cart.CLEAR);
         return response.data;
     },
 };
 
 export const OrderService = {
     createOrder: async (orderData) => {
-        const response = await api.post(ENDPOINTS.ORDERS, orderData);
+        const response = await orderApi.post(ENDPOINTS.orders.LIST, orderData);
         return response.data;
     },
 
-    getOrders: async (page = 1, limit = 10) => {
-        const response = await api.get(ENDPOINTS.ORDERS, { params: { page, limit } });
+    getOrders: async (userId) => {
+        if (!userId) {
+            return [];
+        }
+        const response = await orderApi.get(ENDPOINTS.orders.USER(userId));
         return response.data;
     },
 
     getOrderById: async (id) => {
-        const response = await api.get(ENDPOINTS.ORDER_DETAIL(id));
-        return response.data.order;
+        const response = await orderApi.get(ENDPOINTS.orders.DETAIL(id));
+        return response.data;
     },
 
     getOrderStatus: async (orderId) => {
-        const response = await api.get(ENDPOINTS.ORDER_STATUS(orderId));
+        const response = await orderApi.get(ENDPOINTS.orders.DETAIL(orderId));
         return response.data;
     },
 };
 
 export const UserService = {
-    getProfile: async () => {
-        const response = await api.get(ENDPOINTS.PROFILE);
+    getProfile: async (userId) => {
+        if (!userId) {
+            return null;
+        }
+        const response = await userApi.get(ENDPOINTS.user.PROFILE(userId));
         return response.data;
     },
 
-    addAddress: async (address) => {
-        const response = await api.post(ENDPOINTS.ADDRESSES, address);
+    addAddress: async (userId, address) => {
+        const response = await userApi.post(ENDPOINTS.user.ADDRESSES(userId), address);
         return response.data;
     },
 
-    removeAddress: async (index) => {
-        const response = await api.delete(`${ENDPOINTS.ADDRESSES}/${index}`);
+    removeAddress: async (userId, index) => {
+        const response = await userApi.delete(ENDPOINTS.user.REMOVE_ADDRESS(userId, index));
         return response.data;
     },
 };
 
 export const SettingsService = {
-    getStoreSettings: async () => {
-        const response = await api.get(ENDPOINTS.STORE_SETTINGS);
-        return response.data;
-    },
+    getStoreSettings: async () => ({
+        serviceable: true,
+    }),
 
     checkServiceability: async (latitude, longitude) => {
-        const response = await api.get(ENDPOINTS.CHECK_SERVICEABILITY, {
+        const response = await locationApi.get(ENDPOINTS.location.REVERSE_GEOCODE, {
             params: { latitude, longitude },
         });
-        return response.data;
+        return {
+            serviceable: Boolean(response.data),
+            location: response.data,
+        };
     },
 };
+
+export { getCurrentUser };

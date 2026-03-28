@@ -5,10 +5,12 @@ networks:
     driver: bridge
 
 volumes:
+  rabbitmq_data:
   mongodb_data:
   redis_data:
   prometheus_data:
   grafana_data:
+  nginx_logs:
 
 services:
   # Message Broker

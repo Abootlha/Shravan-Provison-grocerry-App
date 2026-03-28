@@ -16,8 +16,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useDispatch } from 'react-redux';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loginSuccess } from '../store/slices/authSlice';
-import api from '../services/api';
-import { ENDPOINTS } from '../services/config';
+import { AuthService } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
 
 const { width, height } = Dimensions.get('window');
@@ -142,18 +141,26 @@ const OTPScreen = ({ navigation, route }) => {
         ]).start();
 
         try {
-            const response = await api.post(ENDPOINTS.VERIFY_OTP, {
+            const response = await AuthService.verifyOtp(phoneNumber, otpCode);
+            const tokens = response.tokens || {};
+            const user = {
+                id: response.userId || response.user?.id || phoneNumber,
+                name: response.user?.name || 'Customer',
                 phone: phoneNumber,
-                otp: otpCode,
-            });
+            };
 
-            const { user } = response.data;
-            // Note: Tokens are now stored in HTTP-only cookies by backend
+            await AsyncStorage.setItem('customerUser', JSON.stringify(user));
+            if (tokens.accessToken) {
+                await AsyncStorage.setItem('customerAccessToken', tokens.accessToken);
+            }
+            if (tokens.refreshToken) {
+                await AsyncStorage.setItem('customerRefreshToken', tokens.refreshToken);
+            }
 
-            // Update Redux state
             dispatch(loginSuccess({
                 user,
-                token: 'cookie-based', // Token is in cookie, not accessible
+                token: tokens.accessToken || null,
+                refreshToken: tokens.refreshToken || null,
             }));
 
             // Navigate to main
@@ -175,7 +182,7 @@ const OTPScreen = ({ navigation, route }) => {
         if (!canResend) return;
 
         try {
-            await api.post(ENDPOINTS.SEND_OTP, { phone: phoneNumber });
+            await AuthService.sendOtp(phoneNumber);
             setTimer(30);
             setCanResend(false);
             setOtp(['', '', '', '']);
