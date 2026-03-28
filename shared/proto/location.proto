@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package location;
+
+import "common.proto";
+
+message Location {
+  common.GeoLocation geo_location = 1;
+  string address = 2;
+  string city = 3;
+  string state = 4;
+  string postal_code = 5;
+  string country = 6;
+}
+
+message Route {
+  repeated common.GeoLocation points = 1;
+  double distance_km = 2;
+  int64 duration_seconds = 3;
+  string polyline = 4;
+}
+
+message ETA {
+  int64 duration_seconds = 1;
+  string formatted = 2;
+  common.Timestamp arrival_time = 3;
+}
+
+message CalculateRouteRequest {
+  common.GeoLocation origin = 1;
+  common.GeoLocation destination = 2;
+}
+
+message CalculateRouteResponse {
+  Route route = 1;
+}
+
+message CalculateETARequest {
+  common.GeoLocation origin = 1;
+  common.GeoLocation destination = 2;
+}
+
+message CalculateETAResponse {
+  ETA eta = 1;
+}
+
+message GeocodeRequest {
+  string address = 1;
+}
+
+message GeocodeResponse {
+  Location location = 1;
+}
+
+message ReverseGeocodeRequest {
+  common.GeoLocation location = 1;
+}
+
+message ReverseGeocodeResponse {
+  Location location = 1;
+}
+
+service LocationService {
+  rpc CalculateRoute(CalculateRouteRequest) returns (CalculateRouteResponse);
+  rpc CalculateETA(CalculateETARequest) returns (CalculateETAResponse);
+  rpc Geocode(GeocodeRequest) returns (GeocodeResponse);
+  rpc ReverseGeocode(ReverseGeocodeRequest) returns (ReverseGeocodeResponse);
+}

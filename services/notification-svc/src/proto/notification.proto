@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package notification;
+
+service NotificationService {
+  rpc SendPush (PushRequest) returns (PushResponse);
+  rpc SendSms (SmsRequest) returns (SmsResponse);
+  rpc SendEmail (EmailRequest) returns (EmailResponse);
+  rpc SendTemplate (TemplateRequest) returns (TemplateResponse);
+  rpc GetUserNotifications (UserNotificationsRequest) returns (UserNotificationsResponse);
+  rpc GetStats (StatsRequest) returns (StatsResponse);
+}
+
+message PushRequest {
+  string user_id = 1;
+  string title = 2;
+  string body = 3;
+  map<string, string> data = 4;
+  string device_token = 5;
+}
+
+message PushResponse {
+  bool success = 1;
+  string message_id = 2;
+}
+
+message SmsRequest {
+  string user_id = 1;
+  string phone = 2;
+  string message = 3;
+}
+
+message SmsResponse {
+  bool success = 1;
+}
+
+message EmailRequest {
+  string user_id = 1;
+  string to = 2;
+  string subject = 3;
+  string html = 4;
+}
+
+message EmailResponse {
+  bool success = 1;
+}
+
+message TemplateRequest {
+  string user_id = 1;
+  string template_type = 2;
+  map<string, string> data = 3;
+}
+
+message TemplateResponse {
+  bool success = 1;
+  string notification_id = 2;
+}
+
+message UserNotificationsRequest {
+  string user_id = 1;
+  int32 limit = 2;
+}
+
+message UserNotificationsResponse {
+  repeated Notification notifications = 1;
+}
+
+message StatsRequest {}
+
+message StatsResponse {
+  int32 pending = 1;
+  int32 sent = 2;
+  int32 failed = 3;
+}
+
+message Notification {
+  string id = 1;
+  string user_id = 2;
+  string type = 3;
+  string title = 4;
+  string body = 5;
+  map<string, string> data = 6;
+  string status = 7;
+  int32 retry_count = 8;
+  string sent_at = 9;
+  string created_at = 10;
+}

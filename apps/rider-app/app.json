@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "Rider App",
+    "slug": "rider-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1E3A8A"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.shravankirana.rider",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "We need your location to show your position on the map and track deliveries.",
+        "NSLocationAlwaysUsageDescription": "We need your location to track deliveries even when the app is in the background.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "We need your location to track deliveries and show your position on the map."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1E3A8A"
+      },
+      "package": "com.shravankirana.rider",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "CALL_PHONE"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow ShravanKirana to use your location for delivery tracking."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "rider-app-project"
+      }
+    }
+  }
+}

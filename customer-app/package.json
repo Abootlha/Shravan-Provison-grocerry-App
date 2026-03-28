@@ -1,0 +1,35 @@
+{
+  "name": "shravankirana-customer",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@react-navigation/native": "^7.0.0",
+    "@react-navigation/native-stack": "^7.0.0",
+    "@reduxjs/toolkit": "^2.2.0",
+    "axios": "^1.7.0",
+    "expo": "~52.0.0",
+    "expo-asset": "^55.0.11-canary-20260328-bdc6273",
+    "expo-constants": "^55.0.10-canary-20260328-bdc6273",
+    "expo-font": "^55.0.5-canary-20260328-bdc6273",
+    "expo-linking": "^55.0.10-canary-20260328-bdc6273",
+    "expo-router": "~4.0.0",
+    "expo-splash-screen": "^55.0.14-canary-20260328-bdc6273",
+    "expo-status-bar": "~2.0.0",
+    "react": "18.3.1",
+    "react-native": "0.76.5",
+    "react-redux": "^9.1.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.0",
+    "@types/react": "~18.3.0",
+    "typescript": "^5.3.0"
+  }
+}

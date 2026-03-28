@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "ShravanKirana Customer",
+    "slug": "shravankirana-customer",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F8CB46"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.shravankirana.customer"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F8CB46"
+      },
+      "package": "com.shravankirana.customer"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "shravankirana"
+  }
+}
