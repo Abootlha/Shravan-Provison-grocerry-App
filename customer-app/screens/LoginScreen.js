@@ -110,10 +110,10 @@ const LoginScreen = ({ navigation }) => {
         ]).start();
 
         try {
-            const response = await api.post(ENDPOINTS.SEND_OTP, { phone: phoneNumber });
+            const response = await api.post(ENDPOINTS.SEND_OTP, { phone: `+91${phoneNumber}` });
 
             if (response.data.message) {
-                navigation.navigate('OTP', { phoneNumber });
+                navigation.navigate('OTP', { phoneNumber: `+91${phoneNumber}` });
             }
         } catch (error) {
             const errorMessage = error.response?.data?.message || 'Failed to send OTP. Please try again.';
