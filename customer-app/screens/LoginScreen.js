@@ -9,17 +9,15 @@ import {
     KeyboardAvoidingView,
     Platform,
     Animated,
-    Dimensions,
     Alert,
     ActivityIndicator,
+    ScrollView,
+    useWindowDimensions,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { AuthService } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
 
-const { width, height } = Dimensions.get('window');
-
-// Bold, distinctive palette - warm earth tones with sharp accents
 const PALETTE = {
     charcoal: '#1C1917',
     warmBlack: '#0C0A09',
@@ -33,12 +31,12 @@ const PALETTE = {
 
 const LoginScreen = ({ navigation }) => {
     const { t } = useTranslation();
+    const { width, height } = useWindowDimensions();
     const [phoneNumber, setPhoneNumber] = useState('');
     const [isValid, setIsValid] = useState(false);
     const [isFocused, setIsFocused] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
 
-    // Staggered entrance animations
     const bgAnim = useRef(new Animated.Value(0)).current;
     const decorAnim = useRef(new Animated.Value(0)).current;
     const logoAnim = useRef(new Animated.Value(0)).current;
@@ -46,6 +44,13 @@ const LoginScreen = ({ navigation }) => {
     const inputAnim = useRef(new Animated.Value(0)).current;
     const buttonAnim = useRef(new Animated.Value(0)).current;
     const buttonScale = useRef(new Animated.Value(1)).current;
+
+    const isCompact = width < 420;
+    const horizontalPadding = Math.max(Math.min(width * 0.07, 28), 20);
+    const topPadding = Platform.OS === 'web' ? 28 : Math.max(height * 0.06, 24);
+    const bottomPadding = Platform.OS === 'web' ? 16 : Math.max(height * 0.03, 20);
+    const circleSizeLarge = Math.min(width * 1.15, 520);
+    const circleSizeSmall = Math.min(width * 0.9, 420);
 
     useEffect(() => {
         Animated.stagger(100, [
@@ -80,7 +85,7 @@ const LoginScreen = ({ navigation }) => {
                 useNativeDriver: true,
             }),
         ]).start();
-    }, []);
+    }, [bgAnim, decorAnim, logoAnim, titleAnim, inputAnim, buttonAnim]);
 
     const handlePhoneChange = (text) => {
         const cleaned = text.replace(/[^0-9]/g, '');
@@ -122,15 +127,25 @@ const LoginScreen = ({ navigation }) => {
         }
     };
 
+    const titleSize = isCompact ? 30 : 34;
+    const subtitleMargin = isCompact ? 22 : 30;
+    const logoBoxSize = isCompact ? 52 : 56;
+    const iconSize = isCompact ? 28 : 34;
+
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
-            {/* Decorative background elements */}
             <Animated.View
                 style={[
-                    styles.decorCircle1,
+                    styles.decorCircle,
                     {
+                        top: -circleSizeLarge * 0.28,
+                        right: -circleSizeLarge * 0.42,
+                        width: circleSizeLarge,
+                        height: circleSizeLarge,
+                        borderRadius: circleSizeLarge / 2,
+                        backgroundColor: PALETTE.terracotta,
                         opacity: decorAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.06] }),
                         transform: [{ scale: decorAnim }],
                     },
@@ -138,8 +153,14 @@ const LoginScreen = ({ navigation }) => {
             />
             <Animated.View
                 style={[
-                    styles.decorCircle2,
+                    styles.decorCircle,
                     {
+                        bottom: Math.max(height * 0.12, 72),
+                        left: -circleSizeSmall * 0.45,
+                        width: circleSizeSmall,
+                        height: circleSizeSmall,
+                        borderRadius: circleSizeSmall / 2,
+                        backgroundColor: PALETTE.amber,
                         opacity: decorAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.04] }),
                         transform: [{ scale: decorAnim }],
                     },
@@ -147,172 +168,207 @@ const LoginScreen = ({ navigation }) => {
             />
 
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 style={styles.keyboardView}
             >
-                {/* Back Button */}
-                <Animated.View style={[styles.header, { opacity: bgAnim }]}>
-                    <TouchableOpacity
-                        style={styles.backButton}
-                        onPress={() => navigation.goBack()}
-                    >
-                        <MaterialCommunityIcons name="arrow-left" size={22} color={PALETTE.sand} />
-                    </TouchableOpacity>
-                </Animated.View>
-
-                {/* Content */}
-                <View style={styles.content}>
-                    {/* Logo */}
-                    <Animated.View
-                        style={[
-                            styles.logoContainer,
-                            {
-                                opacity: logoAnim,
-                                transform: [{
-                                    translateY: logoAnim.interpolate({
-                                        inputRange: [0, 1],
-                                        outputRange: [30, 0],
-                                    }),
-                                }],
-                            },
-                        ]}
-                    >
-                        <View style={styles.logoWrapper}>
-                            <MaterialCommunityIcons
-                                name="store"
-                                size={Math.min(width * 0.09, 36)}
-                                color={PALETTE.charcoal}
-                            />
-                        </View>
-                        <View style={styles.brandContainer}>
-                            <Text style={styles.brandName}>Shravan</Text>
-                            <Text style={styles.brandAccent}>Provision Store</Text>
-                        </View>
+                <ScrollView
+                    contentContainerStyle={[
+                        styles.scrollContent,
+                        {
+                            paddingTop: topPadding,
+                            paddingBottom: bottomPadding,
+                            paddingHorizontal: horizontalPadding,
+                        },
+                    ]}
+                    keyboardShouldPersistTaps="handled"
+                    bounces={false}
+                    showsVerticalScrollIndicator={false}
+                >
+                    <Animated.View style={[styles.header, { opacity: bgAnim }]}>
+                        <TouchableOpacity
+                            style={styles.backButton}
+                            onPress={() => (
+                                navigation.canGoBack()
+                                    ? navigation.goBack()
+                                    : navigation.navigate('Onboarding')
+                            )}
+                        >
+                            <MaterialCommunityIcons name="arrow-left" size={22} color={PALETTE.sand} />
+                        </TouchableOpacity>
                     </Animated.View>
 
-                    {/* Title */}
-                    <Animated.View
-                        style={{
-                            opacity: titleAnim,
-                            transform: [{
-                                translateY: titleAnim.interpolate({
-                                    inputRange: [0, 1],
-                                    outputRange: [20, 0],
-                                }),
-                            }],
-                        }}
-                    >
-                        <Text style={styles.title}>{t('whatsYourNumber')}</Text>
-                        <Text style={styles.subtitle}>
-                            {t('verifyText')}
-                        </Text>
-                    </Animated.View>
+                    <View style={styles.body}>
+                        <Animated.View
+                            style={[
+                                styles.logoContainer,
+                                {
+                                    opacity: logoAnim,
+                                    transform: [{
+                                        translateY: logoAnim.interpolate({
+                                            inputRange: [0, 1],
+                                            outputRange: [30, 0],
+                                        }),
+                                    }],
+                                },
+                            ]}
+                        >
+                            <View style={[styles.logoWrapper, { width: logoBoxSize, height: logoBoxSize }]}>
+                                <MaterialCommunityIcons
+                                    name="store"
+                                    size={iconSize}
+                                    color={PALETTE.charcoal}
+                                />
+                            </View>
+                            <View style={styles.brandContainer}>
+                                <Text style={[styles.brandName, { fontSize: isCompact ? 20 : 22 }]}>Shravan</Text>
+                                <Text style={[styles.brandAccent, { fontSize: isCompact ? 13 : 14 }]}>
+                                    Provision Store
+                                </Text>
+                            </View>
+                        </Animated.View>
 
-                    {/* Phone Input */}
-                    <Animated.View
-                        style={[
-                            styles.inputWrapper,
-                            {
-                                opacity: inputAnim,
+                        <Animated.View
+                            style={{
+                                opacity: titleAnim,
                                 transform: [{
-                                    translateY: inputAnim.interpolate({
+                                    translateY: titleAnim.interpolate({
                                         inputRange: [0, 1],
                                         outputRange: [20, 0],
                                     }),
                                 }],
+                            }}
+                        >
+                            <Text style={[styles.title, { fontSize: titleSize }]}>{t('whatsYourNumber')}</Text>
+                            <Text style={[styles.subtitle, { marginBottom: subtitleMargin }]}>
+                                {t('verifyText')}
+                            </Text>
+                        </Animated.View>
+
+                        <Animated.View
+                            style={[
+                                styles.inputWrapper,
+                                {
+                                    opacity: inputAnim,
+                                    transform: [{
+                                        translateY: inputAnim.interpolate({
+                                            inputRange: [0, 1],
+                                            outputRange: [20, 0],
+                                        }),
+                                    }],
+                                },
+                            ]}
+                        >
+                            <View
+                                style={[
+                                    styles.inputContainer,
+                                    {
+                                        minHeight: isCompact ? 58 : 64,
+                                        paddingHorizontal: isCompact ? 16 : 18,
+                                    },
+                                    isFocused && styles.inputContainerFocused,
+                                ]}
+                            >
+                                <View style={styles.countryCode}>
+                                    <Text style={styles.flag}>🇮🇳</Text>
+                                    <Text style={styles.code}>+91</Text>
+                                </View>
+                                <View style={[styles.divider, { marginHorizontal: isCompact ? 14 : 16 }]} />
+                                <TextInput
+                                    style={[
+                                        styles.phoneInput,
+                                        {
+                                            fontSize: isCompact ? 18 : 20,
+                                            letterSpacing: isCompact ? 0.5 : 1,
+                                        },
+                                    ]}
+                                    placeholder={t('digitNumber')}
+                                    placeholderTextColor={PALETTE.warmGray}
+                                    value={phoneNumber}
+                                    onChangeText={handlePhoneChange}
+                                    keyboardType="phone-pad"
+                                    maxLength={10}
+                                    onFocus={() => setIsFocused(true)}
+                                    onBlur={() => setIsFocused(false)}
+                                    autoFocus
+                                />
+                                {phoneNumber.length > 0 && (
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            setPhoneNumber('');
+                                            setIsValid(false);
+                                        }}
+                                        style={styles.clearButton}
+                                    >
+                                        <MaterialCommunityIcons
+                                            name="close-circle"
+                                            size={20}
+                                            color={PALETTE.warmGray}
+                                        />
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+
+                            <Text style={styles.terms}>
+                                {t('byContinu')}{' '}
+                                <Text style={styles.termsLink}>{t('terms')}</Text>
+                                {' '}{t('and')}{' '}
+                                <Text style={styles.termsLink}>{t('privacyPolicy')}</Text>
+                            </Text>
+                        </Animated.View>
+                    </View>
+
+                    <Animated.View
+                        style={[
+                            styles.footer,
+                            {
+                                opacity: buttonAnim,
+                                transform: [
+                                    { scale: buttonScale },
+                                    {
+                                        translateY: buttonAnim.interpolate({
+                                            inputRange: [0, 1],
+                                            outputRange: [30, 0],
+                                        }),
+                                    },
+                                ],
                             },
                         ]}
                     >
-                        <View style={[
-                            styles.inputContainer,
-                            isFocused && styles.inputContainerFocused,
-                        ]}>
-                            <View style={styles.countryCode}>
-                                <Text style={styles.flag}>🇮🇳</Text>
-                                <Text style={styles.code}>+91</Text>
-                            </View>
-                            <View style={styles.divider} />
-                            <TextInput
-                                style={styles.phoneInput}
-                                placeholder={t('digitNumber')}
-                                placeholderTextColor={PALETTE.warmGray}
-                                value={phoneNumber}
-                                onChangeText={handlePhoneChange}
-                                keyboardType="phone-pad"
-                                maxLength={10}
-                                onFocus={() => setIsFocused(true)}
-                                onBlur={() => setIsFocused(false)}
-                                autoFocus
-                            />
-                            {phoneNumber.length > 0 && (
-                                <TouchableOpacity
-                                    onPress={() => setPhoneNumber('')}
-                                    style={styles.clearButton}
-                                >
-                                    <MaterialCommunityIcons
-                                        name="close-circle"
-                                        size={20}
-                                        color={PALETTE.warmGray}
+                        <TouchableOpacity
+                            style={[
+                                styles.continueButton,
+                                isValid && styles.continueButtonActive,
+                            ]}
+                            onPress={handleContinue}
+                            disabled={!isValid || isLoading}
+                            activeOpacity={0.85}
+                        >
+                            <Text style={[
+                                styles.continueText,
+                                isValid && styles.continueTextActive,
+                            ]}>
+                                {t('continue')}
+                            </Text>
+                            <View style={[
+                                styles.arrowWrapper,
+                                isValid && styles.arrowWrapperActive,
+                            ]}>
+                                {isLoading ? (
+                                    <ActivityIndicator
+                                        size="small"
+                                        color={isValid ? PALETTE.charcoal : PALETTE.warmGray}
                                     />
-                                </TouchableOpacity>
-                            )}
-                        </View>
-
-                        {/* Terms */}
-                        <Text style={styles.terms}>
-                            {t('byContinu')}{' '}
-                            <Text style={styles.termsLink}>{t('terms')}</Text>
-                            {' '}{t('and')}{' '}
-                            <Text style={styles.termsLink}>{t('privacyPolicy')}</Text>
-                        </Text>
+                                ) : (
+                                    <MaterialCommunityIcons
+                                        name="arrow-right"
+                                        size={18}
+                                        color={isValid ? PALETTE.charcoal : PALETTE.warmGray}
+                                    />
+                                )}
+                            </View>
+                        </TouchableOpacity>
                     </Animated.View>
-                </View>
-
-                {/* Continue Button */}
-                <Animated.View
-                    style={[
-                        styles.footer,
-                        {
-                            opacity: buttonAnim,
-                            transform: [
-                                { scale: buttonScale },
-                                {
-                                    translateY: buttonAnim.interpolate({
-                                        inputRange: [0, 1],
-                                        outputRange: [30, 0],
-                                    }),
-                                },
-                            ],
-                        },
-                    ]}
-                >
-                    <TouchableOpacity
-                        style={[
-                            styles.continueButton,
-                            isValid && styles.continueButtonActive,
-                        ]}
-                        onPress={handleContinue}
-                        disabled={!isValid}
-                        activeOpacity={0.85}
-                    >
-                        <Text style={[
-                            styles.continueText,
-                            isValid && styles.continueTextActive,
-                        ]}>
-                            {t('continue')}
-                        </Text>
-                        <View style={[
-                            styles.arrowWrapper,
-                            isValid && styles.arrowWrapperActive,
-                        ]}>
-                            <MaterialCommunityIcons
-                                name="arrow-right"
-                                size={18}
-                                color={isValid ? PALETTE.charcoal : PALETTE.warmGray}
-                            />
-                        </View>
-                    </TouchableOpacity>
-                </Animated.View>
+                </ScrollView>
             </KeyboardAvoidingView>
         </View>
     );
@@ -324,35 +380,22 @@ const styles = StyleSheet.create({
         backgroundColor: PALETTE.warmBlack,
         overflow: 'hidden',
     },
-    decorCircle1: {
+    decorCircle: {
         position: 'absolute',
-        top: -height * 0.15,
-        right: -width * 0.3,
-        width: width * 0.8,
-        height: width * 0.8,
-        borderRadius: width * 0.4,
-        backgroundColor: PALETTE.terracotta,
-    },
-    decorCircle2: {
-        position: 'absolute',
-        bottom: height * 0.2,
-        left: -width * 0.4,
-        width: width * 0.7,
-        height: width * 0.7,
-        borderRadius: width * 0.35,
-        backgroundColor: PALETTE.amber,
     },
     keyboardView: {
         flex: 1,
     },
+    scrollContent: {
+        flexGrow: 1,
+        justifyContent: 'space-between',
+    },
     header: {
-        paddingHorizontal: width * 0.05,
-        paddingTop: height * 0.07,
-        paddingBottom: height * 0.02,
+        paddingBottom: 8,
     },
     backButton: {
-        width: Math.min(width * 0.12, 44),
-        height: Math.min(width * 0.12, 44),
+        width: 44,
+        height: 44,
         borderRadius: 14,
         backgroundColor: PALETTE.coffee,
         alignItems: 'center',
@@ -360,66 +403,64 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.08)',
     },
-    content: {
-        flex: 1,
-        paddingHorizontal: width * 0.07,
+    body: {
+        width: '100%',
+        maxWidth: 480,
+        alignSelf: 'center',
+        flexGrow: 1,
         justifyContent: 'center',
     },
     logoContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: height * 0.04,
-        gap: width * 0.035,
+        gap: 14,
+        marginBottom: 16,
     },
     logoWrapper: {
-        width: Math.min(width * 0.14, 56),
-        height: Math.min(width * 0.14, 56),
         borderRadius: 16,
         backgroundColor: PALETTE.amber,
         alignItems: 'center',
         justifyContent: 'center',
+        flexShrink: 0,
     },
     brandContainer: {
         flexDirection: 'column',
+        flexShrink: 1,
     },
     brandName: {
-        fontSize: Math.min(width * 0.055, 22),
         fontWeight: '800',
         color: PALETTE.cream,
         letterSpacing: -0.5,
     },
     brandAccent: {
-        fontSize: Math.min(width * 0.035, 14),
         fontWeight: '600',
         color: PALETTE.amber,
         letterSpacing: 0.5,
         marginTop: -2,
     },
     title: {
-        fontSize: Math.min(width * 0.075, 30),
         fontWeight: '900',
         color: PALETTE.cream,
-        marginBottom: height * 0.012,
+        marginBottom: 10,
         letterSpacing: -1,
     },
     subtitle: {
-        fontSize: Math.min(width * 0.038, 15),
+        fontSize: 15,
         color: PALETTE.warmGray,
-        marginBottom: height * 0.035,
         lineHeight: 22,
+        maxWidth: 420,
     },
     inputWrapper: {
-        gap: height * 0.025,
+        gap: 18,
     },
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: PALETTE.coffee,
         borderRadius: 16,
-        paddingHorizontal: width * 0.045,
-        height: Math.min(height * 0.075, 64),
         borderWidth: 2,
         borderColor: 'rgba(255,255,255,0.06)',
+        width: '100%',
     },
     inputContainerFocused: {
         borderColor: PALETTE.terracotta,
@@ -427,36 +468,38 @@ const styles = StyleSheet.create({
     countryCode: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: width * 0.02,
+        gap: 8,
+        flexShrink: 0,
     },
     flag: {
-        fontSize: Math.min(width * 0.05, 20),
+        fontSize: 20,
     },
     code: {
-        fontSize: Math.min(width * 0.043, 17),
+        fontSize: 17,
         fontWeight: '700',
         color: PALETTE.sand,
     },
     divider: {
         width: 1,
-        height: height * 0.035,
+        height: 28,
         backgroundColor: 'rgba(255,255,255,0.1)',
-        marginHorizontal: width * 0.04,
+        flexShrink: 0,
     },
     phoneInput: {
         flex: 1,
-        fontSize: Math.min(width * 0.045, 18),
+        minWidth: 0,
         fontWeight: '600',
         color: PALETTE.cream,
-        letterSpacing: 2,
+        paddingVertical: 0,
     },
     clearButton: {
         padding: 6,
+        marginLeft: 8,
     },
     terms: {
-        fontSize: Math.min(width * 0.03, 12),
+        fontSize: 12,
         color: PALETTE.warmGray,
-        textAlign: 'center',
+        textAlign: 'left',
         lineHeight: 18,
     },
     termsLink: {
@@ -464,18 +507,21 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     footer: {
-        paddingHorizontal: width * 0.07,
-        paddingBottom: height * 0.05,
+        width: '100%',
+        maxWidth: 480,
+        alignSelf: 'center',
+        paddingTop: 24,
     },
     continueButton: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: PALETTE.coffee,
-        paddingVertical: height * 0.022,
-        paddingHorizontal: width * 0.02,
+        minHeight: 60,
+        paddingVertical: 14,
+        paddingHorizontal: 16,
         borderRadius: 16,
-        gap: width * 0.03,
+        gap: 12,
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.06)',
     },
@@ -484,7 +530,7 @@ const styles = StyleSheet.create({
         borderColor: PALETTE.terracotta,
     },
     continueText: {
-        fontSize: Math.min(width * 0.043, 17),
+        fontSize: 17,
         fontWeight: '800',
         color: PALETTE.warmGray,
         letterSpacing: 0.5,
@@ -493,8 +539,8 @@ const styles = StyleSheet.create({
         color: PALETTE.cream,
     },
     arrowWrapper: {
-        width: Math.min(width * 0.08, 32),
-        height: Math.min(width * 0.08, 32),
+        width: 32,
+        height: 32,
         borderRadius: 10,
         backgroundColor: 'rgba(255,255,255,0.08)',
         alignItems: 'center',

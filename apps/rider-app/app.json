@@ -43,6 +43,7 @@
       ]
     ],
     "extra": {
+      "LOCAL_IP": "192.168.31.166",
       "eas": {
         "projectId": "rider-app-project"
       }

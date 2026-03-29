@@ -1,53 +1,70 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import MapView, { Marker } from 'react-native-maps';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants';
-import { reverseGeocode, formatAddress } from '../services/locationService';
-import { openInMapMyIndia } from '../services/mapService';
+
+const DEFAULT_REGION = {
+    latitude: 28.6139,
+    longitude: 77.2090,
+    latitudeDelta: 0.01,
+    longitudeDelta: 0.01,
+};
 
 const MapComponent = ({
+    region,
     selectedLocation,
     addressDetails,
     isLoading,
-    onCurrentLocationPress
+    onMapPress,
+    onRegionChangeComplete,
+    onCurrentLocationPress,
 }) => {
-
-    const handleOpenInMaps = async () => {
-        if (!selectedLocation) return;
-
-        try {
-            const lat = selectedLocation.latitude;
-            const lng = selectedLocation.longitude;
-            const url = `https://maps.mapmyindia.com/explore/#/place?q=${lat},${lng}&zoom=17&center=${lng},${lat}`;
-            await Linking.openURL(url);
-        } catch (error) {
-            console.error('Error opening maps:', error);
-        }
+    const activeRegion = region || {
+        ...DEFAULT_REGION,
+        ...(selectedLocation
+            ? {
+                latitude: selectedLocation.latitude,
+                longitude: selectedLocation.longitude,
+            }
+            : {}),
     };
 
     return (
-        <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-            <View style={styles.mapPlaceholder}>
-                <View style={styles.mapBackground}>
-                    <View style={styles.gridLine1} />
-                    <View style={styles.gridLine2} />
-                    <View style={styles.gridLine3} />
-                    <View style={styles.gridLine4} />
-                </View>
-                <View style={styles.pinContainer}>
-                    <MaterialCommunityIcons name="map-marker" size={50} color="#E91E63" />
-                    <View style={styles.pinShadow} />
-                </View>
+        <View style={styles.container}>
+            <View style={styles.mapShell}>
+                <MapView
+                    style={styles.map}
+                    initialRegion={activeRegion}
+                    region={activeRegion}
+                    onPress={onMapPress}
+                    onRegionChangeComplete={onRegionChangeComplete}
+                    showsUserLocation
+                    showsMyLocationButton={false}
+                >
+                    {selectedLocation && (
+                        <Marker
+                            coordinate={{
+                                latitude: selectedLocation.latitude,
+                                longitude: selectedLocation.longitude,
+                            }}
+                            title={addressDetails?.address || 'Selected Location'}
+                            description={[addressDetails?.city, addressDetails?.pincode].filter(Boolean).join(', ')}
+                        />
+                    )}
+                </MapView>
 
-                {selectedLocation && (
-                    <TouchableOpacity
-                        style={styles.openMapButton}
-                        onPress={handleOpenInMaps}
-                    >
-                        <MaterialCommunityIcons name="open-in-new" size={16} color="#E91E63" />
-                        <Text style={styles.openMapText}>Open in MapMyIndia</Text>
-                    </TouchableOpacity>
-                )}
+                <TouchableOpacity
+                    style={styles.gpsFloatingButton}
+                    onPress={onCurrentLocationPress}
+                    disabled={isLoading}
+                >
+                    {isLoading ? (
+                        <ActivityIndicator size="small" color={COLORS.white} />
+                    ) : (
+                        <MaterialCommunityIcons name="crosshairs-gps" size={20} color={COLORS.white} />
+                    )}
+                </TouchableOpacity>
             </View>
 
             {selectedLocation ? (
@@ -59,7 +76,7 @@ const MapComponent = ({
                         <Text style={styles.locationTitle}>
                             {addressDetails?.formattedAddress || addressDetails?.address || 'Location Selected'}
                         </Text>
-                        {addressDetails?.city && (
+                        {!!addressDetails?.city && (
                             <Text style={styles.locationSubtitle}>
                                 {[addressDetails.city, addressDetails.pincode].filter(Boolean).join(', ')}
                             </Text>
@@ -72,32 +89,13 @@ const MapComponent = ({
             ) : (
                 <View style={styles.noLocationCard}>
                     <MaterialCommunityIcons name="map-marker-question" size={32} color={COLORS.textSecondary} />
-                    <Text style={styles.noLocationText}>No location selected</Text>
+                    <Text style={styles.noLocationText}>Tap the map or use current location</Text>
                     <Text style={styles.noLocationHint}>
-                        Use the button below to detect your current location
+                        Your selected delivery pin will appear here.
                     </Text>
                 </View>
             )}
-
-            <TouchableOpacity
-                style={styles.gpsButton}
-                onPress={onCurrentLocationPress}
-                disabled={isLoading}
-            >
-                {isLoading ? (
-                    <ActivityIndicator size="small" color="#E91E63" />
-                ) : (
-                    <>
-                        <MaterialCommunityIcons name="crosshairs-gps" size={22} color="#E91E63" />
-                        <Text style={styles.gpsButtonText}>Use Current Location</Text>
-                    </>
-                )}
-            </TouchableOpacity>
-
-            {isLoading && (
-                <Text style={styles.loadingText}>Detecting your location...</Text>
-            )}
-        </ScrollView>
+        </View>
     );
 };
 
@@ -106,94 +104,49 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#FAFAFA',
     },
-    mapPlaceholder: {
-        height: 200,
-        backgroundColor: '#E8F5E9',
+    mapShell: {
+        height: 280,
         margin: 16,
-        borderRadius: 16,
+        borderRadius: 18,
         overflow: 'hidden',
+        position: 'relative',
+        backgroundColor: '#EDEDED',
+    },
+    map: {
+        width: '100%',
+        height: '100%',
+    },
+    gpsFloatingButton: {
+        position: 'absolute',
+        right: 16,
+        bottom: 16,
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#E91E63',
         alignItems: 'center',
         justifyContent: 'center',
-        position: 'relative',
-    },
-    mapBackground: {
-        ...StyleSheet.absoluteFillObject,
-        opacity: 0.3,
-    },
-    gridLine1: {
-        position: 'absolute',
-        top: '30%',
-        left: 0,
-        right: 0,
-        height: 2,
-        backgroundColor: '#81C784',
-    },
-    gridLine2: {
-        position: 'absolute',
-        top: '60%',
-        left: 0,
-        right: 0,
-        height: 2,
-        backgroundColor: '#81C784',
-    },
-    gridLine3: {
-        position: 'absolute',
-        left: '30%',
-        top: 0,
-        bottom: 0,
-        width: 2,
-        backgroundColor: '#81C784',
-    },
-    gridLine4: {
-        position: 'absolute',
-        left: '70%',
-        top: 0,
-        bottom: 0,
-        width: 2,
-        backgroundColor: '#81C784',
-    },
-    pinContainer: {
-        alignItems: 'center',
-    },
-    pinShadow: {
-        width: 20,
-        height: 8,
-        backgroundColor: 'rgba(0,0,0,0.2)',
-        borderRadius: 10,
-        marginTop: -5,
-    },
-    openMapButton: {
-        position: 'absolute',
-        bottom: 10,
-        right: 10,
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(255,255,255,0.9)',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 16,
-        gap: 4,
-    },
-    openMapText: {
-        fontSize: 11,
-        color: '#E91E63',
-        fontWeight: '600',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.18,
+        shadowRadius: 20,
+        elevation: 8,
     },
     locationCard: {
         flexDirection: 'row',
         alignItems: 'flex-start',
-        margin: 16,
-        marginTop: 0,
+        marginHorizontal: 16,
+        marginBottom: 16,
         padding: 16,
         backgroundColor: '#FFFFFF',
-        borderRadius: 12,
+        borderRadius: 14,
         borderWidth: 1,
         borderColor: '#FCE4EC',
-        elevation: 2,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        shadowRadius: 3,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.08,
+        shadowRadius: 18,
+        elevation: 4,
     },
     locationIconContainer: {
         width: 44,
@@ -224,8 +177,8 @@ const styles = StyleSheet.create({
     },
     noLocationCard: {
         alignItems: 'center',
-        margin: 16,
-        marginTop: 0,
+        marginHorizontal: 16,
+        marginBottom: 16,
         padding: 24,
         backgroundColor: '#FFFFFF',
         borderRadius: 12,
@@ -244,27 +197,6 @@ const styles = StyleSheet.create({
         color: '#999',
         marginTop: 4,
         textAlign: 'center',
-    },
-    gpsButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginHorizontal: 16,
-        padding: 16,
-        backgroundColor: '#FCE4EC',
-        borderRadius: 12,
-        gap: 10,
-    },
-    gpsButtonText: {
-        fontSize: 15,
-        fontWeight: '600',
-        color: '#E91E63',
-    },
-    loadingText: {
-        fontSize: 13,
-        color: '#666',
-        textAlign: 'center',
-        marginTop: 12,
     },
 });
 

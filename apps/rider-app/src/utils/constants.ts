@@ -1,18 +1,39 @@
-export const AUTH_SERVICE_URL = __DEV__
-  ? 'http://localhost:8001'
-  : 'https://api.shravankirana.com';
+import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 
-export const RIDER_SERVICE_URL = __DEV__
-  ? 'http://localhost:8003'
-  : 'https://api.shravankirana.com';
+const LOCAL_IP = Constants.expoConfig?.extra?.LOCAL_IP || '192.168.31.166';
 
-export const ORDER_SERVICE_URL = __DEV__
-  ? 'http://localhost:8004'
-  : 'https://api.shravankirana.com';
+const getBaseUrl = () => {
+  if (!__DEV__) {
+    return 'https://api.shravankirana.com/api/v1';
+  }
 
-export const SOCKET_URL = __DEV__
-  ? 'http://localhost:8010'
-  : 'https://api.shravankirana.com';
+  if (Platform.OS === 'web') {
+    return 'http://localhost:3000/api/v1';
+  }
+
+  return `http://${LOCAL_IP}:3000/api/v1`;
+};
+
+const getSocketUrl = () => {
+  if (!__DEV__) {
+    return 'https://api.shravankirana.com/tracking';
+  }
+
+  if (Platform.OS === 'web') {
+    return 'http://localhost:3000/tracking';
+  }
+
+  return `http://${LOCAL_IP}:3000/tracking`;
+};
+
+export const AUTH_SERVICE_URL = getBaseUrl();
+
+export const RIDER_SERVICE_URL = getBaseUrl();
+
+export const ORDER_SERVICE_URL = getBaseUrl();
+
+export const SOCKET_URL = getSocketUrl();
 
 export const LOCATION_UPDATE_INTERVAL = 3000;
 export const LOCATION_UPDATE_THROTTLE = 3000;

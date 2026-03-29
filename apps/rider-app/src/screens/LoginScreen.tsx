@@ -27,9 +27,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
       return;
     }
 
-    const result = await dispatch(sendOtp(`+91${cleanPhone}`));
+    const result = await dispatch(sendOtp(cleanPhone));
     if (sendOtp.fulfilled.match(result)) {
-      navigation.navigate('OTP', { phone: `+91${cleanPhone}` });
+      navigation.navigate('OTP', { phone: cleanPhone });
     }
   };
 

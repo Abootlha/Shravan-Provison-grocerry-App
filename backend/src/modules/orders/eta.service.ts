@@ -2,7 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Client, TravelMode, UnitSystem } from '@googlemaps/google-maps-services-js';
+import axios from 'axios';
 import { RedisService } from '../../common/utils/redis.service';
 import { Order, OrderDocument, OrderStatus } from './schemas/order.schema';
 import { User, UserDocument, UserRole } from '../users/schemas/user.schema';
@@ -29,8 +29,9 @@ export interface ETAResult {
 @Injectable()
 export class ETAService {
   private readonly logger = new Logger(ETAService.name);
-  private readonly googleMapsClient: Client;
   private readonly ETA_CACHE_TTL = 120; // 2 minutes
+  private readonly mapplsApiKey: string;
+  private readonly directionsUrl = 'https://apis.mappls.com/advancedmaps/v1/route_adv/driving';
 
   constructor(
     private readonly configService: ConfigService,
@@ -38,12 +39,15 @@ export class ETAService {
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
   ) {
-    this.googleMapsClient = new Client({});
+    this.mapplsApiKey =
+      this.configService.get<string>('MAPMYINDIA_API_KEY') ||
+      this.configService.get<string>('MAPPLS_API_KEY') ||
+      '';
   }
 
   /**
-   * Calculate ETA from rider location to delivery address
-   * Uses Google Distance Matrix API with 2-minute caching
+   * Calculate ETA from rider location to delivery address.
+   * Uses Mappls directions with 2-minute caching.
    */
   async calculateETA(
     riderLocation: LocationDto,
@@ -70,14 +74,14 @@ export class ETAService {
       };
     }
 
-    // Call Distance Matrix API
     const origin = `${riderLocation.latitude},${riderLocation.longitude}`;
     const destination = `${deliveryAddress.latitude},${deliveryAddress.longitude}`;
 
     try {
-      const response = await this.callDistanceMatrixAPI(origin, destination);
-      const durationSeconds = this.parseETAFromResponse(response);
-      const distanceMeters = this.parseDistanceFromResponse(response);
+      const { durationSeconds, distanceMeters } = await this.callMapplsDirectionsAPI(
+        riderLocation,
+        deliveryAddress,
+      );
 
       // Cache the duration
       await this.setCachedETA(cacheKey, durationSeconds);
@@ -103,60 +107,44 @@ export class ETAService {
   }
 
   /**
-   * Call Google Distance Matrix API
+   * Call Mappls directions API
    */
-  private async callDistanceMatrixAPI(
-    origin: string,
-    destination: string,
-  ): Promise<any> {
-    const apiKey = this.configService.get<string>('GOOGLE_MAPS_API_KEY');
-    
-    if (!apiKey) {
-      throw new Error('GOOGLE_MAPS_API_KEY is not configured');
+  private async callMapplsDirectionsAPI(
+    riderLocation: LocationDto,
+    deliveryAddress: AddressDto,
+  ): Promise<{ durationSeconds: number; distanceMeters: number }> {
+    if (!this.mapplsApiKey) {
+      throw new Error('MAPMYINDIA_API_KEY is not configured');
     }
 
-    const response = await this.googleMapsClient.distancematrix({
-      params: {
-        origins: [origin],
-        destinations: [destination],
-        mode: TravelMode.driving,
-        units: UnitSystem.metric,
-        key: apiKey,
+    const response = await axios.get(this.directionsUrl, {
+      headers: {
+        Authorization: this.mapplsApiKey,
       },
+      params: {
+        lex_lat: riderLocation.latitude,
+        lex_lng: riderLocation.longitude,
+        dest_lat: deliveryAddress.latitude,
+        dest_lng: deliveryAddress.longitude,
+        alternatives: false,
+        geometries: 'polyline',
+        overview: 'full',
+        steps: false,
+      },
+      timeout: 10000,
     });
 
-    if (response.data.status !== 'OK') {
-      throw new Error(`Distance Matrix API error: ${response.data.status}`);
+    const route = response.data?.route?.[0];
+    const leg = route?.legs?.[0];
+
+    if (!route || !leg) {
+      throw new Error('Mappls directions response did not contain a route');
     }
 
-    const element = response.data.rows[0]?.elements[0];
-    if (!element || element.status !== 'OK') {
-      throw new Error(`No route found: ${element?.status || 'UNKNOWN'}`);
-    }
-
-    return response.data;
-  }
-
-  /**
-   * Parse duration in seconds from Distance Matrix API response
-   */
-  private parseETAFromResponse(response: any): number {
-    const element = response.rows[0]?.elements[0];
-    if (!element || !element.duration) {
-      throw new Error('Invalid Distance Matrix API response: missing duration');
-    }
-    return element.duration.value; // Duration in seconds
-  }
-
-  /**
-   * Parse distance in meters from Distance Matrix API response
-   */
-  private parseDistanceFromResponse(response: any): number {
-    const element = response.rows[0]?.elements[0];
-    if (!element || !element.distance) {
-      throw new Error('Invalid Distance Matrix API response: missing distance');
-    }
-    return element.distance.value; // Distance in meters
+    return {
+      durationSeconds: leg.duration || route.duration || 0,
+      distanceMeters: leg.distance || route.distance || 0,
+    };
   }
 
   /**

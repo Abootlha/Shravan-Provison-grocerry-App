@@ -1,7 +1,7 @@
 {
   "name": "shravankirana-customer",
   "version": "1.0.0",
-  "main": "expo-router/entry",
+  "main": "index.js",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -11,21 +11,29 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@expo/vector-icons": "~14.0.4",
+    "@react-native-async-storage/async-storage": "^1.23.1",
+    "@react-navigation/bottom-tabs": "^7.15.9",
     "@react-navigation/native": "^7.0.0",
     "@react-navigation/native-stack": "^7.0.0",
     "@reduxjs/toolkit": "^2.2.0",
     "axios": "^1.7.0",
     "expo": "~52.0.0",
-    "expo-asset": "^55.0.11-canary-20260328-bdc6273",
-    "expo-constants": "^55.0.10-canary-20260328-bdc6273",
-    "expo-font": "^55.0.5-canary-20260328-bdc6273",
-    "expo-linking": "^55.0.10-canary-20260328-bdc6273",
+    "expo-asset": "~11.0.5",
+    "expo-constants": "~17.0.8",
+    "expo-font": "~13.0.4",
+    "expo-linking": "~7.0.5",
+    "expo-location": "~18.0.10",
     "expo-router": "~4.0.0",
-    "expo-splash-screen": "^55.0.14-canary-20260328-bdc6273",
+    "expo-splash-screen": "~0.29.24",
     "expo-status-bar": "~2.0.0",
     "react": "18.3.1",
-    "react-native": "0.76.5",
-    "react-redux": "^9.1.0"
+    "react-dom": "18.3.1",
+    "react-native": "0.76.9",
+    "react-native-maps": "1.18.0",
+    "react-native-web": "~0.19.13",
+    "react-redux": "^9.1.0",
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "@babel/core": "^7.25.0",

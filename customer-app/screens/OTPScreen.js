@@ -142,9 +142,12 @@ const OTPScreen = ({ navigation, route }) => {
 
         try {
             const response = await AuthService.verifyOtp(phoneNumber, otpCode);
-            const tokens = response.tokens || {};
+            const tokens = {
+                accessToken: response.accessToken || response.tokens?.accessToken || null,
+                refreshToken: response.refreshToken || response.tokens?.refreshToken || null,
+            };
             const user = {
-                id: response.userId || response.user?.id || phoneNumber,
+                id: response.user?.id || response.userId || phoneNumber,
                 name: response.user?.name || 'Customer',
                 phone: phoneNumber,
             };

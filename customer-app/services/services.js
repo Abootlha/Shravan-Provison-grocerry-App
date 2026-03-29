@@ -9,9 +9,11 @@ import {
 import { ENDPOINTS } from './config';
 
 const getCurrentUser = async () => {
-    const phone = globalThis?.__SHRAVAN_PHONE__;
-    const userId = globalThis?.__SHRAVAN_USER_ID__;
-    return { phone, userId };
+    const profile = await UserService.getProfile();
+    return {
+        phone: profile?.phone,
+        userId: profile?.id,
+    };
 };
 
 export const AuthService = {
@@ -38,7 +40,7 @@ export const ProductService = {
 
     getSubcategories: async ({ parentId }) => {
         const response = await productApi.get(ENDPOINTS.categories.SUBCATEGORIES(parentId));
-        return response.data.subcategories || [];
+        return response.data;
     },
 
     getProducts: async (params = {}) => {
@@ -111,20 +113,17 @@ export const OrderService = {
 
 export const UserService = {
     getProfile: async (userId) => {
-        if (!userId) {
-            return null;
-        }
-        const response = await userApi.get(ENDPOINTS.user.PROFILE(userId));
+        const response = await userApi.get(ENDPOINTS.user.PROFILE);
         return response.data;
     },
 
-    addAddress: async (userId, address) => {
-        const response = await userApi.post(ENDPOINTS.user.ADDRESSES(userId), address);
+    addAddress: async (address) => {
+        const response = await userApi.post(ENDPOINTS.user.ADDRESSES, address);
         return response.data;
     },
 
-    removeAddress: async (userId, index) => {
-        const response = await userApi.delete(ENDPOINTS.user.REMOVE_ADDRESS(userId, index));
+    removeAddress: async (_userId, index) => {
+        const response = await userApi.delete(ENDPOINTS.user.REMOVE_ADDRESS(index));
         return response.data;
     },
 };
@@ -135,12 +134,11 @@ export const SettingsService = {
     }),
 
     checkServiceability: async (latitude, longitude) => {
-        const response = await locationApi.get(ENDPOINTS.location.REVERSE_GEOCODE, {
-            params: { latitude, longitude },
-        });
+        const response = await locationApi.get('/settings/store');
+        const settings = response.data?.settings || response.data || {};
         return {
-            serviceable: Boolean(response.data),
-            location: response.data,
+            serviceable: settings.isOpen !== false,
+            location: { latitude, longitude, settings },
         };
     },
 };

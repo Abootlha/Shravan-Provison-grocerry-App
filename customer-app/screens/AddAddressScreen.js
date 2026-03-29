@@ -13,10 +13,12 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import { Platform } from 'react-native';
 import { useDispatch } from 'react-redux';
 import { COLORS, SHADOWS } from '../constants';
 import { setSelectedAddress, addSavedAddress } from '../store/slices/locationSlice';
 import { UserService, SettingsService } from '../services';
+import { geocodeAddress, reverseGeocode as mapplsReverseGeocode, searchPlaces } from '../services';
 import MapComponent from '../components/MapComponent';
 
 const { width, height } = Dimensions.get('window');
@@ -58,29 +60,48 @@ const AddAddressScreen = ({ navigation, route }) => {
     const getCurrentLocation = async () => {
         setIsLoading(true);
         try {
-            const { status } = await Location.requestForegroundPermissionsAsync();
-            if (status === 'granted') {
+            let latitude;
+            let longitude;
+
+            if (Platform.OS === 'web') {
+                const position = await new Promise((resolve, reject) => {
+                    if (!navigator?.geolocation) {
+                        reject(new Error('Geolocation is not available'));
+                        return;
+                    }
+
+                    navigator.geolocation.getCurrentPosition(resolve, reject, {
+                        enableHighAccuracy: true,
+                        timeout: 15000,
+                    });
+                });
+                latitude = position.coords.latitude;
+                longitude = position.coords.longitude;
+            } else {
+                const { status } = await Location.requestForegroundPermissionsAsync();
+                if (status !== 'granted') {
+                    throw new Error('Location permission not granted');
+                }
                 const location = await Location.getCurrentPositionAsync({});
-                const { latitude, longitude } = location.coords;
-
-                const newRegion = {
-                    latitude,
-                    longitude,
-                    latitudeDelta: LATITUDE_DELTA,
-                    longitudeDelta: LONGITUDE_DELTA,
-                };
-
-                setRegion(newRegion);
-                setSelectedLocation({ latitude, longitude });
-
-                // Get address for this location
-                await reverseGeocode(latitude, longitude);
-
-                // Check serviceability
-                await checkServiceability(latitude, longitude);
+                latitude = location.coords.latitude;
+                longitude = location.coords.longitude;
             }
+
+            const newRegion = {
+                latitude,
+                longitude,
+                latitudeDelta: LATITUDE_DELTA,
+                longitudeDelta: LONGITUDE_DELTA,
+            };
+
+            setRegion(newRegion);
+            setSelectedLocation({ latitude, longitude });
+
+            await reverseGeocode(latitude, longitude);
+            await checkServiceability(latitude, longitude);
         } catch (error) {
             console.log('Error getting location:', error);
+            Alert.alert('Location unavailable', 'Unable to fetch your current location. Please search manually.');
         } finally {
             setIsLoading(false);
         }
@@ -88,19 +109,31 @@ const AddAddressScreen = ({ navigation, route }) => {
 
     const reverseGeocode = async (latitude, longitude) => {
         try {
-            const [address] = await Location.reverseGeocodeAsync({ latitude, longitude });
+            const address = await mapplsReverseGeocode(latitude, longitude);
             if (address) {
-                const formattedAddress = [
-                    address.name,
-                    address.street,
-                    address.district,
-                ].filter(Boolean).join(', ');
-
                 setAddressDetails({
-                    address: formattedAddress || 'Selected Location',
-                    city: address.city || address.subregion || '',
-                    pincode: address.postalCode || '',
+                    address: address.formattedAddress || 'Selected Location',
+                    city: address.city || address.district || '',
+                    pincode: address.pincode || '',
                 });
+                return;
+            }
+
+            if (Platform.OS !== 'web') {
+                const [fallbackAddress] = await Location.reverseGeocodeAsync({ latitude, longitude });
+                if (fallbackAddress) {
+                    const formattedAddress = [
+                        fallbackAddress.name,
+                        fallbackAddress.street,
+                        fallbackAddress.district,
+                    ].filter(Boolean).join(', ');
+
+                    setAddressDetails({
+                        address: formattedAddress || 'Selected Location',
+                        city: fallbackAddress.city || fallbackAddress.subregion || '',
+                        pincode: fallbackAddress.postalCode || '',
+                    });
+                }
             }
         } catch (error) {
             console.log('Reverse geocode error:', error);
@@ -144,10 +177,12 @@ const AddAddressScreen = ({ navigation, route }) => {
 
         setIsLoading(true);
         try {
-            // Geocode the search text
-            const results = await Location.geocodeAsync(searchText);
-            if (results && results.length > 0) {
-                const { latitude, longitude } = results[0];
+            const placeResults = await searchPlaces(searchText.trim());
+            const mapplsResult = placeResults[0] || await geocodeAddress(searchText.trim());
+
+            if (mapplsResult) {
+                const latitude = mapplsResult.latitude;
+                const longitude = mapplsResult.longitude;
 
                 const newRegion = {
                     latitude,
@@ -163,10 +198,12 @@ const AddAddressScreen = ({ navigation, route }) => {
                     mapRef.current.animateToRegion(newRegion, 500);
                 }
 
-                // Get address details
-                await reverseGeocode(latitude, longitude);
+                setAddressDetails({
+                    address: mapplsResult.formattedAddress || searchText.trim(),
+                    city: mapplsResult.city || mapplsResult.district || '',
+                    pincode: mapplsResult.pincode || '',
+                });
 
-                // Check serviceability
                 await checkServiceability(latitude, longitude);
             } else {
                 Alert.alert('Not Found', 'Could not find the location. Please try a different search.');

@@ -17,9 +17,11 @@ import type { OTPScreenProps } from '../types/navigation';
 
 export const OTPScreen: React.FC<OTPScreenProps> = ({ navigation, route }) => {
   const { phone } = route.params;
-  const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const otpLength = 4;
+  const [otp, setOtp] = useState<string[]>(Array(otpLength).fill(''));
   const [timer, setTimer] = useState(30);
   const inputRefs = useRef<(TextInput | null)[]>([]);
+  const verifyInFlightRef = useRef(false);
   const dispatch = useAppDispatch();
   const { loading, error } = useAppSelector((state) => state.auth);
 
@@ -48,13 +50,8 @@ export const OTPScreen: React.FC<OTPScreenProps> = ({ navigation, route }) => {
     newOtp[index] = value;
     setOtp(newOtp);
 
-    if (value && index < 5) {
+    if (value && index < otpLength - 1) {
       inputRefs.current[index + 1]?.focus();
-    }
-
-    const fullOtp = newOtp.join('');
-    if (fullOtp.length === 6) {
-      handleVerify(fullOtp);
     }
   };
 
@@ -65,22 +62,36 @@ export const OTPScreen: React.FC<OTPScreenProps> = ({ navigation, route }) => {
   };
 
   const handleVerify = async (fullOtp?: string) => {
-    const otpCode = fullOtp || otp.join('');
-    if (otpCode.length !== 6) {
-      Alert.alert('Error', 'Please enter a valid 6-digit OTP');
+    if (verifyInFlightRef.current || loading) {
       return;
     }
 
-    const result = await dispatch(verifyOtp({ phone, otp: otpCode }));
-    if (verifyOtp.fulfilled.match(result)) {
-      navigation.replace('Home');
+    const otpCode = fullOtp || otp.join('');
+    if (otpCode.length !== otpLength) {
+      Alert.alert('Error', `Please enter a valid ${otpLength}-digit OTP`);
+      return;
+    }
+
+    verifyInFlightRef.current = true;
+    try {
+      const result = await dispatch(verifyOtp({ phone, otp: otpCode }));
+      if (verifyOtp.fulfilled.match(result)) {
+        navigation.replace('Home');
+      }
+    } finally {
+      verifyInFlightRef.current = false;
     }
   };
 
   const handleResend = async () => {
+    if (loading) {
+      return;
+    }
     setTimer(30);
+    setOtp(Array(otpLength).fill(''));
     const { sendOtp } = await import('../store/slices/authSlice');
     await dispatch(sendOtp(phone));
+    inputRefs.current[0]?.focus();
   };
 
   return (

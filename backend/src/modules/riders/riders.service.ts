@@ -46,6 +46,60 @@ export class RidersService {
     return this.userModel.find(query).lean().exec();
   }
 
+  async findRiderForUser(userId: string): Promise<UserDocument> {
+    const rider = await this.userModel.findOne({
+      _id: userId,
+      role: UserRole.RIDER,
+    });
+
+    if (!rider) {
+      throw new NotFoundException('Rider not found');
+    }
+
+    return rider;
+  }
+
+  async updatePresence(
+    riderId: string,
+    presence: { isOnline?: boolean; isAvailable?: boolean },
+  ): Promise<UserDocument> {
+    const rider = await this.findRiderForUser(riderId);
+
+    if (typeof presence.isOnline === 'boolean') {
+      rider.isOnline = presence.isOnline;
+    }
+
+    if (typeof presence.isAvailable === 'boolean') {
+      rider.isAvailable = presence.isAvailable;
+    }
+
+    await rider.save();
+    return rider;
+  }
+
+  async getMetrics(riderId: string): Promise<{
+    totalDeliveries: number;
+    avgRating: number;
+    acceptanceRate: number;
+  }> {
+    await this.findRiderForUser(riderId);
+
+    const totalDeliveries = await this.orderModel.countDocuments({
+      riderId: new Types.ObjectId(riderId),
+      orderStatus: OrderStatus.DELIVERED,
+    });
+
+    const acceptedAssignments = await this.orderModel.countDocuments({
+      riderId: new Types.ObjectId(riderId),
+    });
+
+    return {
+      totalDeliveries,
+      avgRating: 0,
+      acceptanceRate: acceptedAssignments > 0 ? 100 : 0,
+    };
+  }
+
   /**
    * Update rider availability status
    */

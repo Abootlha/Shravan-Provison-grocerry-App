@@ -1,23 +1,20 @@
 import { MAPMYINDIA_CONFIG } from './config';
+import { API_BASE_URL } from './config';
 
 const MAPMYINDIA_API_KEY = MAPMYINDIA_CONFIG.apiKey;
-const GEOCODE_URL = `${MAPMYINDIA_CONFIG.baseUrl}/geocode`;
-const REVERSE_GEOCODE_URL = `${MAPMYINDIA_CONFIG.baseUrl}/rev_geocode`;
+const MAPS_PROXY_URL = `${API_BASE_URL}/maps`;
+const GEOCODE_URL = `${MAPS_PROXY_URL}/geocode`;
+const REVERSE_GEOCODE_URL = `${MAPS_PROXY_URL}/reverse-geocode`;
+const SEARCH_URL = `${MAPS_PROXY_URL}/search`;
 
 export async function geocodeAddress(address) {
-    if (!address || !MAPMYINDIA_API_KEY) {
+    if (!address) {
         return null;
     }
 
     try {
-        const encodedAddress = encodeURIComponent(address);
-        const url = `${GEOCODE_URL}/${encodedAddress}?region=ind&bbox=79.0,20.0,90.0,30.0`;
-
-        const response = await fetch(url, {
-            headers: {
-                'Authorization': MAPMYINDIA_API_KEY,
-            },
-        });
+        const url = `${GEOCODE_URL}?address=${encodeURIComponent(address)}`;
+        const response = await fetch(url);
 
         if (!response.ok) {
             console.warn('MapMyIndia Geocoding API error:', response.status);
@@ -51,18 +48,13 @@ export async function geocodeAddress(address) {
 }
 
 export async function reverseGeocode(latitude, longitude) {
-    if (!latitude || !longitude || !MAPMYINDIA_API_KEY) {
+    if (!latitude || !longitude) {
         return null;
     }
 
     try {
-        const url = `${REVERSE_GEOCODE_URL}?lat=${latitude}&lng=${longitude}`;
-
-        const response = await fetch(url, {
-            headers: {
-                'Authorization': MAPMYINDIA_API_KEY,
-            },
-        });
+        const url = `${REVERSE_GEOCODE_URL}?latitude=${latitude}&longitude=${longitude}`;
+        const response = await fetch(url);
 
         if (!response.ok) {
             console.warn('MapMyIndia Reverse Geocoding API error:', response.status);
@@ -96,22 +88,21 @@ export async function reverseGeocode(latitude, longitude) {
 }
 
 export async function searchPlaces(query, location = null) {
-    if (!query || query.length < 3 || !MAPMYINDIA_API_KEY) {
+    if (!query || query.length < 3) {
         return [];
     }
 
     try {
-        let url = `${MAPMYINDIA_CONFIG.baseUrl}/search/6?query=${encodeURIComponent(query)}&region=ind&filter=pv:ind`;
+        const params = new URLSearchParams({
+            query: query,
+        });
 
-        if (location) {
-            url += `&near_lat=${location.latitude}&near_lng=${location.longitude}`;
+        if (location?.latitude && location?.longitude) {
+            params.set('near_lat', location.latitude.toString());
+            params.set('near_lng', location.longitude.toString());
         }
 
-        const response = await fetch(url, {
-            headers: {
-                'Authorization': MAPMYINDIA_API_KEY,
-            },
-        });
+        const response = await fetch(`${SEARCH_URL}?${params.toString()}`);
 
         if (!response.ok) {
             console.warn('MapMyIndia Search API error:', response.status);

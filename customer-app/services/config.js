@@ -3,29 +3,30 @@ import Constants from 'expo-constants';
 
 const LOCAL_IP = Constants.expoConfig?.extra?.LOCAL_IP || '192.168.1.7';
 
-const getServiceBaseUrl = (port) => {
+const getMonolithBaseUrl = () => {
     if (!__DEV__) {
-        return `https://api.shravankirana.com`;
+        return 'https://api.shravankirana.com/api/v1';
     }
 
     if (Platform.OS === 'web') {
-        return `http://localhost:${port}`;
+        return 'http://localhost:3000/api/v1';
     }
 
-    return `http://${LOCAL_IP}:${port}`;
+    return `http://${LOCAL_IP}:3000/api/v1`;
 };
 
-export const AUTH_URL = Constants.expoConfig?.extra?.AUTH_SERVICE_URL || getServiceBaseUrl(8001);
-export const USER_URL = Constants.expoConfig?.extra?.USER_SERVICE_URL || getServiceBaseUrl(8002);
-export const RIDER_URL = Constants.expoConfig?.extra?.RIDER_SERVICE_URL || getServiceBaseUrl(8003);
-export const ORDER_URL = Constants.expoConfig?.extra?.ORDER_SERVICE_URL || getServiceBaseUrl(8004);
-export const PRODUCT_URL = Constants.expoConfig?.extra?.PRODUCT_SERVICE_URL || `${getServiceBaseUrl(8005)}/api/v1`;
-export const CART_URL = Constants.expoConfig?.extra?.CART_SERVICE_URL || `${getServiceBaseUrl(8006)}/api/v1`;
-export const LOCATION_URL = Constants.expoConfig?.extra?.LOCATION_SERVICE_URL || getServiceBaseUrl(8009);
+export const API_BASE_URL = Constants.expoConfig?.extra?.API_BASE_URL || getMonolithBaseUrl();
+export const AUTH_URL = Constants.expoConfig?.extra?.AUTH_SERVICE_URL || API_BASE_URL;
+export const USER_URL = Constants.expoConfig?.extra?.USER_SERVICE_URL || API_BASE_URL;
+export const RIDER_URL = Constants.expoConfig?.extra?.RIDER_SERVICE_URL || API_BASE_URL;
+export const ORDER_URL = Constants.expoConfig?.extra?.ORDER_SERVICE_URL || API_BASE_URL;
+export const PRODUCT_URL = Constants.expoConfig?.extra?.PRODUCT_SERVICE_URL || API_BASE_URL;
+export const CART_URL = Constants.expoConfig?.extra?.CART_SERVICE_URL || API_BASE_URL;
+export const LOCATION_URL = Constants.expoConfig?.extra?.LOCATION_SERVICE_URL || API_BASE_URL;
 
 export const TRACKING_URL = __DEV__
-    ? (Platform.OS === 'web' ? 'ws://localhost:8010' : `ws://${LOCAL_IP}:8010`)
-    : 'wss://api.shravankirana.com';
+    ? (Platform.OS === 'web' ? 'ws://localhost:3000/tracking' : `ws://${LOCAL_IP}:3000/tracking`)
+    : 'wss://api.shravankirana.com/tracking';
 
 export const API_URL = ORDER_URL;
 
@@ -48,9 +49,9 @@ export const ENDPOINTS = {
         LOGOUT: '/auth/logout',
     },
     user: {
-        PROFILE: (userId) => `/users/${userId}`,
-        ADDRESSES: (userId) => `/users/${userId}/addresses`,
-        REMOVE_ADDRESS: (userId, addressIndex) => `/users/${userId}/addresses/${addressIndex}`,
+        PROFILE: '/users/me',
+        ADDRESSES: '/users/addresses',
+        REMOVE_ADDRESS: (addressIndex) => `/users/addresses/${addressIndex}`,
     },
     categories: {
         LIST: '/categories',
@@ -74,10 +75,10 @@ export const ENDPOINTS = {
         STATUS: '/orders/status',
     },
     location: {
-        GEOCODE: '/geocode',
-        REVERSE_GEOCODE: '/reverse-geocode',
-        ROUTE: '/route/calculate',
-        ETA: '/eta/calculate',
+        GEOCODE: '/settings/store',
+        REVERSE_GEOCODE: '/settings/store',
+        ROUTE: '/settings/store',
+        ETA: '/settings/store',
     },
 };
 

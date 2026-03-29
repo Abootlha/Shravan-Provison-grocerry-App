@@ -1,33 +1,75 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants';
+import { getMapmyIndiaMapUrl } from '../services/mapService';
 
-// Web fallback - no map support
+const DEFAULT_CENTER = {
+    latitude: 28.6139,
+    longitude: 77.2090,
+};
+
+const iframeBaseStyle = {
+    border: 0,
+    width: '100%',
+    height: '100%',
+};
+
 const MapComponent = ({
+    region,
     selectedLocation,
     addressDetails,
     isLoading,
-    onCurrentLocationPress
+    onCurrentLocationPress,
 }) => {
+    const center = selectedLocation || region || DEFAULT_CENTER;
+    const mapUrl = getMapmyIndiaMapUrl(
+        {
+            latitude: center.latitude,
+            longitude: center.longitude,
+        },
+        selectedLocation ? 16 : 13,
+        900,
+        420
+    );
+
     return (
-        <ScrollView style={styles.webScrollView} showsVerticalScrollIndicator={false}>
-            <View style={styles.webNotice}>
-                <MaterialCommunityIcons name="map-marker-radius" size={48} color="#E91E63" />
-                <Text style={styles.webNoticeTitle}>Map not available on web</Text>
-                <Text style={styles.webNoticeText}>
-                    Use the search bar above to find your location, or use "Current Location" button.
-                </Text>
+        <View style={styles.container}>
+            <View style={styles.previewShell}>
+                {mapUrl ? (
+                    <iframe
+                        key={`${center.latitude}-${center.longitude}`}
+                        src={mapUrl}
+                        title="ShravanKirana Delivery Map"
+                        style={iframeBaseStyle}
+                        loading="lazy"
+                        referrerPolicy="no-referrer-when-downgrade"
+                    />
+                ) : (
+                    <View style={styles.webNotice}>
+                        <MaterialCommunityIcons name="map-marker-radius" size={48} color="#E91E63" />
+                        <Text style={styles.webNoticeTitle}>Map is preparing</Text>
+                        <Text style={styles.webNoticeText}>
+                            We are loading the embedded Mappls view for this location.
+                        </Text>
+                    </View>
+                )}
+
+                {selectedLocation && (
+                    <View style={styles.selectionPill}>
+                        <MaterialCommunityIcons name="map-marker" size={14} color="#E91E63" />
+                        <Text style={styles.selectionPillText}>Selected delivery pin</Text>
+                    </View>
+                )}
             </View>
 
-            {/* Search Result / Current Location Display */}
             {selectedLocation && (
                 <View style={styles.webLocationCard}>
                     <MaterialCommunityIcons name="map-marker" size={24} color="#E91E63" />
                     <View style={styles.webLocationDetails}>
                         <Text style={styles.webLocationTitle}>{addressDetails.address || 'Selected Location'}</Text>
                         <Text style={styles.webLocationSubtitle}>
-                            {addressDetails.city} {addressDetails.pincode}
+                            {[addressDetails.city, addressDetails.pincode].filter(Boolean).join(', ')}
                         </Text>
                         <Text style={styles.webLocationCoords}>
                             Lat: {selectedLocation.latitude.toFixed(6)}, Lng: {selectedLocation.longitude.toFixed(6)}
@@ -36,7 +78,6 @@ const MapComponent = ({
                 </View>
             )}
 
-            {/* GPS Button for Web */}
             <TouchableOpacity style={styles.webGpsButton} onPress={onCurrentLocationPress}>
                 <MaterialCommunityIcons name="crosshairs-gps" size={20} color="#E91E63" />
                 <Text style={styles.webGpsButtonText}>Use Current Location</Text>
@@ -48,18 +89,29 @@ const MapComponent = ({
                     <Text style={styles.webLoadingText}>Getting location...</Text>
                 </View>
             )}
-        </ScrollView>
+        </View>
     );
 };
 
 const styles = StyleSheet.create({
-    webScrollView: {
+    container: {
         flex: 1,
         paddingHorizontal: 16,
     },
+    previewShell: {
+        height: 260,
+        borderRadius: 18,
+        overflow: 'hidden',
+        backgroundColor: '#FFF8FA',
+        borderWidth: 1,
+        borderColor: '#FCE4EC',
+        marginBottom: 16,
+        position: 'relative',
+    },
     webNotice: {
+        flex: 1,
         alignItems: 'center',
-        paddingVertical: 40,
+        justifyContent: 'center',
         paddingHorizontal: 20,
     },
     webNoticeTitle: {
@@ -74,6 +126,25 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         marginTop: 8,
         lineHeight: 20,
+    },
+    selectionPill: {
+        position: 'absolute',
+        left: 12,
+        top: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: 'rgba(255,255,255,0.94)',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#F8BBD9',
+    },
+    selectionPillText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#E91E63',
     },
     webLocationCard: {
         flexDirection: 'row',
@@ -112,6 +183,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#FCE4EC',
         borderRadius: 12,
         gap: 8,
+        marginBottom: 12,
     },
     webGpsButtonText: {
         fontSize: 14,

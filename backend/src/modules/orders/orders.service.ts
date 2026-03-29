@@ -202,6 +202,17 @@ export class OrdersService {
             .exec();
     }
 
+    async findAvailableForRiders(): Promise<OrderDocument[]> {
+        return this.orderModel
+            .find({
+                orderStatus: OrderStatus.PACKED,
+                riderId: { $exists: false },
+            })
+            .sort({ createdAt: -1 })
+            .lean()
+            .exec();
+    }
+
     validateStatusTransition(currentStatus: OrderStatus, newStatus: OrderStatus): boolean {
         const allowedTransitions = ORDER_STATUS_TRANSITIONS[currentStatus];
         return allowedTransitions.includes(newStatus);
@@ -313,11 +324,33 @@ export class OrdersService {
         }
 
         // Assign rider
+        const previousStatus = order.orderStatus;
         order.riderId = new Types.ObjectId(riderId);
+        order.orderStatus = OrderStatus.ASSIGNED;
+        this.addTimelineEntry(order, OrderStatus.ASSIGNED, riderId);
         await order.save();
 
         // Invalidate cache
+        await this.cacheService.deleteOrder(order._id.toString());
         await this.redisService.del(RedisService.Keys.orderStatus(order.orderId));
+        await this.redisService.set(
+            RedisService.Keys.orderStatus(order.orderId),
+            OrderStatus.ASSIGNED,
+        );
+
+        await this.logStatusChange(
+            order._id,
+            previousStatus,
+            OrderStatus.ASSIGNED,
+            new Types.ObjectId(riderId),
+        );
+
+        await this.redisService.publish(
+            'order-updates',
+            JSON.stringify({ orderId: order.orderId, status: OrderStatus.ASSIGNED }),
+        );
+
+        this.trackingGateway.broadcastOrderStatusUpdate(order._id.toString(), order);
 
         // Calculate initial ETA
         try {

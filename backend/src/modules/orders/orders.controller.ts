@@ -38,6 +38,26 @@ export class OrdersController {
         );
     }
 
+    @Get('available')
+    async getAvailableOrders(@Request() req: any) {
+        if (req.user.role !== UserRole.RIDER) {
+            throw new ForbiddenException('Only riders can access available orders');
+        }
+
+        const orders = await this.ordersService.findAvailableForRiders();
+        return { orders };
+    }
+
+    @Patch(':id/accept')
+    async acceptOrder(@Request() req: any, @Param('id') id: string) {
+        if (req.user.role !== UserRole.RIDER) {
+            throw new ForbiddenException('Only riders can accept orders');
+        }
+
+        const order = await this.ordersService.assignRider(id, req.user.userId);
+        return { order };
+    }
+
     @Get('user/:userId')
     async getOrdersByUserId(
         @Request() req: any,

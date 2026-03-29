@@ -97,9 +97,11 @@ export class AuthController {
         res.cookie('accessToken', result.accessToken, COOKIE_OPTIONS);
         res.cookie('refreshToken', result.refreshToken, COOKIE_OPTIONS);
 
-        // Return user info (but not tokens in body for security)
+        // Mobile apps rely on bearer tokens, so return them in the response body too.
         return {
             user: result.user,
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
             message: 'Login successful',
         };
     }

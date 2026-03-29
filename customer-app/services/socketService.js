@@ -109,8 +109,8 @@ class SocketService {
             console.log('Rider location update received:', data);
             store.dispatch(updateRiderLocation({
                 location: {
-                    latitude: data.lat,
-                    longitude: data.lng,
+                    latitude: data.location?.latitude ?? data.lat,
+                    longitude: data.location?.longitude ?? data.lng,
                     heading: data.heading,
                     speed: data.speed,
                 },
@@ -121,7 +121,7 @@ class SocketService {
         this.socket.on('etaUpdate', (data) => {
             console.log('ETA update received:', data);
             store.dispatch(updateETA({
-                estimatedDeliveryTime: data.eta,
+                estimatedDeliveryTime: data.estimatedDeliveryTime || data.eta,
                 durationMinutes: data.durationMinutes,
                 distanceRemaining: data.distanceRemaining,
             }));

@@ -17,6 +17,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { ItemGroupsModule } from './modules/item-groups/item-groups.module';
 import { JobsModule } from './modules/jobs/jobs.module';
+import { MapsModule } from './modules/maps/maps.module';
 import { RedisModule } from './common/utils/redis.module';
 
 // Config
@@ -89,6 +90,7 @@ import configuration from './config/configuration';
     SettingsModule,
     ItemGroupsModule,
     JobsModule,
+    MapsModule,
   ],
 })
 export class AppModule { }

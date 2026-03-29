@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import { SOCKET_URL } from '../utils/constants';
-import type { RiderLocation, NewOrderAssignment, OrderStatusUpdate } from '../types';
+import type { RiderLocation } from '../types/rider';
+import type { NewOrderAssignment, OrderStatusUpdate } from '../types/order';
 
 type SocketEventHandler = (...args: unknown[]) => void;
 

@@ -52,6 +52,11 @@ class ApiClient {
     return response.data;
   }
 
+  async put<T>(url: string, data?: unknown): Promise<T> {
+    const response = await this.client.put<T>(url, data);
+    return response.data;
+  }
+
   async delete<T>(url: string): Promise<T> {
     const response = await this.client.delete<T>(url);
     return response.data;
@@ -61,6 +66,24 @@ class ApiClient {
 const authClient = new ApiClient(AUTH_SERVICE_URL);
 const riderClient = new ApiClient(RIDER_SERVICE_URL);
 const orderClient = new ApiClient(ORDER_SERVICE_URL);
+
+const normalizeStatus = (status?: string) => {
+  switch ((status || '').toUpperCase()) {
+    case 'ASSIGNED':
+      return 'accepted';
+    case 'OUT_FOR_DELIVERY':
+      return 'picked_up';
+    case 'DELIVERED':
+      return 'delivered';
+    case 'CANCELLED':
+      return 'cancelled';
+    case 'PENDING':
+    case 'CONFIRMED':
+    case 'PACKED':
+    default:
+      return 'pending';
+  }
+};
 
 const normalizeRider = (record: any): Rider => ({
   id: record._id || record.id || record.userId,
@@ -80,17 +103,17 @@ const normalizeRider = (record: any): Rider => ({
 });
 
 const normalizeOrder = (order: any) => ({
-  id: order.orderId || order.id,
-  orderNumber: order.orderId || order.id,
-  status: (order.orderStatus || 'pending').toLowerCase(),
+  id: order._id || order.id || order.orderId,
+  orderNumber: order.orderId || order.id || order._id,
+  status: normalizeStatus(order.orderStatus || order.status),
   pickup: {
-    name: 'Store',
-    phone: '',
+    name: order.storeName || 'Shravan Kirana Store',
+    phone: order.storePhone || '',
     address: {
-      full: order.deliveryAddress?.address || 'Store pickup',
+      full: order.storeAddress || 'Store pickup',
       coordinates: {
-        latitude: order.deliveryAddress?.coordinates?.coordinates?.[1] || 0,
-        longitude: order.deliveryAddress?.coordinates?.coordinates?.[0] || 0,
+        latitude: order.storeLocation?.latitude || 26.7606,
+        longitude: order.storeLocation?.longitude || 83.3732,
       },
     },
   },
@@ -117,16 +140,6 @@ const normalizeOrder = (order: any) => ({
   estimatedTime: order.estimatedDeliveryTime ? Date.parse(order.estimatedDeliveryTime) : undefined,
 });
 
-const getOrCreateRiderProfile = async (userId: string): Promise<Rider> => {
-  try {
-    const existing = await riderClient.get<any>(`/riders/user/${userId}`);
-    return normalizeRider(existing);
-  } catch {
-    const created = await riderClient.post<any>('/riders', { userId });
-    return normalizeRider(created);
-  }
-};
-
 export const authApi = {
   sendOtp: (phone: string) =>
     authClient.post<{ success: boolean; message: string }>('/auth/send-otp', { phone }),
@@ -134,17 +147,15 @@ export const authApi = {
   verifyOtp: async (phone: string, otp: string) => {
     const response = await authClient.post<any>('/auth/verify-otp', { phone, otp });
     const token = response.tokens?.accessToken || response.accessToken;
-    const rider = await getOrCreateRiderProfile(response.userId || response.user?.id);
+    const rider = normalizeRider(response.user || {});
     return { token, user: rider };
   },
 };
 
 export const riderApi = {
   getMe: async () => {
-    const user = await storage.getUser<Rider>();
-    if (!user?.id) return null;
-    const rider = await riderClient.get<any>(`/riders/${user.id}`);
-    return normalizeRider(rider);
+    const rider = await riderClient.get<any>('/riders/me');
+    return normalizeRider(rider.rider || rider);
   },
 
   updateAvailability: async (isOnline: boolean) => {
@@ -152,11 +163,11 @@ export const riderApi = {
     if (!user?.id) {
       throw new Error('Rider not found');
     }
-    const rider = await riderClient.put<any>(`/riders/${user.id}/availability`, {
+    const rider = await riderClient.put<any>('/riders/me/availability', {
       isOnline,
       isAvailable: isOnline,
     });
-    return normalizeRider(rider);
+    return normalizeRider(rider.rider || rider);
   },
 
   getEarnings: async (_period: 'daily' | 'weekly' | 'monthly') => {
@@ -164,7 +175,7 @@ export const riderApi = {
     if (!user?.id) {
       throw new Error('Rider not found');
     }
-    const stats = await riderClient.get<any>(`/riders/${user.id}/metrics`);
+    const stats = await riderClient.get<any>('/riders/me/metrics');
     return {
       today: 0,
       week: 0,
@@ -180,20 +191,13 @@ export const riderApi = {
 
 export const orderApi = {
   getAvailable: async () => {
-    const orders = await orderClient.get<any[]>('/orders');
-    return (orders || []).map(normalizeOrder);
+    const response = await orderClient.get<any>('/orders/available');
+    return (response.orders || []).map(normalizeOrder);
   },
 
   accept: async (orderId: string) => {
-    const user = await storage.getUser<Rider>();
-    if (!user?.id) {
-      throw new Error('Rider not found');
-    }
-    const order = await orderClient.patch<any>('/orders/assign-rider', {
-      orderId,
-      riderId: user.id,
-    });
-    return { order: normalizeOrder(order) };
+    const response = await orderClient.patch<any>(`/orders/${orderId}/accept`);
+    return { order: normalizeOrder(response.order || response) };
   },
 
   reject: async (_orderId: string) =>
@@ -210,10 +214,9 @@ export const orderApi = {
       assigned: 'ASSIGNED',
     };
 
-    const order = await orderClient.patch<any>('/orders/status', {
-      orderId,
-      newStatus: statusMap[status] || status.toUpperCase(),
+    const response = await orderClient.patch<any>(`/orders/${orderId}/status`, {
+      status: statusMap[status] || status.toUpperCase(),
     });
-    return { order: normalizeOrder(order) };
+    return { order: normalizeOrder(response.order || response) };
   },
 };
