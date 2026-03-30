@@ -9,25 +9,27 @@ import {
     TouchableOpacity,
     Linking,
     Image,
+    ScrollView,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS, SHADOWS } from '../constants';
 
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
+
+const ZEPTO_PURPLE = '#7C3AED';
+const ZEPTO_GREEN = '#10B981';
 
 const SNAP_POINTS = {
-    collapsed: SCREEN_HEIGHT * 0.42,  // Shows rider + ETA
-    mid: SCREEN_HEIGHT * 0.55,       // Shows status
-    expanded: SCREEN_HEIGHT * 0.80,   // Shows everything
+    collapsed: SCREEN_HEIGHT * 0.45,
+    mid: SCREEN_HEIGHT * 0.65,
+    expanded: SCREEN_HEIGHT * 0.90,
 };
 
 const STATUS_STEPS = [
-    { key: 'PENDING', label: 'Placed', icon: 'check-circle', activeColor: '#0C831F' },
-    { key: 'CONFIRMED', label: 'Confirmed', icon: 'store-check', activeColor: '#0C831F' },
-    { key: 'PACKED', label: 'Packed', icon: 'package-variant', activeColor: '#0C831F' },
-    { key: 'ASSIGNED', label: 'Assigned', icon: 'account-check', activeColor: '#0C831F' },
-    { key: 'OUT_FOR_DELIVERY', label: 'On the way', icon: 'bike-fast', activeColor: '#0C831F' },
-    { key: 'DELIVERED', label: 'Delivered', icon: 'home-check', activeColor: '#4CAF50' },
+    { key: 'CONFIRMED', label: 'Confirmed', icon: 'store-check' },
+    { key: 'PACKED', label: 'Packed', icon: 'package-variant' },
+    { key: 'OUT_FOR_DELIVERY', label: 'On the way', icon: 'bike-fast' },
+    { key: 'ARRIVED', label: 'Arrived', icon: 'map-marker-check' },
 ];
 
 const TrackingBottomSheet = ({
@@ -35,19 +37,17 @@ const TrackingBottomSheet = ({
     riderLocation,
     routeInfo,
     connectionStatus,
-    onCallRider,
 }) => {
     const translateY = useRef(new Animated.Value(SNAP_POINTS.collapsed)).current;
     const lastSnap = useRef(SNAP_POINTS.collapsed);
     const [etaCountdown, setEtaCountdown] = useState(null);
+    const [selectedTip, setSelectedTip] = useState(null);
 
-    // ETA countdown timer
     useEffect(() => {
         if (!order?.estimatedDeliveryTime) {
-            setEtaCountdown(null);
+            setEtaCountdown(10);
             return;
         }
-
         const updateCountdown = () => {
             const now = new Date();
             const eta = new Date(order.estimatedDeliveryTime);
@@ -55,45 +55,31 @@ const TrackingBottomSheet = ({
             const diffMins = Math.max(0, Math.ceil(diffMs / 60000));
             setEtaCountdown(diffMins);
         };
-
         updateCountdown();
-        const interval = setInterval(updateCountdown, 30000); // Update every 30s
+        const interval = setInterval(updateCountdown, 30000);
         return () => clearInterval(interval);
     }, [order?.estimatedDeliveryTime]);
 
-    // Pan responder for drag gesture
     const panResponder = useRef(
         PanResponder.create({
             onStartShouldSetPanResponder: () => true,
             onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 5,
             onPanResponderMove: (_, gesture) => {
                 const newVal = lastSnap.current - gesture.dy;
-                const clamped = Math.max(
-                    SNAP_POINTS.collapsed,
-                    Math.min(SNAP_POINTS.expanded, newVal)
-                );
+                const clamped = Math.max(SNAP_POINTS.collapsed, Math.min(SNAP_POINTS.expanded, newVal));
                 translateY.setValue(clamped);
             },
             onPanResponderRelease: (_, gesture) => {
                 const currentVal = lastSnap.current - gesture.dy;
                 let targetSnap;
-
-                if (gesture.vy > 0.5) {
-                    // Swiping down fast
-                    targetSnap = SNAP_POINTS.collapsed;
-                } else if (gesture.vy < -0.5) {
-                    // Swiping up fast
-                    targetSnap = SNAP_POINTS.expanded;
-                } else {
-                    // Find closest snap point
+                if (gesture.vy > 0.5) targetSnap = SNAP_POINTS.collapsed;
+                else if (gesture.vy < -0.5) targetSnap = SNAP_POINTS.expanded;
+                else {
                     const snapValues = Object.values(SNAP_POINTS);
                     targetSnap = snapValues.reduce((prev, curr) =>
-                        Math.abs(curr - currentVal) < Math.abs(prev - currentVal)
-                            ? curr
-                            : prev
+                        Math.abs(curr - currentVal) < Math.abs(prev - currentVal) ? curr : prev
                     );
                 }
-
                 lastSnap.current = targetSnap;
                 Animated.spring(translateY, {
                     toValue: targetSnap,
@@ -105,46 +91,14 @@ const TrackingBottomSheet = ({
         })
     ).current;
 
-    const getCurrentStepIndex = () => {
-        if (!order) return 0;
-        return STATUS_STEPS.findIndex((step) => step.key === order.orderStatus);
-    };
-
-    const currentStepIndex = getCurrentStepIndex();
-
-    const handleCallRider = () => {
-        const phone = typeof order?.riderId === 'object' ? order.riderId.phone : null;
-        if (phone) {
-            Linking.openURL(`tel:${phone}`);
-        }
-    };
-
     const getRiderName = () => {
-        if (typeof order?.riderId === 'object' && order.riderId?.name) {
-            return order.riderId.name;
-        }
+        if (typeof order?.riderId === 'object' && order.riderId?.name) return order.riderId.name;
         return 'Delivery Partner';
     };
 
-    const getRiderPhone = () => {
-        if (typeof order?.riderId === 'object' && order.riderId?.phone) {
-            return order.riderId.phone;
-        }
-        return null;
-    };
-
-    const getStatusMessage = () => {
-        if (!order) return 'Loading...';
-        switch (order.orderStatus) {
-            case 'PENDING': return 'Waiting for store to confirm your order';
-            case 'CONFIRMED': return 'Store is preparing your order';
-            case 'PACKED': return 'Your order is packed and ready!';
-            case 'ASSIGNED': return `${getRiderName()} will pick up your order`;
-            case 'OUT_FOR_DELIVERY': return `${getRiderName()} is on the way!`;
-            case 'DELIVERED': return 'Your order has been delivered! 🎉';
-            case 'CANCELLED': return 'Order was cancelled';
-            default: return 'Processing your order';
-        }
+    const handleCallRider = () => {
+        const phone = typeof order?.riderId === 'object' ? order.riderId.phone : null;
+        if (phone) Linking.openURL(`tel:${phone}`);
     };
 
     const bottomSheetHeight = translateY.interpolate({
@@ -153,179 +107,174 @@ const TrackingBottomSheet = ({
         extrapolate: 'clamp',
     });
 
+    const isArrived = order?.orderStatus === 'ARRIVED' || (routeInfo?.distanceValue < 100);
+
+    const renderArrivedBanner = () => (
+        <View style={styles.arrivedBanner}>
+            <View style={styles.arrivedHeader}>
+                <View style={[styles.arrivedIconBox, { backgroundColor: ZEPTO_GREEN }]}>
+                    <MaterialCommunityIcons name="check" size={24} color="white" />
+                </View>
+                <View style={styles.arrivedHeaderText}>
+                    <Text style={styles.arrivedTitle}>Arrived in {etaCountdown || '28'} mins</Text>
+                    <View style={styles.onTimeBadgeSmall}>
+                        <MaterialCommunityIcons name="lightning-bolt" size={10} color={ZEPTO_GREEN} />
+                        <Text style={styles.onTimeTextSmall}>ON TIME</Text>
+                    </View>
+                </View>
+            </View>
+            <View style={styles.chatBubble}>
+                <Text style={styles.chatText}>
+                    Hi! I've reached your location with your fresh order. Please collect it from the entrance.
+                </Text>
+                <View style={styles.chatPointer} />
+            </View>
+        </View>
+    );
+
+    const renderEnRouteBanner = () => (
+        <View style={styles.etaBanner}>
+            <View style={styles.etaHeader}>
+                <View style={styles.etaLeft}>
+                    <Text style={styles.etaLabel}>Arriving in</Text>
+                    <View style={styles.etaTimeRow}>
+                        <Text style={styles.etaTime}>{etaCountdown || '10'}</Text>
+                        <Text style={styles.etaUnit}>MINS</Text>
+                    </View>
+                    <View style={styles.onTimeBadgeLarge}>
+                        <MaterialCommunityIcons name="lightning-bolt" size={12} color={ZEPTO_GREEN} />
+                        <Text style={styles.onTimeTextLarge}>ON TIME</Text>
+                    </View>
+                </View>
+                <View style={styles.etaRight}>
+                    <View style={styles.zeptoIllustration}>
+                        <MaterialCommunityIcons name="bike-fast" size={40} color={ZEPTO_PURPLE} />
+                    </View>
+                </View>
+            </View>
+            <View style={styles.riderBar}>
+                <View style={styles.riderAvatarSmall}>
+                    <MaterialCommunityIcons name="account" size={16} color="#999" />
+                </View>
+                <Text style={styles.riderBarText}>
+                    <Text style={{ fontWeight: '800' }}>{getRiderName()}</Text> is on the way
+                </Text>
+            </View>
+        </View>
+    );
+
+    const renderStepper = () => (
+        <View style={styles.stepperContainer}>
+            <View style={styles.stepperItems}>
+                {STATUS_STEPS.map((step, index) => {
+                    const isActive = index <= STATUS_STEPS.findIndex(s => s.key === order?.orderStatus);
+                    return (
+                        <View key={step.key} style={styles.stepperItem}>
+                            <View style={[styles.stepperNode, isActive && { backgroundColor: ZEPTO_GREEN }]}>
+                                <MaterialCommunityIcons name={step.icon} size={14} color={isActive ? "white" : "#CCC"} />
+                            </View>
+                            <Text style={[styles.stepperLabel, isActive && { color: "#333", fontWeight: '700' }]}>{step.label}</Text>
+                        </View>
+                    );
+                })}
+            </View>
+            <View style={styles.stepperLineTrack}>
+                <View style={[styles.stepperLineFill, { width: `${(STATUS_STEPS.findIndex(s => s.key === order?.orderStatus) / (STATUS_STEPS.length - 1)) * 100}%` }]} />
+            </View>
+        </View>
+    );
+
     return (
-        <Animated.View
-            style={[
-                styles.container,
-                { height: bottomSheetHeight },
-            ]}
-        >
-            {/* Drag Handle */}
+        <Animated.View style={[styles.container, { height: bottomSheetHeight }]}>
             <View style={styles.handleContainer} {...panResponder.panHandlers}>
                 <View style={styles.handle} />
             </View>
 
-            {/* Rider Card + ETA (Always visible) */}
-            <View style={styles.topSection}>
-                {/* ETA Banner */}
-                {etaCountdown !== null && order?.orderStatus !== 'DELIVERED' && order?.orderStatus !== 'CANCELLED' && (
-                    <View style={styles.etaBanner}>
-                        <View style={styles.etaLeft}>
-                            <Text style={styles.etaLabel}>
-                                {order?.orderStatus === 'OUT_FOR_DELIVERY' ? 'Arriving in' : 'Estimated delivery'}
-                            </Text>
-                            <View style={styles.etaTimeRow}>
-                                <Text style={styles.etaTime}>{etaCountdown}</Text>
-                                <Text style={styles.etaUnit}> mins</Text>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+                <View style={styles.content}>
+                    {/* Arrived or En Route Banner */}
+                    {isArrived ? renderArrivedBanner() : renderEnRouteBanner()}
+
+                    {/* Order Code Section */}
+                    {order?.orderStatus !== 'DELIVERED' && (
+                        <View style={styles.codeContainer}>
+                            <View style={styles.codeLeft}>
+                                <Text style={styles.codeLabel}>Your code</Text>
+                                <Text style={styles.codeValue}>{order?.orderCode || '3594'}</Text>
+                            </View>
+                            <View style={styles.codeRight}>
+                                <MaterialCommunityIcons name="shield-check" size={24} color={ZEPTO_PURPLE} />
+                                <Text style={styles.codeSecureText}>Secure Delivery</Text>
                             </View>
                         </View>
-                        <View style={styles.etaRight}>
-                            {routeInfo && (
-                                <View style={styles.routeInfoBadge}>
-                                    <MaterialCommunityIcons name="map-marker-distance" size={14} color={COLORS.secondary} />
-                                    <Text style={styles.routeInfoText}>{routeInfo.distance}</Text>
-                                </View>
-                            )}
-                            <View style={[
-                                styles.connectionDot,
-                                connectionStatus === 'connected' && styles.connectionDotOnline,
-                                connectionStatus === 'reconnecting' && styles.connectionDotReconnecting,
-                                connectionStatus === 'disconnected' && styles.connectionDotOffline,
-                            ]} />
-                        </View>
-                    </View>
-                )}
+                    )}
 
-                {/* Delivered Card */}
-                {order?.orderStatus === 'DELIVERED' && (
-                    <View style={styles.deliveredBanner}>
-                        <MaterialCommunityIcons name="check-circle" size={28} color="#4CAF50" />
-                        <View style={styles.deliveredContent}>
-                            <Text style={styles.deliveredTitle}>Order Delivered!</Text>
-                            <Text style={styles.deliveredSubtitle}>Thank you for ordering with us</Text>
-                        </View>
-                    </View>
-                )}
+                    {/* Horizontal Stepper */}
+                    {renderStepper()}
 
-                {/* Status message */}
-                <Text style={styles.statusMessage}>{getStatusMessage()}</Text>
-
-                {/* Rider Info Card */}
-                {order?.riderId && (order?.orderStatus === 'ASSIGNED' || order?.orderStatus === 'OUT_FOR_DELIVERY') && (
+                    {/* Rider Info Card */}
                     <View style={styles.riderCard}>
-                        <View style={styles.riderAvatar}>
-                            <MaterialCommunityIcons name="account" size={24} color={COLORS.white} />
-                        </View>
-                        <View style={styles.riderInfo}>
-                            <Text style={styles.riderName}>{getRiderName()}</Text>
-                            <Text style={styles.riderLabel}>
-                                {order?.orderStatus === 'OUT_FOR_DELIVERY' ? 'Is delivering your order' : 'Picking up your order'}
-                            </Text>
+                        <View style={styles.riderMain}>
+                            <View style={styles.riderAvatarBox}>
+                                <View style={styles.riderAvatar}>
+                                    <MaterialCommunityIcons name="account" size={32} color="#AAA" />
+                                </View>
+                                <View style={styles.ratingBadge}>
+                                    <MaterialCommunityIcons name="star" size={10} color="#FFB300" />
+                                    <Text style={styles.ratingText}>4.8</Text>
+                                </View>
+                            </View>
+                            <View style={styles.riderDetails}>
+                                <Text style={styles.riderNameText}>{getRiderName()}</Text>
+                                <Text style={styles.riderStatusText}>Delivery Partner</Text>
+                            </View>
                         </View>
                         <View style={styles.riderActions}>
-                            {getRiderPhone() && (
-                                <TouchableOpacity style={styles.callBtn} onPress={handleCallRider}>
-                                    <MaterialCommunityIcons name="phone" size={20} color={COLORS.secondary} />
+                            <TouchableOpacity style={styles.riderActionBtn}>
+                                <MaterialCommunityIcons name="chat-processing" size={22} color={ZEPTO_PURPLE} />
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.riderActionBtn, { marginLeft: 12 }]} onPress={handleCallRider}>
+                                <MaterialCommunityIcons name="phone" size={22} color={ZEPTO_PURPLE} />
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+
+                    {/* Tip Your Shopper Section */}
+                    <View style={styles.tipSection}>
+                        <View style={styles.tipHeader}>
+                            <Text style={styles.tipTitle}>Tip your shopper</Text>
+                            <Text style={styles.tipSubtitle}>100% of your tip goes to {getRiderName()}</Text>
+                        </View>
+                        <View style={styles.tipButtons}>
+                            {[20, 30, 50, 100].map(amount => (
+                                <TouchableOpacity
+                                    key={amount}
+                                    style={[styles.tipBtn, selectedTip === amount && styles.tipBtnActive]}
+                                    onPress={() => setSelectedTip(amount)}
+                                >
+                                    <Text style={[styles.tipBtnText, selectedTip === amount && styles.tipBtnTextActive]}>₹{amount}</Text>
                                 </TouchableOpacity>
-                            )}
+                            ))}
                         </View>
                     </View>
-                )}
-            </View>
 
-            {/* Horizontal Status Stepper */}
-            <View style={styles.stepperContainer}>
-                <View style={styles.stepperTrack}>
-                    {STATUS_STEPS.map((step, index) => {
-                        const isActive = index <= currentStepIndex;
-                        const isCurrent = index === currentStepIndex;
-                        return (
-                            <React.Fragment key={step.key}>
-                                {index > 0 && (
-                                    <View
-                                        style={[
-                                            styles.stepperLine,
-                                            isActive && styles.stepperLineActive,
-                                        ]}
-                                    />
-                                )}
-                                <View style={styles.stepperItem}>
-                                    <View
-                                        style={[
-                                            styles.stepperDot,
-                                            isActive && { backgroundColor: step.activeColor },
-                                            isCurrent && styles.stepperDotCurrent,
-                                        ]}
-                                    >
-                                        <MaterialCommunityIcons
-                                            name={step.icon}
-                                            size={14}
-                                            color={isActive ? COLORS.white : '#CCC'}
-                                        />
-                                    </View>
-                                    <Text
-                                        style={[
-                                            styles.stepperLabel,
-                                            isActive && styles.stepperLabelActive,
-                                            isCurrent && styles.stepperLabelCurrent,
-                                        ]}
-                                        numberOfLines={1}
-                                    >
-                                        {step.label}
-                                    </Text>
-                                </View>
-                            </React.Fragment>
-                        );
-                    })}
-                </View>
-            </View>
-
-            {/* Order Details (visible when expanded) */}
-            <View style={styles.detailsSection}>
-                <View style={styles.detailsDivider} />
-
-                {/* Order Summary */}
-                <View style={styles.orderSummary}>
-                    <View style={styles.summaryHeader}>
-                        <Text style={styles.summaryTitle}>Order Details</Text>
-                        <Text style={styles.summaryOrderId}>
-                            {order?.orderId || `#${order?._id?.slice(-8).toUpperCase()}`}
-                        </Text>
-                    </View>
-
-                    {/* Items */}
-                    {order?.items?.map((item, index) => (
-                        <View key={index} style={styles.itemRow}>
-                            <View style={styles.itemQtyBadge}>
-                                <Text style={styles.itemQtyText}>{item.quantity}x</Text>
-                            </View>
-                            <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
-                            <Text style={styles.itemPrice}>₹{item.price * item.quantity}</Text>
+                    {/* Order Details */}
+                    <View style={styles.orderDetails}>
+                        <View style={styles.orderHeaderRow}>
+                            <Text style={styles.orderLabel}>Order Info</Text>
+                            <TouchableOpacity>
+                                <Text style={styles.viewItemsText}>VIEW ITEMS</Text>
+                            </TouchableOpacity>
                         </View>
-                    ))}
-
-                    <View style={styles.totalRow}>
-                        <Text style={styles.totalLabel}>Total Amount</Text>
-                        <Text style={styles.totalValue}>₹{order?.totalAmount}</Text>
+                        <View style={styles.addressBox}>
+                            <MaterialCommunityIcons name="map-marker-outline" size={18} color="#666" />
+                            <Text style={styles.addressText} numberOfLines={2}>
+                                {order?.deliveryAddress?.addressLine || 'Home, Gorakhpur'}
+                            </Text>
+                        </View>
                     </View>
                 </View>
-
-                {/* Delivery Address */}
-                {order?.deliveryAddress && (
-                    <View style={styles.addressSection}>
-                        <View style={styles.addressHeader}>
-                            <MaterialCommunityIcons name="map-marker" size={18} color={COLORS.secondary} />
-                            <Text style={styles.addressTitle}>Delivery Address</Text>
-                        </View>
-                        <Text style={styles.addressText}>
-                            {order.deliveryAddress.address}
-                        </Text>
-                        <Text style={styles.addressCity}>
-                            {order.deliveryAddress.city}, {order.deliveryAddress.pincode}
-                        </Text>
-                    </View>
-                )}
-            </View>
+            </ScrollView>
         </Animated.View>
     );
 };
@@ -336,332 +285,403 @@ const styles = StyleSheet.create({
         bottom: 0,
         left: 0,
         right: 0,
-        backgroundColor: COLORS.white,
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
+        backgroundColor: 'white',
+        borderTopLeftRadius: 28,
+        borderTopRightRadius: 28,
         ...SHADOWS.dark,
         overflow: 'hidden',
     },
     handleContainer: {
         alignItems: 'center',
-        paddingTop: 12,
-        paddingBottom: 4,
+        paddingVertical: 12,
     },
     handle: {
-        width: 40,
+        width: 36,
         height: 4,
         borderRadius: 2,
-        backgroundColor: '#DDD',
+        backgroundColor: '#E5E7EB',
     },
-
-    // Top section
-    topSection: {
+    content: {
         paddingHorizontal: 20,
-        paddingBottom: 12,
     },
 
-    // ETA Banner
+    // Arrived Banner
+    arrivedBanner: {
+        backgroundColor: '#F0FDF4',
+        borderRadius: 20,
+        padding: 16,
+        borderWidth: 1,
+        borderColor: '#DCFCE7',
+    },
+    arrivedHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+    },
+    arrivedIconBox: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    arrivedHeaderText: {
+        flex: 1,
+    },
+    arrivedTitle: {
+        fontSize: 18,
+        fontWeight: '900',
+        color: '#065F46',
+    },
+    onTimeBadgeSmall: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 6,
+        alignSelf: 'flex-start',
+        marginTop: 4,
+        gap: 2,
+    },
+    onTimeTextSmall: {
+        fontSize: 9,
+        fontWeight: '900',
+        color: ZEPTO_GREEN,
+    },
+    chatBubble: {
+        backgroundColor: 'white',
+        padding: 12,
+        borderRadius: 12,
+        marginTop: 12,
+        ...SHADOWS.light,
+    },
+    chatText: {
+        fontSize: 13,
+        color: '#374151',
+        lineHeight: 18,
+        fontWeight: '500',
+    },
+    chatPointer: {
+        position: 'absolute',
+        top: -8,
+        left: 20,
+        width: 0,
+        height: 0,
+        borderLeftWidth: 8,
+        borderRightWidth: 8,
+        borderBottomWidth: 8,
+        borderLeftColor: 'transparent',
+        borderRightColor: 'transparent',
+        borderBottomColor: 'white',
+    },
+
+    // En Route Banner
     etaBanner: {
+        backgroundColor: 'rgba(124, 58, 237, 0.04)',
+        borderRadius: 20,
+        padding: 16,
+        borderWidth: 1,
+        borderColor: 'rgba(124, 58, 237, 0.08)',
+    },
+    etaHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'center',
-        backgroundColor: '#E8F5E9',
-        borderRadius: 16,
-        padding: 16,
-        marginBottom: 12,
     },
     etaLeft: {},
     etaLabel: {
         fontSize: 12,
-        color: '#666',
-        fontWeight: '500',
+        fontWeight: '700',
+        color: '#6B7280',
     },
     etaTimeRow: {
         flexDirection: 'row',
         alignItems: 'baseline',
+        marginTop: -4,
     },
     etaTime: {
-        fontSize: 36,
-        fontWeight: '800',
-        color: COLORS.secondary,
+        fontSize: 48,
+        fontWeight: '900',
+        color: ZEPTO_PURPLE,
     },
     etaUnit: {
         fontSize: 16,
-        fontWeight: '600',
-        color: COLORS.secondary,
+        fontWeight: '900',
+        color: ZEPTO_PURPLE,
+        marginLeft: 4,
     },
-    etaRight: {
-        alignItems: 'flex-end',
+    onTimeBadgeLarge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 8,
+        alignSelf: 'flex-start',
+        marginTop: 4,
+        gap: 4,
+    },
+    onTimeTextLarge: {
+        fontSize: 10,
+        fontWeight: '900',
+        color: ZEPTO_GREEN,
+    },
+    zeptoIllustration: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: 'rgba(124, 58, 237, 0.08)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    riderBar: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 16,
+        paddingTop: 12,
+        borderTopWidth: 1,
+        borderTopColor: 'rgba(124, 58, 237, 0.1)',
         gap: 8,
     },
-    routeInfoBadge: {
-        flexDirection: 'row',
+    riderAvatarSmall: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: '#F3F4F6',
         alignItems: 'center',
-        gap: 4,
-        backgroundColor: COLORS.white,
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 20,
+        justifyContent: 'center',
     },
-    routeInfoText: {
+    riderBarText: {
         fontSize: 12,
-        fontWeight: '600',
-        color: COLORS.secondary,
-    },
-    connectionDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: '#CCC',
-    },
-    connectionDotOnline: {
-        backgroundColor: '#4CAF50',
-    },
-    connectionDotReconnecting: {
-        backgroundColor: '#FF9800',
-    },
-    connectionDotOffline: {
-        backgroundColor: '#F44336',
+        color: '#4B5563',
+        fontWeight: '500',
     },
 
-    // Delivered
-    deliveredBanner: {
+    // Code Section
+    codeContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#E8F5E9',
+        justifyContent: 'space-between',
+        backgroundColor: '#F9FAFB',
         borderRadius: 16,
         padding: 16,
-        marginBottom: 12,
-        gap: 12,
+        marginTop: 16,
     },
-    deliveredContent: {
-        flex: 1,
+    codeLeft: {},
+    codeLabel: {
+        fontSize: 11,
+        fontWeight: '800',
+        color: '#6B7280',
+        textTransform: 'uppercase',
     },
-    deliveredTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#2E7D32',
+    codeValue: {
+        fontSize: 24,
+        fontWeight: '900',
+        color: '#111827',
+        letterSpacing: 2,
     },
-    deliveredSubtitle: {
-        fontSize: 13,
-        color: '#66BB6A',
-        marginTop: 2,
+    codeRight: {
+        alignItems: 'center',
+        gap: 4,
+    },
+    codeSecureText: {
+        fontSize: 10,
+        fontWeight: '800',
+        color: ZEPTO_PURPLE,
     },
 
-    // Status message
-    statusMessage: {
-        fontSize: 14,
-        color: '#666',
-        fontWeight: '500',
-        marginBottom: 12,
+    // Stepper
+    stepperContainer: {
+        marginTop: 24,
+        paddingHorizontal: 4,
+    },
+    stepperItems: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        zIndex: 2,
+    },
+    stepperItem: {
+        alignItems: 'center',
+        width: 60,
+    },
+    stepperNode: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: '#F3F4F6',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
+        borderColor: 'white',
+    },
+    stepperLabel: {
+        fontSize: 10,
+        color: '#9CA3AF',
+        marginTop: 6,
+        fontWeight: '600',
+    },
+    stepperLineTrack: {
+        position: 'absolute',
+        top: 15,
+        left: 30,
+        right: 30,
+        height: 2,
+        backgroundColor: '#F3F4F6',
+        zIndex: 1,
+    },
+    stepperLineFill: {
+        height: '100%',
+        backgroundColor: ZEPTO_GREEN,
     },
 
     // Rider Card
     riderCard: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#FAFAFA',
-        borderRadius: 14,
-        padding: 14,
-        borderWidth: 1,
-        borderColor: '#F0F0F0',
+        justifyContent: 'space-between',
+        paddingVertical: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F3F4F6',
+        marginTop: 24,
+    },
+    riderMain: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 16,
+    },
+    riderAvatarBox: {
+        position: 'relative',
     },
     riderAvatar: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: COLORS.secondary,
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: '#F3F4F6',
         alignItems: 'center',
         justifyContent: 'center',
     },
-    riderInfo: {
-        flex: 1,
-        marginLeft: 12,
+    ratingBadge: {
+        position: 'absolute',
+        bottom: -4,
+        alignSelf: 'center',
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'white',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 8,
+        ...SHADOWS.light,
+        gap: 2,
     },
-    riderName: {
+    ratingText: {
+        fontSize: 10,
+        fontWeight: '800',
+        color: '#111827',
+    },
+    riderDetails: {
+        gap: 2,
+    },
+    riderNameText: {
         fontSize: 15,
-        fontWeight: '700',
-        color: COLORS.text,
+        fontWeight: '900',
+        color: '#111827',
     },
-    riderLabel: {
+    riderStatusText: {
         fontSize: 12,
-        color: '#999',
-        marginTop: 2,
+        color: '#6B7280',
+        fontWeight: '600',
     },
     riderActions: {
         flexDirection: 'row',
-        gap: 8,
     },
-    callBtn: {
-        width: 42,
-        height: 42,
-        borderRadius: 21,
-        backgroundColor: '#E8F5E9',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-
-    // Horizontal Status Stepper
-    stepperContainer: {
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-    },
-    stepperTrack: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    stepperLine: {
-        flex: 1,
-        height: 2,
-        backgroundColor: '#E0E0E0',
-        marginHorizontal: -2,
-    },
-    stepperLineActive: {
-        backgroundColor: COLORS.secondary,
-    },
-    stepperItem: {
-        alignItems: 'center',
-        width: 46,
-    },
-    stepperDot: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        backgroundColor: '#E8E8E8',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    stepperDotCurrent: {
-        borderWidth: 2,
-        borderColor: COLORS.secondary,
-        transform: [{ scale: 1.15 }],
-    },
-    stepperLabel: {
-        fontSize: 9,
-        color: '#BBB',
-        marginTop: 4,
-        fontWeight: '500',
-        textAlign: 'center',
-    },
-    stepperLabelActive: {
-        color: '#666',
-    },
-    stepperLabelCurrent: {
-        color: COLORS.secondary,
-        fontWeight: '700',
-    },
-
-    // Details section
-    detailsSection: {
-        paddingHorizontal: 20,
-        flex: 1,
-    },
-    detailsDivider: {
-        height: 1,
-        backgroundColor: '#F0F0F0',
-        marginBottom: 16,
-    },
-
-    // Order Summary
-    orderSummary: {
-        marginBottom: 16,
-    },
-    summaryHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 12,
-    },
-    summaryTitle: {
-        fontSize: 15,
-        fontWeight: '700',
-        color: COLORS.text,
-    },
-    summaryOrderId: {
-        fontSize: 12,
-        color: '#999',
-        fontWeight: '500',
-    },
-    itemRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 8,
-        gap: 10,
-    },
-    itemQtyBadge: {
-        width: 28,
-        height: 28,
-        borderRadius: 6,
-        backgroundColor: '#F0F0F0',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    itemQtyText: {
-        fontSize: 11,
-        fontWeight: '700',
-        color: COLORS.secondary,
-    },
-    itemName: {
-        flex: 1,
-        fontSize: 13,
-        color: COLORS.text,
-        fontWeight: '500',
-    },
-    itemPrice: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: COLORS.text,
-    },
-    totalRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        borderTopWidth: 1,
-        borderTopColor: '#F0F0F0',
-        paddingTop: 12,
-        marginTop: 8,
-    },
-    totalLabel: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: COLORS.textSecondary,
-    },
-    totalValue: {
-        fontSize: 18,
-        fontWeight: '800',
-        color: COLORS.secondary,
-    },
-
-    // Address section
-    addressSection: {
-        backgroundColor: '#FAFAFA',
+    riderActionBtn: {
+        width: 40,
+        height: 40,
         borderRadius: 12,
-        padding: 14,
-        marginBottom: 20,
+        backgroundColor: 'rgba(124, 58, 237, 0.04)',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    addressHeader: {
+
+    // Tip Section
+    tipSection: {
+        marginTop: 24,
+    },
+    tipHeader: {
+        gap: 2,
+    },
+    tipTitle: {
+        fontSize: 15,
+        fontWeight: '900',
+        color: '#111827',
+    },
+    tipSubtitle: {
+        fontSize: 12,
+        color: '#6B7280',
+        fontWeight: '500',
+    },
+    tipButtons: {
+        flexDirection: 'row',
+        gap: 12,
+        marginTop: 16,
+    },
+    tipBtn: {
+        flex: 1,
+        height: 40,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    tipBtnActive: {
+        backgroundColor: ZEPTO_PURPLE,
+        borderColor: ZEPTO_PURPLE,
+    },
+    tipBtnText: {
+        fontSize: 13,
+        fontWeight: '800',
+        color: '#374151',
+    },
+    tipBtnTextActive: {
+        color: 'white',
+    },
+
+    // Order Details
+    orderDetails: {
+        marginTop: 24,
+    },
+    orderHeaderRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    orderLabel: {
+        fontSize: 15,
+        fontWeight: '900',
+        color: '#111827',
+    },
+    viewItemsText: {
+        fontSize: 12,
+        fontWeight: '800',
+        color: ZEPTO_PURPLE,
+    },
+    addressBox: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
-        marginBottom: 6,
-    },
-    addressTitle: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: COLORS.text,
+        marginTop: 12,
+        gap: 8,
+        backgroundColor: '#F9FAFB',
+        padding: 12,
+        borderRadius: 12,
     },
     addressText: {
+        flex: 1,
         fontSize: 13,
-        color: COLORS.text,
+        color: '#4B5563',
         fontWeight: '500',
-        marginLeft: 24,
-    },
-    addressCity: {
-        fontSize: 12,
-        color: '#999',
-        marginLeft: 24,
-        marginTop: 2,
     },
 });
 
 export default TrackingBottomSheet;
+

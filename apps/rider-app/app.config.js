@@ -74,13 +74,10 @@ module.exports = () => ({
       ],
     ],
     extra: {
-      LOCAL_IP: loadEnvValue('LOCAL_IP', '192.168.31.166'),
+      LOCAL_IP: loadEnvValue('LOCAL_IP', '192.168.1.7'),
       MAPMYINDIA_API_KEY: loadEnvValue('MAPMYINDIA_API_KEY', loadEnvValue('MAPPLS_API_KEY')),
       MAPMYINDIA_CLIENT_ID: loadEnvValue('MAPMYINDIA_CLIENT_ID'),
       MAPMYINDIA_CLIENT_SECRET: loadEnvValue('MAPMYINDIA_CLIENT_SECRET'),
-      eas: {
-        projectId: 'rider-app-project',
-      },
     },
   },
 });

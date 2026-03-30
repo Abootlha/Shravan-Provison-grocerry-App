@@ -18,6 +18,8 @@ export interface Rider {
   isOnline: boolean;
   rating: number;
   totalDeliveries: number;
+  totalEarnings?: number;
+  totalOrders?: number;
   acceptanceRate: number;
   createdAt: string;
 }

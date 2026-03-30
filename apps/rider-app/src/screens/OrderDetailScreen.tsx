@@ -8,13 +8,19 @@ import {
   Alert,
   Linking,
   ActivityIndicator,
+  StatusBar,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { COLORS, SPACING, ORDER_STATUS_LABELS, ORDER_STATUS_COLORS } from '../utils/constants';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { COLORS, SPACING, ORDER_STATUS_LABELS } from '../utils/constants';
 import { StatusStepper } from '../components/StatusStepper';
 import { useOrders } from '../hooks/useOrders';
 import type { OrderDetailScreenProps } from '../types/navigation';
 import type { Order } from '../types/order';
+
+const ZEPTO_PURPLE = '#7C3AED';
+const ZEPTO_GREEN = '#10B981';
 
 export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
   navigation,
@@ -83,68 +89,70 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
     );
   }
 
-  const statusColor = ORDER_STATUS_COLORS[activeOrder.status] || COLORS.textSecondary;
-
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
+      <StatusBar barStyle="dark-content" backgroundColor="white" />
+
+      <View style={styles.topHeader}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <MaterialCommunityIcons name="chevron-left" size={28} color="#333" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Order Details</Text>
+        <View style={{ width: 40 }} />
+      </View>
+
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <Text style={styles.orderNumber}>Order #{activeOrder.orderNumber}</Text>
-          <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
-            <Text style={styles.statusText}>
-              {ORDER_STATUS_LABELS[activeOrder.status]}
+        <View style={styles.statusCard}>
+          <View>
+            <Text style={styles.orderNumberTitle}>Order #{activeOrder.orderNumber}</Text>
+            <Text style={styles.orderDate}>Today, 09:45 PM</Text>
+          </View>
+          <View style={styles.statusBadgeContainer}>
+            <Text style={styles.statusBadgeText}>
+              {ORDER_STATUS_LABELS[activeOrder.status].toUpperCase()}
             </Text>
           </View>
         </View>
 
         {activeOrder.status !== 'pending' && (
-          <StatusStepper currentStatus={activeOrder.status} />
+          <View style={styles.stepperContainer}>
+            <StatusStepper currentStatus={activeOrder.status} />
+          </View>
         )}
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Pickup</Text>
-          <View style={styles.addressCard}>
+          <Text style={styles.sectionTitle}>PICKUP & DELIVERY</Text>
+          <View style={styles.addressContainer}>
             <View style={styles.addressRow}>
-              <View style={[styles.dot, { backgroundColor: COLORS.success }]} />
-              <View style={styles.addressContent}>
-                <Text style={styles.addressName}>{activeOrder.pickup.name}</Text>
-                <Text style={styles.addressText}>{activeOrder.pickup.address.full}</Text>
-                <TouchableOpacity
-                  onPress={() => handleCall(activeOrder.pickup.phone)}
-                  style={styles.callButton}
-                >
-                  <Text style={styles.callButtonText}>
-                    📞 {activeOrder.pickup.phone}
-                  </Text>
-                </TouchableOpacity>
+              <View style={styles.indicatorCol}>
+                <View style={[styles.indicatorDot, { backgroundColor: '#333' }]} />
+                <View style={styles.indicatorLine} />
+                <View style={[styles.indicatorDot, { backgroundColor: ZEPTO_GREEN }]} />
+              </View>
+              <View style={styles.addressDetails}>
+                <View style={styles.addressPoint}>
+                  <Text style={styles.pointTitle}>{activeOrder.pickup.name}</Text>
+                  <Text style={styles.pointSub}>{activeOrder.pickup.address.full}</Text>
+                  <TouchableOpacity onPress={() => handleCall(activeOrder.pickup.phone)} style={styles.inlineCall}>
+                    <MaterialCommunityIcons name="phone" size={14} color={ZEPTO_PURPLE} />
+                    <Text style={styles.inlineCallText}>Call Store</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.addressPoint}>
+                  <Text style={styles.pointTitle}>{activeOrder.delivery.name}</Text>
+                  <Text style={styles.pointSub}>{activeOrder.delivery.address.full}</Text>
+                  <TouchableOpacity onPress={() => handleCall(activeOrder.delivery.phone)} style={styles.inlineCall}>
+                    <MaterialCommunityIcons name="phone" size={14} color={ZEPTO_PURPLE} />
+                    <Text style={styles.inlineCallText}>Call Customer</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
           </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Delivery</Text>
-          <View style={styles.addressCard}>
-            <View style={styles.addressRow}>
-              <View style={[styles.dot, { backgroundColor: COLORS.primary }]} />
-              <View style={styles.addressContent}>
-                <Text style={styles.addressName}>{activeOrder.delivery.name}</Text>
-                <Text style={styles.addressText}>{activeOrder.delivery.address.full}</Text>
-                <TouchableOpacity
-                  onPress={() => handleCall(activeOrder.delivery.phone)}
-                  style={styles.callButton}
-                >
-                  <Text style={styles.callButtonText}>
-                    📞 {activeOrder.delivery.phone}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Items ({activeOrder.items.length})</Text>
+          <Text style={styles.sectionTitle}>ORDER SUMMARY</Text>
           <View style={styles.itemsCard}>
             {activeOrder.items.map((item, index) => (
               <View
@@ -154,21 +162,24 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
                   index < activeOrder.items.length - 1 && styles.itemBorder,
                 ]}
               >
-                <Text style={styles.itemName}>
-                  {item.quantity}x {item.name}
-                </Text>
+                <View style={styles.itemNameCol}>
+                  <View style={styles.quantityBox}>
+                    <Text style={styles.quantityText}>{item.quantity}</Text>
+                  </View>
+                  <Text style={styles.itemName}>{item.name}</Text>
+                </View>
                 <Text style={styles.itemPrice}>₹{item.price.toFixed(2)}</Text>
               </View>
             ))}
             <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Total</Text>
+              <Text style={styles.totalLabel}>Total Bill Amount</Text>
               <Text style={styles.totalValue}>₹{activeOrder.totalAmount.toFixed(2)}</Text>
             </View>
           </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Earnings</Text>
+          <Text style={styles.sectionTitle}>YOUR EARNINGS</Text>
           <View style={styles.earningsCard}>
             <View style={styles.earningRow}>
               <Text style={styles.earningLabel}>Delivery Fee</Text>
@@ -176,31 +187,34 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
             </View>
             {activeOrder.tip && activeOrder.tip > 0 && (
               <View style={styles.earningRow}>
-                <Text style={styles.earningLabel}>Tip</Text>
-                <Text style={[styles.earningValue, { color: COLORS.success }]}>
+                <Text style={styles.earningLabel}>Customer Tip</Text>
+                <Text style={[styles.earningValue, { color: ZEPTO_GREEN }]}>
                   +₹{activeOrder.tip.toFixed(2)}
                 </Text>
               </View>
             )}
-            <View style={[styles.earningRow, styles.totalEarning]}>
-              <Text style={styles.totalEarningLabel}>Total Earning</Text>
+            <View style={styles.divider} />
+            <View style={styles.earningRow}>
+              <Text style={styles.totalEarningLabel}>Estimated Earning</Text>
               <Text style={styles.totalEarningValue}>
                 ₹{(activeOrder.deliveryFee + (activeOrder.tip || 0)).toFixed(2)}
               </Text>
             </View>
           </View>
         </View>
+
+        <View style={{ height: 100 }} />
       </ScrollView>
 
       <View style={styles.footer}>
         {activeOrder.status === 'pending' && (
-          <>
+          <View style={styles.actionsRow}>
             <TouchableOpacity
               style={[styles.button, styles.rejectButton]}
               onPress={handleReject}
               disabled={loading}
             >
-              <Text style={styles.rejectButtonText}>Reject</Text>
+              <Text style={styles.rejectButtonText}>REJECT</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.button, styles.acceptButton]}
@@ -208,43 +222,45 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
               disabled={loading}
             >
               {loading ? (
-                <ActivityIndicator color={COLORS.surface} />
+                <ActivityIndicator color="white" />
               ) : (
-                <Text style={styles.acceptButtonText}>Accept</Text>
+                <Text style={styles.acceptButtonText}>ACCEPT ORDER</Text>
               )}
             </TouchableOpacity>
-          </>
+          </View>
         )}
 
         {activeOrder.status === 'accepted' && (
           <TouchableOpacity
-            style={[styles.button, styles.navigateButton]}
+            style={[styles.fullButton, { backgroundColor: ZEPTO_PURPLE }]}
             onPress={handleNavigate}
           >
-            <Text style={styles.navigateButtonText}>Navigate to Pickup</Text>
+            <MaterialCommunityIcons name="navigation-variant" size={20} color="white" />
+            <Text style={styles.fullButtonText}>NAVIGATE TO PICKUP</Text>
           </TouchableOpacity>
         )}
 
-        {activeOrder.status === 'in_transit' && (
-          <>
+        {activeOrder.status === 'picked_up' && (
+          <View style={styles.actionsRow}>
             <TouchableOpacity
-              style={[styles.button, styles.pickupButton]}
+              style={[styles.button, { backgroundColor: '#333' }]}
+              onPress={handleNavigate}
+            >
+              <MaterialCommunityIcons name="navigation" size={20} color="white" />
+              <Text style={styles.buttonText}>NAVIGATE</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.button, { backgroundColor: ZEPTO_GREEN }]}
               onPress={handleMarkPickedUp}
               disabled={loading}
             >
               {loading ? (
-                <ActivityIndicator color={COLORS.surface} />
+                <ActivityIndicator color="white" />
               ) : (
-                <Text style={styles.pickupButtonText}>Mark as Picked Up</Text>
+                <Text style={styles.buttonText}>DELIVERED</Text>
               )}
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.button, styles.navigateButton]}
-              onPress={handleNavigate}
-            >
-              <Text style={styles.navigateButtonText}>Navigate to Delivery</Text>
-            </TouchableOpacity>
-          </>
+          </View>
         )}
       </View>
     </SafeAreaView>
@@ -254,199 +270,300 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: '#F7F7F7',
+  },
+  topHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F5F5F5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#1F1F1F',
   },
   content: {
     flex: 1,
   },
-  header: {
+  statusCard: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: SPACING.md,
-    backgroundColor: COLORS.surface,
+    padding: 20,
+    backgroundColor: 'white',
+    marginBottom: 1,
   },
-  orderNumber: {
+  orderNumberTitle: {
     fontSize: 20,
-    fontWeight: '700',
-    color: COLORS.text,
+    fontWeight: '900',
+    color: '#1F1F1F',
   },
-  statusBadge: {
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusText: {
+  orderDate: {
     fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.surface,
+    color: '#888',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  statusBadgeContainer: {
+    backgroundColor: 'rgba(124, 58, 237, 0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+  statusBadgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: ZEPTO_PURPLE,
+    letterSpacing: 0.5,
+  },
+  stepperContainer: {
+    backgroundColor: 'white',
+    paddingVertical: 20,
+    marginBottom: 8,
   },
   section: {
-    padding: SPACING.md,
+    padding: 16,
+    paddingBottom: 0,
+    marginTop: 8,
   },
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: SPACING.sm,
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#888',
+    letterSpacing: 1,
+    marginBottom: 12,
+    marginLeft: 4,
   },
-  addressCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: SPACING.md,
+  addressContainer: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
   },
   addressRow: {
     flexDirection: 'row',
   },
-  dot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginTop: 4,
-    marginRight: SPACING.sm,
+  indicatorCol: {
+    alignItems: 'center',
+    width: 20,
+    paddingTop: 6,
   },
-  addressContent: {
+  indicatorDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  indicatorLine: {
+    width: 2,
+    flex: 1,
+    backgroundColor: '#F0F0F0',
+    marginVertical: 4,
+  },
+  addressDetails: {
+    flex: 1,
+    marginLeft: 12,
+    gap: 24,
+  },
+  addressPoint: {
     flex: 1,
   },
-  addressName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: 4,
+  pointTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#1F1F1F',
   },
-  addressText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    lineHeight: 20,
-    marginBottom: 8,
+  pointSub: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 4,
+    lineHeight: 18,
   },
-  callButton: {
-    alignSelf: 'flex-start',
+  inlineCall: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 6,
   },
-  callButtonText: {
-    fontSize: 14,
-    color: COLORS.primary,
-    fontWeight: '500',
+  inlineCallText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: ZEPTO_PURPLE,
   },
   itemsCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: SPACING.md,
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
   },
   itemRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: SPACING.sm,
+    alignItems: 'center',
+    paddingVertical: 12,
   },
   itemBorder: {
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    borderBottomColor: '#F7F7F7',
+  },
+  itemNameCol: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  quantityBox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    backgroundColor: '#F5F5F5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  quantityText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#333',
   },
   itemName: {
     fontSize: 14,
-    color: COLORS.text,
+    color: '#333',
+    fontWeight: '600',
   },
   itemPrice: {
     fontSize: 14,
-    color: COLORS.text,
-    fontWeight: '500',
+    color: '#1F1F1F',
+    fontWeight: '700',
   },
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingTop: SPACING.sm,
-    marginTop: SPACING.sm,
+    paddingTop: 16,
+    marginTop: 8,
     borderTopWidth: 1,
-    borderTopColor: COLORS.border,
+    borderTopColor: '#F0F0F0',
   },
   totalLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#1F1F1F',
   },
   totalValue: {
     fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
+    fontWeight: '900',
+    color: '#1F1F1F',
   },
   earningsCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: SPACING.md,
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
   },
   earningRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 6,
+    paddingVertical: 8,
   },
   earningLabel: {
     fontSize: 14,
-    color: COLORS.textSecondary,
+    color: '#666',
+    fontWeight: '500',
   },
   earningValue: {
     fontSize: 14,
-    color: COLORS.text,
-    fontWeight: '500',
+    color: '#1F1F1F',
+    fontWeight: '700',
   },
-  totalEarning: {
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    marginTop: SPACING.sm,
-    paddingTop: SPACING.sm,
+  divider: {
+    height: 1,
+    backgroundColor: '#F0F0F0',
+    marginVertical: 12,
   },
   totalEarningLabel: {
     fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
+    fontWeight: '800',
+    color: '#1F1F1F',
   },
   totalEarningValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.success,
+    fontSize: 18,
+    fontWeight: '900',
+    color: ZEPTO_GREEN,
   },
   footer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 16,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 16,
+    backgroundColor: 'white',
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+  },
+  actionsRow: {
     flexDirection: 'row',
-    padding: SPACING.md,
-    backgroundColor: COLORS.surface,
-    gap: SPACING.sm,
+    gap: 12,
   },
   button: {
     flex: 1,
-    paddingVertical: SPACING.md,
-    borderRadius: 12,
+    height: 54,
+    borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  fullButton: {
+    width: '100%',
+    height: 54,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 10,
   },
   rejectButton: {
-    backgroundColor: COLORS.error + '20',
+    backgroundColor: '#F5F5F5',
   },
   acceptButton: {
-    backgroundColor: COLORS.success,
-  },
-  pickupButton: {
-    backgroundColor: COLORS.secondary,
-  },
-  navigateButton: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: ZEPTO_PURPLE,
   },
   rejectButtonText: {
-    color: COLORS.error,
-    fontWeight: '600',
-    fontSize: 16,
+    color: '#666',
+    fontWeight: '900',
+    fontSize: 14,
   },
   acceptButtonText: {
-    color: COLORS.surface,
-    fontWeight: '600',
-    fontSize: 16,
+    color: 'white',
+    fontWeight: '900',
+    fontSize: 14,
   },
-  pickupButtonText: {
-    color: COLORS.surface,
-    fontWeight: '600',
-    fontSize: 16,
+  fullButtonText: {
+    color: 'white',
+    fontWeight: '900',
+    fontSize: 14,
+    letterSpacing: 0.5,
   },
-  navigateButtonText: {
-    color: COLORS.surface,
-    fontWeight: '600',
-    fontSize: 16,
+  buttonText: {
+    color: 'white',
+    fontWeight: '900',
+    fontSize: 14,
   },
   errorContainer: {
     flex: 1,
@@ -455,6 +572,7 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 16,
-    color: COLORS.textSecondary,
+    color: '#888',
   },
 });
+

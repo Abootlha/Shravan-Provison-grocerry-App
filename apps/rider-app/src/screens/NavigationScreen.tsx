@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,9 +7,12 @@ import {
   Dimensions,
   Alert,
   ActivityIndicator,
+  StatusBar,
+  Platform,
 } from 'react-native';
 import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS, SPACING } from '../utils/constants';
 import { openMapMyIndiaNavigation } from '../utils/mapmyindia';
 import { useOrders } from '../hooks/useOrders';
@@ -17,6 +20,34 @@ import { useLocation } from '../hooks/useLocation';
 import type { NavigationScreenProps } from '../types/navigation';
 
 const { width, height } = Dimensions.get('window');
+
+const ZEPTO_PURPLE = '#7C3AED';
+const ZEPTO_GREEN = '#10B981';
+
+const MAP_STYLE_SILVER = [
+  { featureType: 'all', elementType: 'labels.text.fill', stylers: [{ color: '#616161' }] },
+  { featureType: 'all', elementType: 'labels.text.stroke', stylers: [{ color: '#f5f5f5' }] },
+  { featureType: 'administrative.land_parcel', elementType: 'labels.text.fill', stylers: [{ color: '#bdbdbd' }] },
+  { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#eeeeee' }] },
+  { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#757575' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
+  { featureType: 'road.arterial', elementType: 'labels.text.fill', stylers: [{ color: '#757575' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#dadada' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#c9c9c9' }] },
+];
+
+const CustomMarkerView = ({ icon, color, label }: { icon: any; color: string; label: string }) => (
+  <View style={styles.markerContainer}>
+    <View style={[styles.markerOuter, { backgroundColor: color }]}>
+      <View style={styles.markerInner}>
+        <MaterialCommunityIcons name={icon} size={18} color="white" />
+      </View>
+    </View>
+    <View style={styles.markerLabel}>
+      <Text style={styles.markerLabelText}>{label}</Text>
+    </View>
+  </View>
+);
 
 export const NavigationScreen: React.FC<NavigationScreenProps> = ({
   navigation,
@@ -26,6 +57,7 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
   const { updateStatus, currentOrder } = useOrders();
   const { currentLocation } = useLocation();
   const [loading, setLoading] = useState(false);
+  const mapRef = useRef<MapView>(null);
 
   const activeOrder = currentOrder?.id === order.id ? currentOrder : order;
 
@@ -85,25 +117,24 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
 
   return (
     <View style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+
       <MapView
+        ref={mapRef}
         style={styles.map}
         provider={PROVIDER_DEFAULT}
         initialRegion={mapRegion}
+        customMapStyle={MAP_STYLE_SILVER}
         showsUserLocation
-        showsMyLocationButton
+        showsMyLocationButton={false}
       >
-        <Marker
-          coordinate={pickupCoords}
-          title="Pickup"
-          description={order.pickup.address.full}
-          pinColor={COLORS.success}
-        />
-        <Marker
-          coordinate={deliveryCoords}
-          title="Delivery"
-          description={order.delivery.address.full}
-          pinColor={COLORS.primary}
-        />
+        <Marker coordinate={pickupCoords}>
+          <CustomMarkerView icon="store" color="#333" label="Store" />
+        </Marker>
+
+        <Marker coordinate={deliveryCoords}>
+          <CustomMarkerView icon="map-marker" color={ZEPTO_GREEN} label="Customer" />
+        </Marker>
       </MapView>
 
       <SafeAreaView style={styles.overlay} edges={['top']}>
@@ -112,29 +143,39 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
-            <Text style={styles.backButtonText}>←</Text>
+            <MaterialCommunityIcons name="chevron-left" size={28} color="#333" />
           </TouchableOpacity>
           <View style={styles.headerContent}>
             <Text style={styles.headerTitle}>
-              {activeOrder.status === 'picked_up' ? 'Navigate to Delivery' : 'Navigate to Pickup'}
+              {activeOrder.status === 'picked_up' ? 'Delivery Location' : 'Store Pickup'}
             </Text>
-            <Text style={styles.headerSubtitle} numberOfLines={1}>
-              {activeOrder.status === 'picked_up'
-                ? order.delivery.address.full
-                : order.pickup.address.full}
-            </Text>
+            <View style={styles.liveIndicator}>
+              <View style={styles.liveDot} />
+              <Text style={styles.liveText}>READY</Text>
+            </View>
           </View>
         </View>
       </SafeAreaView>
 
       <View style={styles.bottomCard}>
-        <View style={styles.orderInfo}>
-          <Text style={styles.orderNumber}>Order #{order.orderNumber}</Text>
-          <View style={styles.addressPreview}>
-            <Text style={styles.addressLabel}>
-              {activeOrder.status === 'picked_up' ? '📍 Delivery' : '📍 Pickup'}
+        <View style={styles.dragHandle} />
+
+        <View style={styles.orderHeader}>
+          <View>
+            <Text style={styles.orderNumber}>#{order.orderNumber}</Text>
+            <Text style={styles.statusBadge}>
+              {activeOrder.status === 'picked_up' ? 'OUT FOR DELIVERY' : 'HEADING TO STORE'}
             </Text>
-            <Text style={styles.addressText} numberOfLines={1}>
+          </View>
+          <TouchableOpacity style={styles.callButton}>
+            <MaterialCommunityIcons name="phone" size={20} color={ZEPTO_PURPLE} />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.addressSection}>
+          <View style={styles.addressRow}>
+            <View style={[styles.addressDot, { backgroundColor: activeOrder.status === 'picked_up' ? ZEPTO_GREEN : '#333' }]} />
+            <Text style={styles.addressText} numberOfLines={2}>
               {activeOrder.status === 'picked_up'
                 ? order.delivery.address.full
                 : order.pickup.address.full}
@@ -142,40 +183,43 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
           </View>
         </View>
 
-        <TouchableOpacity
-          style={styles.mapButton}
-          onPress={handleOpenMapMyIndia}
-        >
-          <Text style={styles.mapButtonText}>🗺️ Open in MapMyIndia</Text>
-        </TouchableOpacity>
-
-        {activeOrder.status === 'accepted' && (
+        <View style={styles.actionsRow}>
           <TouchableOpacity
-            style={[styles.actionButton, styles.pickupButton]}
-            onPress={handleMarkPickedUp}
-            disabled={loading}
+            style={styles.navButton}
+            onPress={handleOpenMapMyIndia}
           >
-            {loading ? (
-              <ActivityIndicator color={COLORS.surface} />
-            ) : (
-              <Text style={styles.actionButtonText}>Mark as Picked Up</Text>
-            )}
+            <MaterialCommunityIcons name="navigation-variant" size={24} color="white" />
+            <Text style={styles.navButtonText}>NAVIGATE</Text>
           </TouchableOpacity>
-        )}
 
-        {activeOrder.status === 'picked_up' && (
-          <TouchableOpacity
-            style={[styles.actionButton, styles.deliverButton]}
-            onPress={handleMarkDelivered}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color={COLORS.surface} />
-            ) : (
-              <Text style={styles.actionButtonText}>Mark as Delivered</Text>
-            )}
-          </TouchableOpacity>
-        )}
+          {activeOrder.status === 'accepted' && (
+            <TouchableOpacity
+              style={[styles.actionButton, styles.pickupButton]}
+              onPress={handleMarkPickedUp}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Text style={styles.actionButtonText}>PICKED UP</Text>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {activeOrder.status === 'picked_up' && (
+            <TouchableOpacity
+              style={[styles.actionButton, styles.deliverButton]}
+              onPress={handleMarkDelivered}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Text style={styles.actionButtonText}>DELIVERED</Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
     </View>
   );
@@ -184,11 +228,11 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: '#F5F5F5',
   },
   map: {
     width,
-    height,
+    height: height * 0.7,
   },
   overlay: {
     position: 'absolute',
@@ -199,108 +243,209 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    marginHorizontal: SPACING.md,
-    marginTop: 44,
-    padding: SPACING.sm,
-    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    marginHorizontal: 16,
+    marginTop: Platform.OS === 'android' ? 40 : 0,
+    padding: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   backButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: COLORS.background,
+    backgroundColor: '#F5F5F5',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backButtonText: {
-    fontSize: 24,
-    color: COLORS.text,
-  },
   headerContent: {
     flex: 1,
-    marginLeft: SPACING.sm,
+    marginLeft: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   headerTitle: {
     fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
+    fontWeight: '800',
+    color: '#1F1F1F',
   },
-  headerSubtitle: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginTop: 2,
+  liveIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    gap: 6,
   },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: ZEPTO_GREEN,
+  },
+  liveText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: ZEPTO_GREEN,
+    letterSpacing: 0.5,
+  },
+
+  // Marker styles
+  markerContainer: {
+    alignItems: 'center',
+  },
+  markerOuter: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    padding: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  markerInner: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  markerLabel: {
+    backgroundColor: 'white',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: '#EEE',
+  },
+  markerLabelText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#333',
+  },
+
   bottomCard: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: COLORS.surface,
-    padding: SPACING.md,
-    paddingBottom: 34,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    backgroundColor: 'white',
+    padding: 20,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
+    shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 5,
+    shadowRadius: 10,
+    elevation: 10,
   },
-  orderInfo: {
-    marginBottom: SPACING.md,
+  dragHandle: {
+    width: 40,
+    height: 5,
+    backgroundColor: '#E0E0E0',
+    borderRadius: 2.5,
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  orderHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
   },
   orderNumber: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.text,
-    marginBottom: 8,
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#1F1F1F',
   },
-  addressPreview: {
-    backgroundColor: COLORS.background,
-    padding: SPACING.sm,
-    borderRadius: 8,
+  statusBadge: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: ZEPTO_PURPLE,
+    letterSpacing: 0.5,
+    marginTop: 2,
   },
-  addressLabel: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginBottom: 4,
+  callButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(124, 58, 237, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addressSection: {
+    backgroundColor: '#F9F9F9',
+    padding: 14,
+    borderRadius: 16,
+    marginBottom: 20,
+  },
+  addressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  addressDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
   addressText: {
+    flex: 1,
     fontSize: 14,
-    color: COLORS.text,
-  },
-  mapButton: {
-    backgroundColor: COLORS.primary,
-    paddingVertical: SPACING.sm,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: SPACING.sm,
-  },
-  mapButtonText: {
-    color: COLORS.surface,
+    color: '#444',
     fontWeight: '600',
-    fontSize: 16,
+    lineHeight: 20,
+  },
+
+  actionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  navButton: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#333',
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  navButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '900',
   },
   actionButton: {
-    paddingVertical: SPACING.md,
-    borderRadius: 12,
+    flex: 1.2,
+    paddingVertical: 14,
+    borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   pickupButton: {
-    backgroundColor: COLORS.secondary,
+    backgroundColor: ZEPTO_PURPLE,
   },
   deliverButton: {
-    backgroundColor: COLORS.success,
+    backgroundColor: ZEPTO_GREEN,
   },
   actionButtonText: {
-    color: COLORS.surface,
-    fontWeight: '600',
-    fontSize: 16,
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '900',
   },
 });
+

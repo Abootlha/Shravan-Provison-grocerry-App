@@ -1,110 +1,50 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Platform, Animated as RNAnimated, Image } from 'react-native';
+import { View, Text, StyleSheet, Platform, Animated as RNAnimated, TouchableOpacity } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import Constants from 'expo-constants';
 import { COLORS } from '../constants';
-import { isMapMyIndiaConfigured } from '../services/mapService';
 
-let MapView, Marker, Polyline, AnimatedRegion;
-const isExpoGo = Constants.executionEnvironment === 'storeClient';
+let MapView, Marker, Polyline;
 let mapsAvailable = false;
 
-if (!isExpoGo) {
-    try {
-        const maps = require('react-native-maps');
-        MapView = maps.default;
-        Marker = maps.Marker;
-        Polyline = maps.Polyline;
-        AnimatedRegion = maps.AnimatedRegion;
-        mapsAvailable = true;
-    } catch (e) {
-        mapsAvailable = false;
-    }
+try {
+    const maps = require('react-native-maps');
+    MapView = maps.default;
+    Marker = maps.Marker;
+    Polyline = maps.Polyline;
+    mapsAvailable = true;
+} catch (e) {
+    mapsAvailable = false;
 }
 
-const RiderMarkerView = ({ heading = 0 }) => (
-    <View style={styles.riderMarkerOuter}>
-        <View style={styles.riderMarkerInner}>
-            <MaterialCommunityIcons name="bike-fast" size={18} color={COLORS.white} />
+const ZEPTO_PURPLE = '#7C3AED';
+const ZEPTO_GREEN = '#10B981';
+
+const RiderMarkerView = () => (
+    <View style={styles.riderMarkerContainer}>
+        <View style={styles.scooterIconBox}>
+            <MaterialCommunityIcons name="moped" size={20} color="white" />
         </View>
-        <View style={styles.riderMarkerPulse} />
+        <View style={styles.scooterPointer} />
     </View>
 );
 
 const StoreMarkerView = () => (
-    <View style={styles.storeMarker}>
-        <MaterialCommunityIcons name="store" size={18} color={COLORS.white} />
+    <View style={styles.storeMarkerContainer}>
+        <View style={styles.storePin}>
+            <MaterialCommunityIcons name="storefront" size={16} color="white" />
+        </View>
+        <View style={styles.storePinTail} />
     </View>
 );
 
 const CustomerMarkerView = () => (
-    <View style={styles.customerMarkerOuter}>
-        <View style={styles.customerMarkerInner}>
-            <MaterialCommunityIcons name="map-marker" size={20} color={COLORS.white} />
+    <View style={styles.customerMarkerContainer}>
+        <View style={styles.customerPin}>
+            <MaterialCommunityIcons name="home-variant" size={16} color="white" />
         </View>
-        <View style={styles.customerMarkerPin} />
+        <View style={styles.customerPinTail} />
     </View>
 );
-
-const FallbackMap = ({ riderLocation, customerLocation, storeLocation, orderStatus, onMapReady }) => {
-    const pulseAnim = useRef(new RNAnimated.Value(1)).current;
-
-    useEffect(() => {
-        onMapReady?.();
-        RNAnimated.loop(
-            RNAnimated.sequence([
-                RNAnimated.timing(pulseAnim, { toValue: 1.3, duration: 1000, useNativeDriver: true }),
-                RNAnimated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
-            ])
-        ).start();
-    }, []);
-
-    const getStatusText = () => {
-        switch (orderStatus) {
-            case 'OUT_FOR_DELIVERY': return 'Your rider is on the way!';
-            case 'ASSIGNED': return 'Rider assigned, picking up your order';
-            case 'PACKED': return 'Order packed, assigning a rider';
-            default: return 'Map will appear when order is out for delivery';
-        }
-    };
-
-    return (
-        <View style={styles.fallbackContainer}>
-            <View style={styles.fallbackBg}>
-                {[...Array(6)].map((_, i) => (
-                    <View key={`h${i}`} style={[styles.fallbackGridLine, { top: `${(i + 1) * 14}%`, left: 0, right: 0, height: 1 }]} />
-                ))}
-                {[...Array(6)].map((_, i) => (
-                    <View key={`v${i}`} style={[styles.fallbackGridLine, { left: `${(i + 1) * 14}%`, top: 0, bottom: 0, width: 1 }]} />
-                ))}
-            </View>
-
-            <RNAnimated.View style={[styles.fallbackIcon, { transform: [{ scale: pulseAnim }] }]}>
-                <MaterialCommunityIcons
-                    name={orderStatus === 'OUT_FOR_DELIVERY' ? 'bike-fast' : 'map-marker-radius'}
-                    size={40}
-                    color={COLORS.secondary}
-                />
-            </RNAnimated.View>
-
-            <Text style={styles.fallbackTitle}>{getStatusText()}</Text>
-
-            {riderLocation && (
-                <View style={styles.fallbackCoordRow}>
-                    <View style={styles.fallbackDot} />
-                    <MaterialCommunityIcons name="bike-fast" size={14} color="#4CAF50" />
-                    <Text style={styles.fallbackCoordText}>
-                        Rider: {riderLocation.latitude.toFixed(5)}, {riderLocation.longitude.toFixed(5)}
-                    </Text>
-                </View>
-            )}
-
-            <Text style={styles.fallbackNote}>
-                Full map requires a development build with react-native-maps
-            </Text>
-        </View>
-    );
-};
 
 const OrderTrackingMap = ({
     riderLocation,
@@ -114,79 +54,32 @@ const OrderTrackingMap = ({
     riderHeading = 0,
     orderStatus,
     onMapReady,
+    showFullMap,
 }) => {
     const mapRef = useRef(null);
-    const riderMarkerRef = useRef(null);
     const [isMapReady, setIsMapReady] = useState(false);
-
-    if (!mapsAvailable) {
-        return (
-            <FallbackMap
-                riderLocation={riderLocation}
-                customerLocation={customerLocation}
-                storeLocation={storeLocation}
-                orderStatus={orderStatus}
-                onMapReady={onMapReady}
-            />
-        );
-    }
 
     useEffect(() => {
         if (!isMapReady || !mapRef.current) return;
 
         const coordinates = [];
+        if (riderLocation) coordinates.push(riderLocation);
+        if (customerLocation) coordinates.push(customerLocation);
+        if (storeLocation) coordinates.push(storeLocation);
 
-        if (riderLocation) {
-            coordinates.push({
-                latitude: riderLocation.latitude,
-                longitude: riderLocation.longitude,
-            });
-        }
-
-        if (customerLocation) {
-            coordinates.push({
-                latitude: customerLocation.latitude,
-                longitude: customerLocation.longitude,
-            });
-        }
-
-        if (storeLocation) {
-            coordinates.push({
-                latitude: storeLocation.latitude,
-                longitude: storeLocation.longitude,
-            });
-        }
-
-        if (coordinates.length >= 2) {
+        if (showFullMap && coordinates.length >= 2) {
             mapRef.current.fitToCoordinates(coordinates, {
-                edgePadding: {
-                    top: 80,
-                    right: 60,
-                    bottom: 320,
-                    left: 60,
-                },
+                edgePadding: { top: 100, right: 60, bottom: 400, left: 60 },
                 animated: true,
             });
-        } else if (coordinates.length === 1) {
+        } else if (riderLocation) {
             mapRef.current.animateToRegion({
-                ...coordinates[0],
-                latitudeDelta: 0.01,
-                longitudeDelta: 0.01,
-            }, 500);
+                ...riderLocation,
+                latitudeDelta: 0.005,
+                longitudeDelta: 0.005,
+            }, 1000);
         }
-    }, [isMapReady, riderLocation, customerLocation, storeLocation]);
-
-    useEffect(() => {
-        if (riderMarkerRef.current && riderLocation && Platform.OS === 'android') {
-            riderMarkerRef.current.animateMarkerToCoordinate(
-                {
-                    latitude: riderLocation.latitude,
-                    longitude: riderLocation.longitude,
-                },
-                800
-            );
-        }
-    }, [riderLocation]);
+    }, [isMapReady, showFullMap, riderLocation?.latitude, riderLocation?.longitude]);
 
     const handleMapReady = () => {
         setIsMapReady(true);
@@ -212,17 +105,23 @@ const OrderTrackingMap = ({
         { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
         { elementType: 'labels.text.fill', stylers: [{ color: '#616161' }] },
         { elementType: 'labels.text.stroke', stylers: [{ color: '#f5f5f5' }] },
+        { featureType: 'administrative.land_parcel', elementType: 'labels.text.fill', stylers: [{ color: '#bdbdbd' }] },
         { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#eeeeee' }] },
         { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#757575' }] },
         { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#e5e5e5' }] },
+        { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#9e9e9e' }] },
         { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
         { featureType: 'road.arterial', elementType: 'labels.text.fill', stylers: [{ color: '#757575' }] },
         { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#dadada' }] },
         { featureType: 'road.highway', elementType: 'labels.text.fill', stylers: [{ color: '#616161' }] },
+        { featureType: 'road.local', elementType: 'labels.text.fill', stylers: [{ color: '#9e9e9e' }] },
         { featureType: 'transit.line', elementType: 'geometry', stylers: [{ color: '#e5e5e5' }] },
+        { featureType: 'transit.station', elementType: 'geometry', stylers: [{ color: '#eeeeee' }] },
         { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#c9c9c9' }] },
         { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#9e9e9e' }] },
     ];
+
+    if (!mapsAvailable) return <View style={styles.container} />;
 
     return (
         <View style={styles.container}>
@@ -242,81 +141,54 @@ const OrderTrackingMap = ({
                 onMapReady={handleMapReady}
             >
                 {routeCoordinates.length > 1 && (
-                    <>
-                        <Polyline
-                            coordinates={routeCoordinates}
-                            strokeColor="rgba(12, 131, 31, 0.15)"
-                            strokeWidth={8}
-                        />
-                        <Polyline
-                            coordinates={routeCoordinates}
-                            strokeColor={COLORS.secondary}
-                            strokeWidth={4}
-                            lineCap="round"
-                            lineJoin="round"
-                        />
-                    </>
-                )}
-
-                {routeCoordinates.length === 0 && riderLocation && customerLocation && (
                     <Polyline
-                        coordinates={[
-                            { latitude: riderLocation.latitude, longitude: riderLocation.longitude },
-                            { latitude: customerLocation.latitude, longitude: customerLocation.longitude },
-                        ]}
-                        strokeColor={COLORS.secondary}
-                        strokeWidth={3}
-                        lineDashPattern={[10, 8]}
+                        coordinates={routeCoordinates}
+                        strokeColor={ZEPTO_PURPLE}
+                        strokeWidth={4}
+                        lineDashPattern={[0]}
+                        lineCap="round"
                     />
                 )}
 
                 {storeLocation && (
-                    <Marker
-                        coordinate={{
-                            latitude: storeLocation.latitude,
-                            longitude: storeLocation.longitude,
-                        }}
-                        title="Store"
-                        description="Pickup location"
-                        anchor={{ x: 0.5, y: 0.5 }}
-                    >
+                    <Marker coordinate={storeLocation} anchor={{ x: 0.5, y: 1 }}>
                         <StoreMarkerView />
                     </Marker>
                 )}
 
                 {customerLocation && (
-                    <Marker
-                        coordinate={{
-                            latitude: customerLocation.latitude,
-                            longitude: customerLocation.longitude,
-                        }}
-                        title="Your Location"
-                        description="Delivery address"
-                        anchor={{ x: 0.5, y: 1 }}
-                    >
+                    <Marker coordinate={customerLocation} anchor={{ x: 0.5, y: 1 }}>
                         <CustomerMarkerView />
                     </Marker>
                 )}
 
                 {riderLocation && (
                     <Marker
-                        ref={riderMarkerRef}
-                        coordinate={{
-                            latitude: riderLocation.latitude,
-                            longitude: riderLocation.longitude,
-                        }}
-                        title="Delivery Partner"
-                        description="Your rider is here"
+                        coordinate={riderLocation}
                         anchor={{ x: 0.5, y: 0.5 }}
                         rotation={riderHeading}
                         flat={true}
                     >
-                        <RiderMarkerView heading={riderHeading} />
+                        <RiderMarkerView />
                     </Marker>
                 )}
             </MapView>
 
-            <View style={styles.bottomGradient} pointerEvents="none" />
+            <TouchableOpacity
+                style={styles.fitButton}
+                onPress={() => {
+                    const coords = [];
+                    if (riderLocation) coords.push(riderLocation);
+                    if (customerLocation) coords.push(customerLocation);
+                    if (storeLocation) coords.push(storeLocation);
+                    mapRef.current?.fitToCoordinates(coords, {
+                        edgePadding: { top: 80, right: 60, bottom: 400, left: 60 },
+                        animated: true,
+                    });
+                }}
+            >
+                <MaterialCommunityIcons name="arrow-expand-all" size={24} color="#333" />
+            </TouchableOpacity>
         </View>
     );
 };
@@ -329,149 +201,97 @@ const styles = StyleSheet.create({
     map: {
         ...StyleSheet.absoluteFillObject,
     },
-
-    bottomGradient: {
+    fitButton: {
         position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        height: 60,
-        backgroundColor: 'transparent',
-    },
-
-    riderMarkerOuter: {
+        right: 16,
+        bottom: 320,
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: 'white',
         alignItems: 'center',
         justifyContent: 'center',
-    },
-    riderMarkerInner: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: '#4CAF50',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 3,
-        borderColor: COLORS.white,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 6,
-        zIndex: 10,
-    },
-    riderMarkerPulse: {
-        position: 'absolute',
-        width: 56,
-        height: 56,
-        borderRadius: 28,
-        backgroundColor: 'rgba(76, 175, 80, 0.2)',
-    },
-
-    storeMarker: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        backgroundColor: '#FF9800',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 2.5,
-        borderColor: COLORS.white,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 3,
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
         elevation: 5,
     },
 
-    customerMarkerOuter: {
+    // Rider Marker
+    riderMarkerContainer: {
         alignItems: 'center',
+        justifyContent: 'center',
     },
-    customerMarkerInner: {
+    scooterIconBox: {
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: COLORS.secondary,
+        backgroundColor: ZEPTO_PURPLE,
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 3,
-        borderColor: COLORS.white,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 6,
-    },
-    customerMarkerPin: {
-        width: 3,
-        height: 10,
-        backgroundColor: COLORS.secondary,
-        marginTop: -1,
-    },
-
-    fallbackContainer: {
-        flex: 1,
-        backgroundColor: '#E8F5E9',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 24,
-        position: 'relative',
-    },
-    fallbackBg: {
-        ...StyleSheet.absoluteFillObject,
-        opacity: 0.2,
-    },
-    fallbackGridLine: {
-        position: 'absolute',
-        backgroundColor: '#81C784',
-    },
-    fallbackIcon: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        backgroundColor: 'rgba(255,255,255,0.9)',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 16,
+        borderColor: 'white',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 4,
+        shadowOpacity: 0.3,
+        shadowRadius: 5,
+        elevation: 8,
     },
-    fallbackTitle: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#2E7D32',
-        textAlign: 'center',
-        marginBottom: 16,
+    scooterPointer: {
+        width: 0,
+        height: 0,
+        backgroundColor: 'transparent',
+        borderStyle: 'solid',
+        borderLeftWidth: 6,
+        borderRightWidth: 6,
+        borderTopWidth: 10,
+        borderLeftColor: 'transparent',
+        borderRightColor: 'transparent',
+        borderTopColor: ZEPTO_PURPLE,
+        marginTop: -2,
     },
-    fallbackCoordRow: {
-        flexDirection: 'row',
+
+    // Store Marker
+    storeMarkerContainer: {
         alignItems: 'center',
-        gap: 6,
-        backgroundColor: 'rgba(255,255,255,0.85)',
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        borderRadius: 20,
-        marginVertical: 4,
     },
-    fallbackDot: {
-        width: 8,
+    storePin: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: '#1F2937',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
+        borderColor: 'white',
+    },
+    storePinTail: {
+        width: 2,
         height: 8,
-        borderRadius: 4,
-        backgroundColor: '#4CAF50',
+        backgroundColor: '#1F2937',
     },
-    fallbackCoordText: {
-        fontSize: 12,
-        color: '#555',
-        fontWeight: '500',
+
+    // Customer Marker
+    customerMarkerContainer: {
+        alignItems: 'center',
     },
-    fallbackNote: {
-        fontSize: 12,
-        color: '#888',
-        marginTop: 20,
-        fontStyle: 'italic',
+    customerPin: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: ZEPTO_GREEN,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
+        borderColor: 'white',
+    },
+    customerPinTail: {
+        width: 2,
+        height: 8,
+        backgroundColor: ZEPTO_GREEN,
     },
 });
 
 export default OrderTrackingMap;
+

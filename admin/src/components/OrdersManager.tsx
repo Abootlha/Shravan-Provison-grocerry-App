@@ -23,6 +23,14 @@ interface Order {
 }
 const STATUS_OPTIONS = ['PENDING', 'CONFIRMED', 'PACKED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'];
 
+const NEXT_STATUS: Record<string, string[]> = {
+    PENDING: ['CONFIRMED'],
+    CONFIRMED: ['PACKED'],
+    PACKED: ['ASSIGNED'],
+    ASSIGNED: ['OUT_FOR_DELIVERY'],
+    OUT_FOR_DELIVERY: ['DELIVERED'],
+};
+
 const STATUS_CONFIG: Record<string, { color: string; glow: string; icon: React.ReactNode; label: string }> = {
     PENDING: { color: '#3B82F6', glow: 'rgba(59, 130, 246, 0.2)', icon: <Clock className="w-4 h-4" />, label: 'Placed' },
     CONFIRMED: { color: '#8B5CF6', glow: 'rgba(139, 92, 246, 0.2)', icon: <CheckCircle className="w-4 h-4" />, label: 'Confirmed' },
@@ -514,7 +522,7 @@ export default function OrdersManager() {
                                             Update Status
                                         </h3>
                                         <div className="flex flex-wrap gap-2">
-                                            {STATUS_OPTIONS.filter(s => s !== selectedOrder.orderStatus).map((status) => {
+                                            {[...(NEXT_STATUS[selectedOrder.orderStatus] || []), 'CANCELLED'].map((status) => {
                                                 const config = STATUS_CONFIG[status];
                                                 return (
                                                     <Button

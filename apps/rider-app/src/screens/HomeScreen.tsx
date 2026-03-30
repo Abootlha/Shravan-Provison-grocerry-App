@@ -8,8 +8,11 @@ import {
   Alert,
   ActivityIndicator,
   RefreshControl,
+  StatusBar,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS, SPACING } from '../utils/constants';
 import { OnlineToggle } from '../components/OnlineToggle';
 import { StatsCard } from '../components/StatsCard';
@@ -21,6 +24,9 @@ import { logout, setUser } from '../store/slices/authSlice';
 import { riderApi } from '../services/api';
 import type { HomeScreenProps } from '../types/navigation';
 import type { Rider } from '../types/rider';
+
+const ZEPTO_PURPLE = '#7C3AED';
+const ZEPTO_GREEN = '#10B981';
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const dispatch = useAppDispatch();
@@ -73,22 +79,26 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setRefreshing(false);
+    // Add real refresh logic here if needed
+    setTimeout(() => setRefreshing(false), 1000);
   }, []);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <StatusBar barStyle="dark-content" backgroundColor="white" />
+
       <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>Hello, {user?.name || 'Rider'}</Text>
-          <Text style={styles.subGreeting}>
-            {user?.isOnline ? 'You are online' : 'You are offline'}
-          </Text>
+        <View style={styles.headerLeft}>
+          <Text style={styles.greeting}>Hey {user?.name?.split(' ')[0] || 'Rider'},</Text>
+          <View style={styles.onlineStatusRow}>
+            <View style={[styles.statusIndicator, { backgroundColor: user?.isOnline ? ZEPTO_GREEN : '#AAA' }]} />
+            <Text style={styles.subGreeting}>
+              {user?.isOnline ? 'Active & Receiving Orders' : 'Offline - Go Online to work'}
+            </Text>
+          </View>
         </View>
         <TouchableOpacity onPress={handleLogout} style={styles.profileButton}>
-          <Text style={styles.profileInitial}>
-            {(user?.name || 'R').charAt(0).toUpperCase()}
-          </Text>
+          <MaterialCommunityIcons name="logout-variant" size={20} color={ZEPTO_PURPLE} />
         </TouchableOpacity>
       </View>
 
@@ -96,76 +106,88 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         style={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ZEPTO_PURPLE} />
         }
       >
-        <OnlineToggle
-          isOnline={user?.isOnline || false}
-          onToggle={handleToggleOnline}
-          loading={toggling}
-        />
-
-        <View style={styles.statsContainer}>
-          <StatsCard
-            title="Today's Deliveries"
-            value={user?.totalDeliveries || 0}
-            subtitle="Total: 0"
-          />
-          <StatsCard
-            title="Today's Earnings"
-            value={`₹${0}`}
-            color={COLORS.success}
-            subtitle="This week: ₹0"
+        <View style={styles.toggleSection}>
+          <OnlineToggle
+            isOnline={user?.isOnline || false}
+            onToggle={handleToggleOnline}
+            loading={toggling}
           />
         </View>
 
-        <View style={styles.statsContainer}>
-          <StatsCard
-            title="Rating"
-            value={user?.rating?.toFixed(1) || '0.0'}
-            color={COLORS.warning}
-          />
-          <StatsCard
-            title="Acceptance Rate"
-            value={`${user?.acceptanceRate || 0}%`}
-            color={COLORS.primary}
-          />
+        <View style={styles.statsGrid}>
+          <View style={styles.statsRow}>
+            <StatsCard
+              title="Today's Orders"
+              value={user?.totalDeliveries || 0}
+              icon="package-variant"
+            />
+            <StatsCard
+              title="Today's Earnings"
+              value={`₹${(user?.totalEarnings || 0).toFixed(0)}`}
+              color={ZEPTO_GREEN}
+              icon="currency-inr"
+            />
+          </View>
+          <View style={styles.statsRow}>
+            <StatsCard
+              title="Rating"
+              value={user?.rating?.toFixed(1) || '4.8'}
+              color="#FF9800"
+              icon="star"
+            />
+            <StatsCard
+              title="Online Hours"
+              value="4.5h"
+              color={ZEPTO_PURPLE}
+              icon="clock-outline"
+            />
+          </View>
         </View>
 
         {currentOrder && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Current Order</Text>
-            <OrderCard
-              order={currentOrder}
-              onPress={() =>
-                navigation.navigate('OrderDetail', {
-                  orderId: currentOrder.id,
-                  order: currentOrder,
-                })
-              }
-            />
-            <TouchableOpacity
-              style={styles.navigateButton}
-              onPress={() =>
-                navigation.navigate('Navigation', {
-                  orderId: currentOrder.id,
-                  order: currentOrder,
-                })
-              }
-            >
-              <Text style={styles.navigateButtonText}>Start Navigation</Text>
-            </TouchableOpacity>
+          <View style={styles.activeOrderSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>ACTIVE ORDER</Text>
+              <View style={styles.liveBadge}>
+                <View style={styles.liveDot} />
+                <Text style={styles.liveText}>READY</Text>
+              </View>
+            </View>
+            <View style={styles.activeOrderCard}>
+              <OrderCard
+                order={currentOrder}
+                onPress={() =>
+                  navigation.navigate('OrderDetail', {
+                    orderId: currentOrder.id,
+                    order: currentOrder,
+                  })
+                }
+              />
+              <TouchableOpacity
+                style={styles.navigateAction}
+                onPress={() =>
+                  navigation.navigate('Navigation', {
+                    orderId: currentOrder.id,
+                    order: currentOrder,
+                  })
+                }
+              >
+                <MaterialCommunityIcons name="navigation-variant" size={20} color="white" />
+                <Text style={styles.navigateActionText}>START NAVIGATION</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
-        {availableOrders.length > 0 && (
+        {availableOrders.length > 0 && !currentOrder && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Available Orders</Text>
-              <TouchableOpacity
-                onPress={() => navigation.navigate('AvailableOrders')}
-              >
-                <Text style={styles.seeAll}>See All ({availableOrders.length})</Text>
+              <Text style={styles.sectionTitle}>NEW REQUESTS</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('AvailableOrders')}>
+                <Text style={styles.seeAll}>SEE ALL ({availableOrders.length})</Text>
               </TouchableOpacity>
             </View>
             <OrderCard
@@ -177,33 +199,32 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
                   order: availableOrders[0],
                 })
               }
-              onReject={() => {}}
             />
           </View>
         )}
 
-        <View style={styles.quickActions}>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => navigation.navigate('Earnings')}
-          >
-            <Text style={styles.actionIcon}>💰</Text>
-            <Text style={styles.actionLabel}>Earnings</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => navigation.navigate('Profile')}
-          >
-            <Text style={styles.actionIcon}>👤</Text>
-            <Text style={styles.actionLabel}>Profile</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => navigation.navigate('AvailableOrders')}
-          >
-            <Text style={styles.actionIcon}>📦</Text>
-            <Text style={styles.actionLabel}>Orders</Text>
-          </TouchableOpacity>
+        <View style={styles.menuGrid}>
+          <Text style={styles.sectionTitle}>QUICK MENU</Text>
+          <View style={styles.menuRow}>
+            <MenuButton
+              label="Earnings"
+              icon="wallet-outline"
+              onPress={() => navigation.navigate('Earnings')}
+              color="#4F46E5"
+            />
+            <MenuButton
+              label="Orders"
+              icon="history"
+              onPress={() => navigation.navigate('AvailableOrders')}
+              color="#EF4444"
+            />
+            <MenuButton
+              label="Profile"
+              icon="account-outline"
+              onPress={() => navigation.navigate('Profile')}
+              color="#10B981"
+            />
+          </View>
         </View>
 
         <View style={styles.bottomPadding} />
@@ -212,103 +233,182 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   );
 };
 
+const MenuButton = ({ label, icon, onPress, color }: any) => (
+  <TouchableOpacity style={styles.menuBtn} onPress={onPress}>
+    <View style={[styles.menuIconBox, { backgroundColor: color + '15' }]}>
+      <MaterialCommunityIcons name={icon} size={24} color={color} />
+    </View>
+    <Text style={styles.menuLabel}>{label}</Text>
+  </TouchableOpacity>
+);
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: 'white',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: 'white',
+  },
+  headerLeft: {
+    flex: 1,
+  },
+  onlineStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    gap: 6,
+  },
+  statusIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   greeting: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: COLORS.text,
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#1F1F1F',
   },
   subGreeting: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginTop: 2,
+    fontSize: 12,
+    color: '#888',
+    fontWeight: '600',
   },
   profileButton: {
     width: 44,
     height: 44,
-    borderRadius: 22,
-    backgroundColor: COLORS.primary,
+    borderRadius: 14,
+    backgroundColor: '#F5F5F5',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  profileInitial: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.surface,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
   },
   content: {
     flex: 1,
-    padding: SPACING.md,
+    paddingHorizontal: 16,
   },
-  statsContainer: {
+  toggleSection: {
+    marginBottom: 8,
+  },
+  statsGrid: {
+    gap: 12,
+    marginTop: 12,
+  },
+  statsRow: {
     flexDirection: 'row',
-    gap: SPACING.sm,
-    marginTop: SPACING.md,
+    gap: 12,
   },
   section: {
-    marginTop: SPACING.lg,
+    marginTop: 24,
+  },
+  activeOrderSection: {
+    marginTop: 24,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: SPACING.sm,
+    marginBottom: 12,
+    paddingHorizontal: 4,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: SPACING.sm,
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#999',
+    letterSpacing: 1,
+  },
+  liveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    gap: 4,
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: ZEPTO_GREEN,
+  },
+  liveText: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: ZEPTO_GREEN,
+  },
+  activeOrderCard: {
+    backgroundColor: 'white',
+    borderRadius: 24,
+    padding: 2,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  navigateAction: {
+    flexDirection: 'row',
+    backgroundColor: ZEPTO_PURPLE,
+    margin: 12,
+    marginTop: 4,
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  navigateActionText: {
+    color: 'white',
+    fontWeight: '900',
+    fontSize: 14,
+    letterSpacing: 0.5,
   },
   seeAll: {
-    fontSize: 14,
-    color: COLORS.primary,
-    fontWeight: '600',
-  },
-  navigateButton: {
-    backgroundColor: COLORS.primary,
-    paddingVertical: SPACING.sm,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: SPACING.sm,
-  },
-  navigateButtonText: {
-    color: COLORS.surface,
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  quickActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: SPACING.xl,
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: SPACING.md,
-  },
-  actionButton: {
-    alignItems: 'center',
-  },
-  actionIcon: {
-    fontSize: 28,
-    marginBottom: 4,
-  },
-  actionLabel: {
     fontSize: 12,
-    color: COLORS.text,
-    fontWeight: '500',
+    color: ZEPTO_PURPLE,
+    fontWeight: '800',
+  },
+  menuGrid: {
+    marginTop: 32,
+  },
+  menuRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#F9F9F9',
+    borderRadius: 24,
+    padding: 16,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+  },
+  menuBtn: {
+    alignItems: 'center',
+    width: 80,
+  },
+  menuIconBox: {
+    width: 54,
+    height: 54,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  menuLabel: {
+    fontSize: 12,
+    color: '#333',
+    fontWeight: '700',
   },
   bottomPadding: {
-    height: 40,
+    height: 100,
   },
 });
+

@@ -9,6 +9,8 @@ import {
     ActivityIndicator,
     Animated,
     Dimensions,
+    Platform,
+    ScrollView,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
@@ -35,6 +37,9 @@ import {
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+const ZEPTO_PURPLE = '#7C3AED';
+const ZEPTO_GREEN = '#10B981';
+
 const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
     const dispatch = useDispatch();
     const { orderId } = navRoute.params || {};
@@ -54,6 +59,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
 
     const { token } = useSelector((state) => state.auth);
     const [mapReady, setMapReady] = useState(false);
+    const [showFullMap, setShowFullMap] = useState(false);
     const headerOpacity = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
@@ -160,7 +166,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
                 <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
                 <View style={styles.loadingContent}>
                     <View style={styles.loadingIconContainer}>
-                        <ActivityIndicator size="large" color={COLORS.secondary} />
+                        <ActivityIndicator size="large" color={ZEPTO_PURPLE} />
                     </View>
                     <Text style={styles.loadingTitle}>Finding your order</Text>
                     <Text style={styles.loadingSubtitle}>Setting up live tracking...</Text>
@@ -169,32 +175,79 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
         );
     }
 
+    const renderCarousel = () => (
+        <View style={styles.carouselContainer}>
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                pagingEnabled
+                style={styles.carouselScroll}
+            >
+                <View style={styles.carouselItem}>
+                    <View style={[styles.carouselCard, { backgroundColor: '#1A1A1A' }]}>
+                        <View style={styles.carouselInfo}>
+                            <Text style={styles.carouselBadge}>PREMIUM</Text>
+                            <Text style={styles.carouselTitle}>15% discount on First Year Premium</Text>
+                            <Text style={styles.carouselSubtitle}>100% premium back with special exit value benefit</Text>
+                            <TouchableOpacity style={styles.applyBtn}>
+                                <Text style={styles.applyBtnText}>APPLY NOW</Text>
+                                <MaterialCommunityIcons name="chevron-right" size={12} color={ZEPTO_PURPLE} />
+                            </TouchableOpacity>
+                        </View>
+                        <View style={styles.carouselImagePlaceholder}>
+                            <MaterialCommunityIcons name="wallet-giftcard" size={40} color="rgba(255,255,255,0.2)" />
+                        </View>
+                    </View>
+                </View>
+                <View style={styles.carouselItem}>
+                    <View style={[styles.carouselCard, { backgroundColor: ZEPTO_PURPLE }]}>
+                        <View style={styles.carouselInfo}>
+                            <Text style={styles.carouselBadge}>OFFER</Text>
+                            <Text style={styles.carouselTitle}>Get FREE Delivery on next 5 orders</Text>
+                            <Text style={styles.carouselSubtitle}>Valid for active ShravanKirana Pass members</Text>
+                        </View>
+                    </View>
+                </View>
+            </ScrollView>
+
+            <TouchableOpacity
+                style={styles.viewMapBtn}
+                onPress={() => setShowFullMap(!showFullMap)}
+            >
+                <View style={styles.viewMapContent}>
+                    <View style={styles.viewMapIconBox}>
+                        <MaterialCommunityIcons name="map-marker-distance" size={16} color="white" />
+                        <View style={styles.viewMapCross} />
+                    </View>
+                    <Text style={styles.viewMapText}>VIEW MAP</Text>
+                </View>
+            </TouchableOpacity>
+        </View>
+    );
+
     if (!shouldShowMap()) {
         return (
             <SafeAreaView style={styles.container}>
-                <StatusBar barStyle="light-content" backgroundColor={COLORS.secondary} />
+                <StatusBar barStyle="dark-content" backgroundColor="white" />
 
                 <View style={styles.header}>
                     <TouchableOpacity
                         style={styles.backBtn}
                         onPress={() => navigation.goBack()}
                     >
-                        <MaterialCommunityIcons name="arrow-left" size={22} color={COLORS.white} />
+                        <MaterialCommunityIcons name="chevron-left" size={28} color="#333" />
                     </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Order Tracking</Text>
-                    <View style={styles.headerRight}>
-                        <View style={[
-                            styles.connectionBadge,
-                            connectionStatus === 'connected' && styles.connectionBadgeOnline,
-                        ]}>
-                            <MaterialCommunityIcons
-                                name={connectionStatus === 'connected' ? 'wifi' : 'wifi-off'}
-                                size={16}
-                                color={connectionStatus === 'connected' ? '#4CAF50' : '#F44336'}
-                            />
-                        </View>
+                    <View style={styles.headerCenter}>
+                        <Text style={styles.headerTitleText}>Order Status</Text>
+                        <Text style={styles.headerSubtitleText}>#{orderId?.slice(-8).toUpperCase() || 'ORDER'}</Text>
                     </View>
+                    <TouchableOpacity style={styles.getHelpBtn}>
+                        <MaterialCommunityIcons name="chat-question-outline" size={18} color={ZEPTO_PURPLE} />
+                        <Text style={styles.getHelpText}>Get Help</Text>
+                    </TouchableOpacity>
                 </View>
+
+                {renderCarousel()}
 
                 <View style={styles.preDeliveryContainer}>
                     <PreDeliveryAnimation orderStatus={currentOrder.orderStatus} />
@@ -222,6 +275,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
                 riderHeading={riderHeading}
                 orderStatus={currentOrder.orderStatus}
                 onMapReady={() => setMapReady(true)}
+                showFullMap={showFullMap}
             />
 
             <Animated.View style={[styles.floatingHeader, { opacity: headerOpacity }]}>
@@ -229,23 +283,25 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
                     style={styles.floatingBackBtn}
                     onPress={() => navigation.goBack()}
                 >
-                    <MaterialCommunityIcons name="arrow-left" size={22} color={COLORS.text} />
+                    <MaterialCommunityIcons name="chevron-left" size={28} color={COLORS.text} />
                 </TouchableOpacity>
 
                 <View style={styles.floatingHeaderCenter}>
-                    <Text style={styles.floatingHeaderTitle}>Live Tracking</Text>
+                    <Text style={styles.floatingHeaderTitle}>Order Status</Text>
                     <View style={styles.liveIndicator}>
                         <View style={[
                             styles.liveDot,
                             connectionStatus === 'connected' && styles.liveDotOnline,
                         ]} />
-                        <Text style={styles.liveText}>
+                        <Text style={[styles.liveText, connectionStatus === 'connected' && { color: ZEPTO_GREEN }]}>
                             {connectionStatus === 'connected' ? 'LIVE' : 'CONNECTING'}
                         </Text>
                     </View>
                 </View>
 
-                <View style={styles.floatingHeaderRight} />
+                <TouchableOpacity style={styles.getHelpBtnHeader}>
+                    <MaterialCommunityIcons name="chat-question-outline" size={18} color={ZEPTO_PURPLE} />
+                </TouchableOpacity>
             </Animated.View>
 
             {error && (
@@ -306,8 +362,8 @@ const PreDeliveryAnimation = ({ orderStatus }) => {
                     icon: 'clock-outline',
                     title: 'Order Placed!',
                     subtitle: 'Waiting for store confirmation',
-                    color: '#0C831F',
-                    bgColor: '#E8F5E9',
+                    color: ZEPTO_PURPLE,
+                    bgColor: 'rgba(124, 58, 237, 0.08)',
                 };
             case 'CONFIRMED':
                 return {
@@ -322,8 +378,8 @@ const PreDeliveryAnimation = ({ orderStatus }) => {
                     icon: 'package-variant-closed',
                     title: 'Order Packed!',
                     subtitle: 'Looking for a delivery partner',
-                    color: '#2196F3',
-                    bgColor: '#E3F2FD',
+                    color: ZEPTO_GREEN,
+                    bgColor: 'rgba(16, 185, 129, 0.08)',
                 };
             default:
                 return {
@@ -440,7 +496,7 @@ const styles = StyleSheet.create({
         width: 80,
         height: 80,
         borderRadius: 40,
-        backgroundColor: '#E8F5E9',
+        backgroundColor: 'rgba(124, 58, 237, 0.08)',
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 20,
@@ -459,57 +515,171 @@ const styles = StyleSheet.create({
 
     header: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
-        backgroundColor: COLORS.secondary,
+        backgroundColor: COLORS.white,
         paddingHorizontal: 16,
-        paddingVertical: 14,
+        paddingVertical: 12,
+        paddingTop: Platform.OS === 'ios' ? 50 : 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F0F0F0',
     },
     backBtn: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#F5F5F5',
+    },
+    headerCenter: {
+        flex: 1,
+        marginLeft: 12,
+    },
+    headerTitleText: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: '#1F1F1F',
+    },
+    headerSubtitleText: {
+        fontSize: 12,
+        color: '#888',
+        fontWeight: '600',
+        marginTop: 1,
+    },
+    getHelpBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(124, 58, 237, 0.04)',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 12,
+        gap: 4,
+    },
+    getHelpText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: ZEPTO_PURPLE,
+    },
+    getHelpBtnHeader: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        backgroundColor: '#F5F5F5',
         alignItems: 'center',
         justifyContent: 'center',
     },
-    headerTitle: {
-        fontSize: 17,
-        fontWeight: '700',
-        color: COLORS.white,
+
+    carouselContainer: {
+        paddingVertical: 16,
+        backgroundColor: COLORS.white,
+        flexDirection: 'row',
+        alignItems: 'center',
     },
-    headerRight: {
-        width: 36,
+    carouselScroll: {
+        flex: 1,
+    },
+    carouselItem: {
+        width: SCREEN_WIDTH - 120,
+        marginLeft: 16,
+    },
+    carouselCard: {
+        borderRadius: 20,
+        padding: 16,
+        height: 120,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+    },
+    carouselInfo: {
+        flex: 1,
+        justifyContent: 'center',
+        gap: 4,
+    },
+    carouselBadge: {
+        fontSize: 9,
+        fontWeight: '900',
+        color: 'rgba(255,255,255,0.6)',
+        letterSpacing: 0.5,
+    },
+    carouselTitle: {
+        fontSize: 14,
+        fontWeight: '800',
+        color: 'white',
+        lineHeight: 18,
+    },
+    carouselSubtitle: {
+        fontSize: 10,
+        color: 'rgba(255,255,255,0.7)',
+        fontWeight: '600',
+    },
+    applyBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'white',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 8,
+        alignSelf: 'flex-start',
+        marginTop: 4,
+        gap: 2,
+    },
+    applyBtnText: {
+        fontSize: 9,
+        fontWeight: '900',
+        color: ZEPTO_PURPLE,
+    },
+    carouselImagePlaceholder: {
+        width: 40,
         alignItems: 'flex-end',
     },
-    connectionBadge: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        backgroundColor: 'rgba(255,255,255,0.15)',
+    viewMapBtn: {
+        marginHorizontal: 16,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    connectionBadgeOnline: {
-        backgroundColor: 'rgba(76, 175, 80, 0.15)',
+    viewMapContent: {
+        alignItems: 'center',
+        gap: 4,
+    },
+    viewMapIconBox: {
+        width: 64,
+        height: 64,
+        borderRadius: 16,
+        backgroundColor: '#E5E7EB',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+    },
+    viewMapCross: {
+        position: 'absolute',
+        width: 20,
+        height: 20,
+        // Small map icon overlay
+    },
+    viewMapText: {
+        fontSize: 9,
+        fontWeight: '900',
+        color: '#6B7280',
     },
 
     floatingHeader: {
         position: 'absolute',
-        top: 50,
+        top: Platform.OS === 'ios' ? 60 : 50,
         left: 16,
         right: 16,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        backgroundColor: 'rgba(255,255,255,0.95)',
-        borderRadius: 16,
-        paddingHorizontal: 6,
-        paddingVertical: 6,
+        backgroundColor: 'rgba(255, 255, 255, 0.95)',
+        borderRadius: 20,
+        paddingHorizontal: 8,
+        paddingVertical: 8,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.12,
+        shadowOpacity: 0.1,
         shadowRadius: 12,
         elevation: 8,
+        borderWidth: 1,
+        borderColor: '#F0F0F0',
     },
     floatingBackBtn: {
         width: 40,
@@ -521,47 +691,42 @@ const styles = StyleSheet.create({
     },
     floatingHeaderCenter: {
         flex: 1,
-        flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
+        gap: 2,
     },
     floatingHeaderTitle: {
         fontSize: 15,
-        fontWeight: '700',
+        fontWeight: '800',
         color: COLORS.text,
     },
     liveIndicator: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#FFF3E0',
+        backgroundColor: '#F8F8F8',
         paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 12,
+        paddingVertical: 2,
+        borderRadius: 8,
         gap: 4,
     },
     liveDot: {
         width: 6,
         height: 6,
         borderRadius: 3,
-        backgroundColor: '#F44336',
+        backgroundColor: '#AAA',
     },
     liveDotOnline: {
-        backgroundColor: '#4CAF50',
+        backgroundColor: ZEPTO_GREEN,
     },
     liveText: {
-        fontSize: 10,
-        fontWeight: '800',
-        color: '#FF9800',
-        letterSpacing: 1,
-    },
-    floatingHeaderRight: {
-        width: 40,
+        fontSize: 9,
+        fontWeight: '900',
+        color: '#888',
+        letterSpacing: 0.5,
     },
 
     errorBanner: {
         position: 'absolute',
-        top: 110,
+        top: 120,
         left: 16,
         right: 16,
         flexDirection: 'row',
@@ -610,9 +775,9 @@ const styles = StyleSheet.create({
         marginBottom: 20,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.1,
-        shadowRadius: 12,
-        elevation: 8,
+        shadowOpacity: 0.08,
+        shadowRadius: 10,
+        elevation: 6,
     },
     preDeliveryTitle: {
         fontSize: 22,
@@ -637,3 +802,4 @@ const styles = StyleSheet.create({
 });
 
 export default OrderTrackingScreen;
+

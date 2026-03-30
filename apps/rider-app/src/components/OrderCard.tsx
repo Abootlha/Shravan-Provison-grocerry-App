@@ -1,7 +1,11 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { COLORS, SPACING, ORDER_STATUS_LABELS, ORDER_STATUS_COLORS } from '../utils/constants';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { COLORS, SPACING, ORDER_STATUS_LABELS } from '../utils/constants';
 import type { Order } from '../types/order';
+
+const ZEPTO_PURPLE = '#7C3AED';
+const ZEPTO_GREEN = '#10B981';
 
 interface OrderCardProps {
   order: Order;
@@ -18,58 +22,52 @@ export const OrderCard: React.FC<OrderCardProps> = ({
   onAccept,
   onReject,
 }) => {
-  const statusColor = ORDER_STATUS_COLORS[order.status] || COLORS.textSecondary;
-
   return (
     <TouchableOpacity
       style={styles.container}
       onPress={onPress}
-      activeOpacity={onPress ? 0.7 : 1}
+      activeOpacity={onPress ? 0.8 : 1}
     >
       <View style={styles.header}>
-        <Text style={styles.orderNumber}>#{order.orderNumber}</Text>
-        <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
-          <Text style={styles.statusText}>{ORDER_STATUS_LABELS[order.status]}</Text>
+        <View>
+          <Text style={styles.orderNumber}>Order #{order.orderNumber}</Text>
+          <Text style={styles.timeTag}>9:45 PM • 3.2 km away</Text>
+        </View>
+        <View style={styles.statusBadge}>
+          <Text style={styles.statusText}>{ORDER_STATUS_LABELS[order.status].toUpperCase()}</Text>
         </View>
       </View>
 
-      <View style={styles.section}>
+      <View style={styles.addressSection}>
         <View style={styles.addressRow}>
-          <View style={[styles.dot, { backgroundColor: COLORS.success }]} />
-          <View style={styles.addressContent}>
-            <Text style={styles.addressLabel}>Pickup</Text>
-            <Text style={styles.addressText} numberOfLines={2}>
-              {order.pickup.address.full}
-            </Text>
+          <View style={styles.indicatorCol}>
+            <View style={[styles.dot, { backgroundColor: '#333' }]} />
+            <View style={styles.line} />
+            <View style={[styles.dot, { backgroundColor: ZEPTO_GREEN }]} />
           </View>
-        </View>
-
-        <View style={styles.divider} />
-
-        <View style={styles.addressRow}>
-          <View style={[styles.dot, { backgroundColor: COLORS.primary }]} />
-          <View style={styles.addressContent}>
-            <Text style={styles.addressLabel}>Delivery</Text>
-            <Text style={styles.addressText} numberOfLines={2}>
-              {order.delivery.address.full}
-            </Text>
+          <View style={styles.addressDetails}>
+            <View style={styles.point}>
+              <Text style={styles.pointLabel}>PICKUP FROM</Text>
+              <Text style={styles.pointText} numberOfLines={1}>{order.pickup.name}</Text>
+            </View>
+            <View style={styles.point}>
+              <Text style={styles.pointLabel}>DELIVER TO</Text>
+              <Text style={styles.pointText} numberOfLines={1}>{order.delivery.address.full}</Text>
+            </View>
           </View>
         </View>
       </View>
 
-      <View style={styles.footer}>
-        <View style={styles.footerItem}>
-          <Text style={styles.footerLabel}>Items</Text>
-          <Text style={styles.footerValue}>{order.items.length}</Text>
+      <View style={styles.statsRow}>
+        <View style={styles.stat}>
+          <MaterialCommunityIcons name="package-variant" size={14} color="#888" />
+          <Text style={styles.statText}>{order.items.length} Items</Text>
         </View>
-        <View style={styles.footerItem}>
-          <Text style={styles.footerLabel}>Amount</Text>
-          <Text style={styles.footerValue}>₹{order.totalAmount.toFixed(2)}</Text>
-        </View>
-        <View style={styles.footerItem}>
-          <Text style={styles.footerLabel}>Earn</Text>
-          <Text style={[styles.footerValue, { color: COLORS.success }]}>
-            ₹{order.deliveryFee.toFixed(2)}
+        <View style={styles.statDot} />
+        <View style={styles.stat}>
+          <MaterialCommunityIcons name="wallet-outline" size={14} color={ZEPTO_GREEN} />
+          <Text style={[styles.statText, { color: ZEPTO_GREEN, fontWeight: '800' }]}>
+            Earn ₹{order.deliveryFee.toFixed(0)}
           </Text>
         </View>
       </View>
@@ -77,16 +75,11 @@ export const OrderCard: React.FC<OrderCardProps> = ({
       {showActions && (
         <View style={styles.actions}>
           <TouchableOpacity
-            style={[styles.button, styles.rejectButton]}
-            onPress={onReject}
-          >
-            <Text style={styles.rejectButtonText}>Reject</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
             style={[styles.button, styles.acceptButton]}
             onPress={onAccept}
           >
-            <Text style={styles.acceptButtonText}>Accept</Text>
+            <Text style={styles.acceptButtonText}>ACCEPT NOW</Text>
+            <MaterialCommunityIcons name="chevron-right" size={18} color="white" />
           </TouchableOpacity>
         </View>
       )}
@@ -96,115 +89,132 @@ export const OrderCard: React.FC<OrderCardProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: SPACING.md,
+    backgroundColor: 'white',
+    borderRadius: 24,
+    padding: 16,
+    marginVertical: 4,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    elevation: 2,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
+    alignItems: 'flex-start',
+    marginBottom: 16,
   },
   orderNumber: {
     fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.text,
+    fontWeight: '900',
+    color: '#1F1F1F',
+  },
+  timeTag: {
+    fontSize: 11,
+    color: '#888',
+    marginTop: 2,
+    fontWeight: '600',
   },
   statusBadge: {
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 4,
-    borderRadius: 12,
+    backgroundColor: 'rgba(124, 58, 237, 0.08)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
   },
   statusText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.surface,
+    fontSize: 9,
+    fontWeight: '900',
+    color: ZEPTO_PURPLE,
+    letterSpacing: 0.5,
   },
-  section: {
-    marginBottom: SPACING.md,
+  addressSection: {
+    marginBottom: 16,
   },
   addressRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+  },
+  indicatorCol: {
+    alignItems: 'center',
+    width: 16,
+    paddingTop: 4,
   },
   dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginTop: 4,
-    marginRight: SPACING.sm,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
-  addressContent: {
-    flex: 1,
-  },
-  addressLabel: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginBottom: 2,
-  },
-  addressText: {
-    fontSize: 14,
-    color: COLORS.text,
-    lineHeight: 20,
-  },
-  divider: {
-    height: 12,
-    marginLeft: 4,
-    borderLeftWidth: 1,
-    borderLeftColor: COLORS.border,
+  line: {
+    width: 1.5,
+    height: 24,
+    backgroundColor: '#F0F0F0',
     marginVertical: 4,
   },
-  footer: {
-    flexDirection: 'row',
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    paddingTop: SPACING.md,
-  },
-  footerItem: {
+  addressDetails: {
     flex: 1,
+    marginLeft: 12,
+    gap: 12,
+  },
+  point: {
+    flex: 1,
+  },
+  pointLabel: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#AAA',
+    letterSpacing: 0.5,
+  },
+  pointText: {
+    fontSize: 13,
+    color: '#333',
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  statsRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F7F7F7',
+    gap: 8,
   },
-  footerLabel: {
+  stat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  statDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: '#DDD',
+  },
+  statText: {
     fontSize: 12,
-    color: COLORS.textSecondary,
-    marginBottom: 4,
-  },
-  footerValue: {
-    fontSize: 16,
+    color: '#666',
     fontWeight: '600',
-    color: COLORS.text,
   },
   actions: {
-    flexDirection: 'row',
-    marginTop: SPACING.md,
-    gap: SPACING.sm,
+    marginTop: 16,
   },
   button: {
-    flex: 1,
-    paddingVertical: SPACING.sm,
-    borderRadius: 8,
+    height: 48,
+    borderRadius: 14,
     alignItems: 'center',
-  },
-  rejectButton: {
-    backgroundColor: COLORS.error + '20',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
   },
   acceptButton: {
-    backgroundColor: COLORS.success,
-  },
-  rejectButtonText: {
-    color: COLORS.error,
-    fontWeight: '600',
-    fontSize: 16,
+    backgroundColor: ZEPTO_PURPLE,
   },
   acceptButtonText: {
-    color: COLORS.surface,
-    fontWeight: '600',
-    fontSize: 16,
+    color: 'white',
+    fontWeight: '900',
+    fontSize: 14,
+    letterSpacing: 0.5,
   },
 });
+

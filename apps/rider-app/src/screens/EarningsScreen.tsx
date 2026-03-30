@@ -7,13 +7,18 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS, SPACING } from '../utils/constants';
 import { StatsCard } from '../components/StatsCard';
 import { useAppDispatch, useAppSelector } from '../hooks/useAuth';
 import { fetchEarnings } from '../store/slices/earningsSlice';
 import type { EarningsScreenProps } from '../types/navigation';
+
+const ZEPTO_PURPLE = '#7C3AED';
+const ZEPTO_GREEN = '#10B981';
 
 type Period = 'daily' | 'weekly' | 'monthly';
 
@@ -71,89 +76,119 @@ export const EarningsScreen: React.FC<EarningsScreenProps> = ({ navigation }) =>
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <ScrollView
-        style={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
+      <StatusBar barStyle="dark-content" backgroundColor="white" />
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <MaterialCommunityIcons name="chevron-left" size={28} color="#333" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Earnings</Text>
+        <View style={{ width: 40 }} />
+      </View>
+
+      <View style={styles.periodSelectorOuter}>
         <View style={styles.periodSelector}>
           {renderPeriodButton('daily', 'Today')}
-          {renderPeriodButton('weekly', 'This Week')}
-          {renderPeriodButton('monthly', 'This Month')}
+          {renderPeriodButton('weekly', 'Week')}
+          {renderPeriodButton('monthly', 'Month')}
         </View>
+      </View>
 
-        <View style={styles.mainEarning}>
-          <Text style={styles.earningLabel}>
-            {period === 'daily'
-              ? "Today's Earnings"
-              : period === 'weekly'
-              ? "This Week's Earnings"
-              : "This Month's Earnings"}
-          </Text>
-          {loading && !refreshing ? (
-            <ActivityIndicator size="large" color={COLORS.primary} />
-          ) : (
-            <Text style={styles.earningValue}>₹{getEarnings().toFixed(2)}</Text>
-          )}
-        </View>
-
-        <View style={styles.statsGrid}>
-          <StatsCard
-            title="Deliveries"
-            value={stats.deliveries}
-            subtitle={
-              period === 'daily'
-                ? 'Today'
+      <ScrollView
+        style={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ZEPTO_PURPLE} />
+        }
+      >
+        <View style={styles.mainEarningCard}>
+          <View style={styles.earningHeader}>
+            <Text style={styles.earningLabel}>
+              {period === 'daily'
+                ? "TOTAL EARNING TODAY"
                 : period === 'weekly'
-                ? 'This Week'
-                : 'This Month'
-            }
-          />
-          <StatsCard
-            title="Rating"
-            value={stats.rating.toFixed(1)}
-            color={COLORS.warning}
-            subtitle="Average"
-          />
+                  ? "TOTAL EARNING THIS WEEK"
+                  : "TOTAL EARNING THIS MONTH"}
+            </Text>
+            <View style={styles.payoutBadge}>
+              <Text style={styles.payoutText}>READY FOR PAYOUT</Text>
+            </View>
+          </View>
+
+          <View style={styles.earningValueRow}>
+            {loading && !refreshing ? (
+              <ActivityIndicator size="small" color="white" />
+            ) : (
+              <Text style={styles.earningValue}>₹{getEarnings().toFixed(0)}</Text>
+            )}
+            <MaterialCommunityIcons name="chevron-right" size={24} color="rgba(255,255,255,0.6)" />
+          </View>
+
+          <View style={styles.earningFooter}>
+            <View style={styles.footerItem}>
+              <Text style={styles.footerLabel}>ORDERS</Text>
+              <Text style={styles.footerValue}>{stats.deliveries}</Text>
+            </View>
+            <View style={styles.footerDivider} />
+            <View style={styles.footerItem}>
+              <Text style={styles.footerLabel}>TIPS</Text>
+              <Text style={styles.footerValue}>₹{(getEarnings() * 0.1).toFixed(0)}</Text>
+            </View>
+          </View>
         </View>
 
         <View style={styles.statsGrid}>
+          <StatsCard
+            title="Avg Rating"
+            value={stats.rating.toFixed(1)}
+            icon="star"
+            color="#FF9800"
+          />
           <StatsCard
             title="Acceptance"
             value={`${stats.acceptanceRate}%`}
-            color={COLORS.primary}
-            subtitle="Rate"
-          />
-          <StatsCard
-            title="Earnings"
-            value={`₹${monthEarnings.toFixed(0)}`}
-            color={COLORS.success}
-            subtitle="This Month"
+            icon="check-circle-outline"
+            color={ZEPTO_GREEN}
           />
         </View>
 
         <View style={styles.breakdown}>
-          <Text style={styles.breakdownTitle}>Earnings Breakdown</Text>
+          <Text style={styles.sectionTitle}>EARNINGS BREAKDOWN</Text>
           <View style={styles.breakdownCard}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Daily Average</Text>
+              <View style={styles.labelCol}>
+                <Text style={styles.breakdownLabel}>Daily Average</Text>
+                <Text style={styles.breakdownSub}>Avg. per day worked</Text>
+              </View>
               <Text style={styles.breakdownValue}>
-                ₹{(todayEarnings / Math.max(1, new Date().getDate())).toFixed(2)}
+                ₹{(todayEarnings / Math.max(1, new Date().getDate())).toFixed(0)}
               </Text>
             </View>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Per Delivery</Text>
+              <View style={styles.labelCol}>
+                <Text style={styles.breakdownLabel}>Per Delivery</Text>
+                <Text style={styles.breakdownSub}>Includes basic + surge</Text>
+              </View>
               <Text style={styles.breakdownValue}>
-                ₹{stats.deliveries > 0 ? (getEarnings() / stats.deliveries).toFixed(2) : '0.00'}
+                ₹{stats.deliveries > 0 ? (getEarnings() / stats.deliveries).toFixed(0) : '0'}
               </Text>
             </View>
             <View style={[styles.breakdownRow, styles.breakdownRowLast]}>
-              <Text style={styles.breakdownLabel}>Best Day</Text>
-              <Text style={styles.breakdownValue}>₹{todayEarnings.toFixed(2)}</Text>
+              <View style={styles.labelCol}>
+                <Text style={styles.breakdownLabel}>Surge Pay</Text>
+                <Text style={styles.breakdownSub}>During peak hours</Text>
+              </View>
+              <Text style={[styles.breakdownValue, { color: ZEPTO_GREEN }]}>₹0</Text>
             </View>
           </View>
         </View>
+
+        <View style={styles.helpCard}>
+          <MaterialCommunityIcons name="help-circle-outline" size={20} color="#666" />
+          <Text style={styles.helpText}>How is my earning calculated?</Text>
+          <MaterialCommunityIcons name="chevron-right" size={18} color="#999" />
+        </View>
+
+        <View style={{ height: 100 }} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -162,90 +197,203 @@ export const EarningsScreen: React.FC<EarningsScreenProps> = ({ navigation }) =>
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: 'white',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F9F9F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#1F1F1F',
   },
   content: {
     flex: 1,
-    padding: SPACING.md,
+    paddingHorizontal: 16,
+  },
+  periodSelectorOuter: {
+    paddingHorizontal: 16,
+    marginBottom: 20,
   },
   periodSelector: {
     flexDirection: 'row',
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 14,
     padding: 4,
-    marginBottom: SPACING.md,
   },
   periodButton: {
     flex: 1,
-    paddingVertical: SPACING.sm,
+    paddingVertical: 10,
     alignItems: 'center',
-    borderRadius: 8,
+    borderRadius: 10,
   },
   periodButtonActive: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   periodButtonText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    fontWeight: '500',
+    fontSize: 13,
+    color: '#888',
+    fontWeight: '700',
   },
   periodButtonTextActive: {
-    color: COLORS.surface,
+    color: ZEPTO_PURPLE,
   },
-  mainEarning: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 16,
-    padding: SPACING.lg,
+  mainEarningCard: {
+    backgroundColor: ZEPTO_PURPLE,
+    borderRadius: 24,
+    padding: 24,
+    marginBottom: 16,
+    shadowColor: ZEPTO_PURPLE,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.2,
+    shadowRadius: 15,
+    elevation: 8,
+  },
+  earningHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: SPACING.md,
+    marginBottom: 12,
   },
   earningLabel: {
-    fontSize: 14,
-    color: COLORS.surface,
-    opacity: 0.9,
-    marginBottom: 8,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.7)',
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  payoutBadge: {
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  payoutText: {
+    fontSize: 8,
+    fontWeight: '900',
+    color: 'white',
+  },
+  earningValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 24,
   },
   earningValue: {
-    fontSize: 48,
-    fontWeight: '700',
-    color: COLORS.surface,
+    fontSize: 42,
+    fontWeight: '900',
+    color: 'white',
+  },
+  earningFooter: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 16,
+    padding: 16,
+    alignItems: 'center',
+  },
+  footerItem: {
+    flex: 1,
+  },
+  footerDivider: {
+    width: 1,
+    height: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    marginHorizontal: 16,
+  },
+  footerLabel: {
+    fontSize: 8,
+    color: 'rgba(255,255,255,0.6)',
+    fontWeight: '900',
+    marginBottom: 4,
+  },
+  footerValue: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: 'white',
   },
   statsGrid: {
     flexDirection: 'row',
-    gap: SPACING.sm,
-    marginBottom: SPACING.sm,
+    gap: 12,
+    marginBottom: 24,
   },
   breakdown: {
-    marginTop: SPACING.md,
+    marginTop: 8,
   },
-  breakdownTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: SPACING.sm,
+  sectionTitle: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#999',
+    letterSpacing: 1,
+    marginBottom: 12,
+    marginLeft: 4,
   },
   breakdownCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: SPACING.md,
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 2,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
   },
   breakdownRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: SPACING.sm,
+    alignItems: 'center',
+    padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    borderBottomColor: '#F5F5F5',
   },
   breakdownRowLast: {
     borderBottomWidth: 0,
   },
+  labelCol: {
+    flex: 1,
+  },
   breakdownLabel: {
     fontSize: 14,
-    color: COLORS.textSecondary,
+    color: '#1F1F1F',
+    fontWeight: '700',
   },
-  breakdownValue: {
-    fontSize: 14,
-    color: COLORS.text,
+  breakdownSub: {
+    fontSize: 11,
+    color: '#AAA',
+    marginTop: 2,
     fontWeight: '500',
   },
+  breakdownValue: {
+    fontSize: 15,
+    color: '#1F1F1F',
+    fontWeight: '800',
+  },
+  helpCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F9F9F9',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 20,
+    gap: 12,
+  },
+  helpText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#666',
+    fontWeight: '600',
+  },
 });
+
