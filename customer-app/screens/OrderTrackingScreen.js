@@ -15,7 +15,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
 import { COLORS } from '../constants';
-import { OrderService } from '../services';
+import { OrderService, SettingsService } from '../services';
 import socketService from '../services/socketService';
 import OrderTrackingMap from '../components/OrderTrackingMap';
 import TrackingBottomSheet from '../components/TrackingBottomSheet';
@@ -111,10 +111,21 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
     }, [riderLocation]);
 
     useEffect(() => {
-        dispatch(setStoreLocation({
-            latitude: 26.7606,
-            longitude: 83.3732,
-        }));
+        const fetchStoreLocation = async () => {
+            try {
+                const data = await SettingsService.getStoreSettings();
+                const settings = data?.settings || data;
+                if (settings?.location) {
+                    dispatch(setStoreLocation({
+                        latitude: settings.location.latitude,
+                        longitude: settings.location.longitude,
+                    }));
+                }
+            } catch (err) {
+                console.warn('Failed to fetch store location:', err);
+            }
+        };
+        fetchStoreLocation();
     }, []);
 
     const fetchOrderDetails = async () => {
@@ -157,7 +168,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
 
     const shouldShowMap = () => {
         if (!currentOrder) return false;
-        return ['ASSIGNED', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(currentOrder.orderStatus);
+        return ['CONFIRMED', 'PACKED', 'ASSIGNED', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(currentOrder.orderStatus);
     };
 
     if (isLoading || !currentOrder) {

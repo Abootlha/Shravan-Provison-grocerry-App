@@ -99,10 +99,8 @@ class SocketService {
       if (location) {
         this.sendLocationUpdate({
           riderId: '',
-          coordinates: {
-            latitude: location.latitude,
-            longitude: location.longitude,
-          },
+          latitude: location.latitude,
+          longitude: location.longitude,
           heading: location.heading,
           speed: location.speed,
           timestamp: new Date().toISOString(),

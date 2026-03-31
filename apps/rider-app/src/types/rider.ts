@@ -37,10 +37,8 @@ export interface RiderStats {
 
 export interface RiderLocation {
   riderId: string;
-  coordinates: {
-    latitude: number;
-    longitude: number;
-  };
+  latitude: number;
+  longitude: number;
   heading?: number;
   speed?: number;
   timestamp: string;
