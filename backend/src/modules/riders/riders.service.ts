@@ -1,11 +1,12 @@
 import { Injectable, BadRequestException, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { User, UserDocument, UserRole } from '../users/schemas/user.schema';
+import { Rider, RiderDocument, RiderStatus, VehicleType } from './schemas/rider.schema';
 import { RedisService } from '../../common/utils/redis.service';
 import { TrackingGateway } from '../../sockets/tracking.gateway';
 import { ETAService } from '../orders/eta.service';
 import { Order, OrderDocument, OrderStatus } from '../orders/schemas/order.schema';
+import * as bcrypt from 'bcrypt';
 
 export interface LocationDto {
   latitude: number;
@@ -16,41 +17,31 @@ export interface LocationDto {
 @Injectable()
 export class RidersService {
   constructor(
-    @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(Rider.name) private riderModel: Model<RiderDocument>,
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     private readonly redisService: RedisService,
     @Inject(forwardRef(() => TrackingGateway))
     private readonly trackingGateway: TrackingGateway,
     @Inject(forwardRef(() => ETAService))
     private readonly etaService: ETAService,
-  ) {}
+  ) { }
 
-  /**
-   * Find riders with optional status filter.
-   */
-  async findAll(status?: string): Promise<User[]> {
-    const query: Record<string, any> = {
-      role: UserRole.RIDER,
-    };
+  async findAll(status?: string): Promise<Rider[]> {
+    const query: Record<string, any> = {};
 
     if (status === 'available') {
-      query.isAvailable = true;
-      query.isOnline = true;
+      query.status = RiderStatus.AVAILABLE;
     } else if (status === 'busy') {
-      query.isAvailable = false;
-      query.isOnline = true;
+      query.status = RiderStatus.BUSY;
     } else if (status === 'offline') {
-      query.isOnline = false;
+      query.status = RiderStatus.OFFLINE;
     }
 
-    return this.userModel.find(query).lean().exec();
+    return this.riderModel.find(query).lean().exec();
   }
 
-  async findRiderForUser(userId: string): Promise<UserDocument> {
-    const rider = await this.userModel.findOne({
-      _id: userId,
-      role: UserRole.RIDER,
-    });
+  async findRiderById(riderId: string): Promise<RiderDocument> {
+    const rider = await this.riderModel.findById(riderId);
 
     if (!rider) {
       throw new NotFoundException('Rider not found');
@@ -59,18 +50,30 @@ export class RidersService {
     return rider;
   }
 
+  async findByUsername(username: string): Promise<RiderDocument | null> {
+    return this.riderModel.findOne({ username });
+  }
+
+  async findByPhone(phone: string): Promise<Rider | null> {
+    return this.riderModel.findOne({ phone }).lean().exec();
+  }
+
   async updatePresence(
     riderId: string,
     presence: { isOnline?: boolean; isAvailable?: boolean },
-  ): Promise<UserDocument> {
-    const rider = await this.findRiderForUser(riderId);
+  ): Promise<RiderDocument> {
+    const rider = await this.findRiderById(riderId);
 
     if (typeof presence.isOnline === 'boolean') {
-      rider.isOnline = presence.isOnline;
+      rider.status = presence.isOnline
+        ? (presence.isAvailable ? RiderStatus.AVAILABLE : RiderStatus.BUSY)
+        : RiderStatus.OFFLINE;
     }
 
     if (typeof presence.isAvailable === 'boolean') {
-      rider.isAvailable = presence.isAvailable;
+      rider.status = rider.status === RiderStatus.OFFLINE
+        ? RiderStatus.OFFLINE
+        : (presence.isAvailable ? RiderStatus.AVAILABLE : RiderStatus.BUSY);
     }
 
     await rider.save();
@@ -82,7 +85,7 @@ export class RidersService {
     avgRating: number;
     acceptanceRate: number;
   }> {
-    await this.findRiderForUser(riderId);
+    await this.findRiderById(riderId);
 
     const totalDeliveries = await this.orderModel.countDocuments({
       riderId: new Types.ObjectId(riderId),
@@ -100,66 +103,36 @@ export class RidersService {
     };
   }
 
-  /**
-   * Update rider availability status
-   */
-  async updateAvailability(riderId: string, isAvailable: boolean): Promise<User> {
-    const rider = await this.userModel.findOne({
-      _id: riderId,
-      role: UserRole.RIDER,
-    });
+  async updateAvailability(riderId: string, isAvailable: boolean): Promise<Rider> {
+    const rider = await this.findRiderById(riderId);
 
-    if (!rider) {
-      throw new NotFoundException('Rider not found');
-    }
-
-    rider.isAvailable = isAvailable;
+    rider.status = isAvailable ? RiderStatus.AVAILABLE : RiderStatus.BUSY;
     await rider.save();
 
     return rider;
   }
 
-  /**
-   * Update rider online status
-   */
-  async updateOnlineStatus(riderId: string, isOnline: boolean): Promise<User> {
-    const rider = await this.userModel.findOne({
-      _id: riderId,
-      role: UserRole.RIDER,
-    });
+  async updateOnlineStatus(riderId: string, isOnline: boolean): Promise<Rider> {
+    const rider = await this.findRiderById(riderId);
 
-    if (!rider) {
-      throw new NotFoundException('Rider not found');
-    }
-
-    rider.isOnline = isOnline;
+    rider.status = isOnline ? RiderStatus.AVAILABLE : RiderStatus.OFFLINE;
     await rider.save();
 
     return rider;
   }
 
-  /**
-   * Find all available riders (both available and online)
-   */
-  async findAvailableRiders(): Promise<User[]> {
-    return this.userModel
+  async findAvailableRiders(): Promise<Rider[]> {
+    return this.riderModel
       .find({
-        role: UserRole.RIDER,
-        isAvailable: true,
-        isOnline: true,
+        status: RiderStatus.AVAILABLE,
+        isActive: true,
       })
       .lean()
       .exec();
   }
 
-  /**
-   * Find rider by ID
-   */
-  async findById(riderId: string): Promise<User> {
-    const rider = await this.userModel.findOne({
-      _id: riderId,
-      role: UserRole.RIDER,
-    });
+  async findById(riderId: string): Promise<Rider> {
+    const rider = await this.riderModel.findById(riderId);
 
     if (!rider) {
       throw new NotFoundException('Rider not found');
@@ -168,26 +141,18 @@ export class RidersService {
     return rider;
   }
 
-  /**
-   * Validate location update is not throttled (5-second minimum interval)
-   */
   async validateLocationUpdate(riderId: string): Promise<boolean> {
     const throttleKey = `rider:location:throttle:${riderId}`;
     const lastUpdate = await this.redisService.get(throttleKey);
 
     if (lastUpdate) {
-      // Location update is throttled
       return false;
     }
 
     return true;
   }
 
-  /**
-   * Update rider location with throttling
-   */
-  async updateLocation(riderId: string, location: LocationDto): Promise<User> {
-    // Validate coordinates
+  async updateLocation(riderId: string, location: LocationDto): Promise<Rider> {
     if (!Number.isFinite(location.latitude) || location.latitude < -90 || location.latitude > 90) {
       throw new BadRequestException('Latitude must be between -90 and 90');
     }
@@ -195,23 +160,13 @@ export class RidersService {
       throw new BadRequestException('Longitude must be between -180 and 180');
     }
 
-    // Check throttling
     const isAllowed = await this.validateLocationUpdate(riderId);
     if (!isAllowed) {
       throw new BadRequestException('Location updates are throttled to 5 seconds minimum interval');
     }
 
-    // Find rider
-    const rider = await this.userModel.findOne({
-      _id: riderId,
-      role: UserRole.RIDER,
-    });
+    const rider = await this.findRiderById(riderId);
 
-    if (!rider) {
-      throw new NotFoundException('Rider not found');
-    }
-
-    // Update location
     rider.currentLocation = {
       type: 'Point',
       coordinates: [location.longitude, location.latitude],
@@ -220,11 +175,9 @@ export class RidersService {
 
     await rider.save();
 
-    // Set throttle timestamp in Redis with 5-second TTL
     const throttleKey = `rider:location:throttle:${riderId}`;
     await this.redisService.set(throttleKey, Date.now().toString(), 5);
 
-    // Find all active orders for this rider (ASSIGNED or OUT_FOR_DELIVERY)
     const activeOrders = await this.orderModel
       .find({
         riderId: new Types.ObjectId(riderId),
@@ -236,7 +189,6 @@ export class RidersService {
       .lean()
       .exec();
 
-    // Broadcast location update to all order rooms
     for (const order of activeOrders) {
       this.trackingGateway.broadcastRiderLocationUpdate(
         order._id.toString(),
@@ -244,7 +196,6 @@ export class RidersService {
         riderId,
       );
 
-      // Trigger ETA recalculation for OUT_FOR_DELIVERY orders
       if (order.orderStatus === OrderStatus.OUT_FOR_DELIVERY) {
         try {
           const eta = await this.etaService.recalculateForOrder(order._id.toString());
@@ -252,7 +203,6 @@ export class RidersService {
             this.trackingGateway.broadcastETAUpdate(order._id.toString(), eta);
           }
         } catch (error) {
-          // Log error but don't fail the location update
           console.error(`Failed to recalculate ETA for order ${order._id}:`, error);
         }
       }
@@ -261,20 +211,14 @@ export class RidersService {
     return rider;
   }
 
-  /**
-   * Find nearby riders using geospatial query
-   * @param coordinates [longitude, latitude]
-   * @param maxDistance Maximum distance in meters
-   */
   async findNearbyRiders(
     coordinates: [number, number],
     maxDistance: number = 5000,
-  ): Promise<User[]> {
-    return this.userModel
+  ): Promise<Rider[]> {
+    return this.riderModel
       .find({
-        role: UserRole.RIDER,
-        isAvailable: true,
-        isOnline: true,
+        status: RiderStatus.AVAILABLE,
+        isActive: true,
         currentLocation: {
           $near: {
             $geometry: {
@@ -287,5 +231,57 @@ export class RidersService {
       })
       .lean()
       .exec();
+  }
+
+  async createRider(data: any): Promise<Rider> {
+    const { name, username, password, phone, vehicleType } = data;
+
+    const normalizedPhone = phone.startsWith('+91') ? phone : `+91${phone.replace(/\s/g, '')}`;
+
+    const existingRider = await this.riderModel.findOne({
+      $or: [
+        { username },
+        { phone: normalizedPhone },
+        { phone: phone.replace(/\s/g, '') },
+      ],
+    });
+
+    if (existingRider) {
+      throw new BadRequestException('Username or phone number already registered');
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const rider = new this.riderModel({
+      name,
+      username,
+      password: hashedPassword,
+      phone: normalizedPhone,
+      vehicleType: vehicleType || VehicleType.TWO_WHEELER,
+      status: RiderStatus.OFFLINE,
+      isActive: true,
+      currentLocation: {
+        type: 'Point',
+        coordinates: [0, 0],
+      },
+    });
+
+    return rider.save();
+  }
+
+  async updateRider(riderId: string, data: Partial<Rider>): Promise<Rider> {
+    const rider = await this.findRiderById(riderId);
+
+    if (data.name) rider.name = data.name;
+    if (data.vehicleType) rider.vehicleType = data.vehicleType;
+    if (data.isActive !== undefined) rider.isActive = data.isActive;
+
+    await rider.save();
+    return rider;
+  }
+
+  async deleteRider(riderId: string): Promise<void> {
+    const rider = await this.findRiderById(riderId);
+    await rider.deleteOne();
   }
 }

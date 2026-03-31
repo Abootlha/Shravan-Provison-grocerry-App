@@ -5,7 +5,7 @@ import { Model } from 'mongoose';
 import axios from 'axios';
 import { RedisService } from '../../common/utils/redis.service';
 import { Order, OrderDocument, OrderStatus } from './schemas/order.schema';
-import { User, UserDocument, UserRole } from '../users/schemas/user.schema';
+import { Rider, RiderDocument } from '../riders/schemas/rider.schema';
 
 export interface LocationDto {
   latitude: number;
@@ -37,7 +37,7 @@ export class ETAService {
     private readonly configService: ConfigService,
     private readonly redisService: RedisService,
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
-    @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(Rider.name) private riderModel: Model<RiderDocument>,
   ) {
     this.mapplsApiKey =
       this.configService.get<string>('MAPMYINDIA_API_KEY') ||
@@ -210,10 +210,7 @@ export class ETAService {
     }
 
     // Get rider details
-    const rider = await this.userModel.findOne({
-      _id: order.riderId,
-      role: UserRole.RIDER,
-    });
+    const rider = await this.riderModel.findById(order.riderId);
 
     if (!rider || !rider.currentLocation) {
       this.logger.warn(

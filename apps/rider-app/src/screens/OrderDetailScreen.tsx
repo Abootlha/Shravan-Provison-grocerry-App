@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS, SPACING, ORDER_STATUS_LABELS } from '../utils/constants';
 import { StatusStepper } from '../components/StatusStepper';
 import { useOrders } from '../hooks/useOrders';
+import { useLocation } from '../hooks/useLocation';
+import { locationService } from '../services/location';
 import type { OrderDetailScreenProps } from '../types/navigation';
 import type { Order } from '../types/order';
 
@@ -30,6 +32,23 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
   const [order, setOrder] = useState<Order | undefined>(initialOrder);
   const [loading, setLoading] = useState(false);
   const { accept, reject, updateStatus, currentOrder } = useOrders();
+  const { currentLocation, isTracking } = useLocation();
+  const [locationEnabled, setLocationEnabled] = useState(false);
+  const [riderCoords, setRiderCoords] = useState<{ lat: number; lng: number } | null>(null);
+
+  useEffect(() => {
+    const checkLocation = async () => {
+      const hasPermission = await locationService.hasPermissions();
+      setLocationEnabled(hasPermission);
+      if (hasPermission) {
+        const loc = await locationService.getCurrentLocation();
+        if (loc) {
+          setRiderCoords({ lat: loc.latitude, lng: loc.longitude });
+        }
+      }
+    };
+    checkLocation();
+  }, []);
 
   const activeOrder = currentOrder?.id === orderId ? currentOrder : order;
 
@@ -40,6 +59,30 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
   }, []);
 
   const handleAccept = useCallback(async () => {
+    if (!locationEnabled) {
+      Alert.alert(
+        'Location Required',
+        'You must enable location services to accept orders. Please enable location in your device settings and try again.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]
+      );
+      return;
+    }
+
+    if (!riderCoords) {
+      Alert.alert(
+        'Location Unavailable',
+        'Unable to get your current location. Please make sure GPS is enabled and try again.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Retry', onPress: handleAccept },
+        ]
+      );
+      return;
+    }
+
     setLoading(true);
     const result = await accept(orderId);
     setLoading(false);
@@ -47,7 +90,7 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
       setOrder(result);
       Alert.alert('Success', 'Order accepted successfully!');
     }
-  }, [accept, orderId]);
+  }, [accept, orderId, locationEnabled, riderCoords]);
 
   const handleReject = useCallback(async () => {
     Alert.alert('Reject Order', 'Are you sure you want to reject this order?', [
@@ -66,14 +109,22 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
   }, [reject, orderId, navigation]);
 
   const handleMarkPickedUp = useCallback(async () => {
+    if (!riderCoords) {
+      Alert.alert('Location Required', 'Unable to get your current location. Please wait for GPS to update.');
+      return;
+    }
+
     setLoading(true);
-    const result = await updateStatus(orderId, 'picked_up');
+    const result = await updateStatus(orderId, 'picked_up', {
+      latitude: riderCoords.lat,
+      longitude: riderCoords.lng,
+    });
     setLoading(false);
     if (result) {
       setOrder(result);
       navigation.navigate('Navigation', { orderId, order: result });
     }
-  }, [updateStatus, orderId, navigation]);
+  }, [updateStatus, orderId, navigation, riderCoords]);
 
   const handleNavigate = useCallback(() => {
     navigation.navigate('Navigation', { orderId, order: activeOrder! });
@@ -88,6 +139,9 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
       </SafeAreaView>
     );
   }
+
+  const deliveryCoords = activeOrder.delivery.address.coordinates;
+  const pickupCoords = activeOrder.pickup.address?.coordinates;
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -120,6 +174,43 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
           </View>
         )}
 
+        {/* Rider Location Status */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>YOUR LOCATION</Text>
+          <View style={styles.locationCard}>
+            {locationEnabled && riderCoords ? (
+              <>
+                <View style={styles.locationStatusRow}>
+                  <View style={styles.locationDot} />
+                  <Text style={styles.locationStatusText}>Location Active</Text>
+                </View>
+                <Text style={styles.locationCoords}>
+                  {riderCoords.lat.toFixed(6)}, {riderCoords.lng.toFixed(6)}
+                </Text>
+              </>
+            ) : (
+              <>
+                <View style={styles.locationStatusRow}>
+                  <View style={[styles.locationDot, { backgroundColor: '#EF4444' }]} />
+                  <Text style={[styles.locationStatusText, { color: '#EF4444' }]}>
+                    Location Disabled
+                  </Text>
+                </View>
+                <Text style={styles.locationWarningText}>
+                  Enable location to accept and deliver orders
+                </Text>
+                <TouchableOpacity
+                  style={styles.enableLocationBtn}
+                  onPress={() => Linking.openSettings()}
+                >
+                  <MaterialCommunityIcons name="cog-outline" size={16} color="white" />
+                  <Text style={styles.enableLocationBtnText}>Open Settings</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>PICKUP & DELIVERY</Text>
           <View style={styles.addressContainer}>
@@ -133,6 +224,11 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
                 <View style={styles.addressPoint}>
                   <Text style={styles.pointTitle}>{activeOrder.pickup.name}</Text>
                   <Text style={styles.pointSub}>{activeOrder.pickup.address.full}</Text>
+                  {pickupCoords && (
+                    <Text style={styles.coordText}>
+                      📍 {pickupCoords.latitude?.toFixed(5)}, {pickupCoords.longitude?.toFixed(5)}
+                    </Text>
+                  )}
                   <TouchableOpacity onPress={() => handleCall(activeOrder.pickup.phone)} style={styles.inlineCall}>
                     <MaterialCommunityIcons name="phone" size={14} color={ZEPTO_PURPLE} />
                     <Text style={styles.inlineCallText}>Call Store</Text>
@@ -141,6 +237,11 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
                 <View style={styles.addressPoint}>
                   <Text style={styles.pointTitle}>{activeOrder.delivery.name}</Text>
                   <Text style={styles.pointSub}>{activeOrder.delivery.address.full}</Text>
+                  {deliveryCoords && (
+                    <Text style={styles.coordText}>
+                      📍 {deliveryCoords.latitude?.toFixed(5)}, {deliveryCoords.longitude?.toFixed(5)}
+                    </Text>
+                  )}
                   <TouchableOpacity onPress={() => handleCall(activeOrder.delivery.phone)} style={styles.inlineCall}>
                     <MaterialCommunityIcons name="phone" size={14} color={ZEPTO_PURPLE} />
                     <Text style={styles.inlineCallText}>Call Customer</Text>
@@ -217,12 +318,21 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
               <Text style={styles.rejectButtonText}>REJECT</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.button, styles.acceptButton]}
+              style={[
+                styles.button,
+                styles.acceptButton,
+                !locationEnabled && styles.disabledButton,
+              ]}
               onPress={handleAccept}
-              disabled={loading}
+              disabled={loading || !locationEnabled}
             >
               {loading ? (
                 <ActivityIndicator color="white" />
+              ) : !locationEnabled ? (
+                <>
+                  <MaterialCommunityIcons name="map-marker-off" size={18} color="#999" />
+                  <Text style={styles.disabledAcceptText}>ENABLE LOCATION</Text>
+                </>
               ) : (
                 <Text style={styles.acceptButtonText}>ACCEPT ORDER</Text>
               )}
@@ -250,9 +360,12 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
               <Text style={styles.buttonText}>NAVIGATE</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.button, { backgroundColor: ZEPTO_GREEN }]}
+              style={[
+                styles.button,
+                { backgroundColor: riderCoords ? ZEPTO_GREEN : '#999' },
+              ]}
               onPress={handleMarkPickedUp}
-              disabled={loading}
+              disabled={loading || !riderCoords}
             >
               {loading ? (
                 <ActivityIndicator color="white" />
@@ -347,6 +460,56 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     marginLeft: 4,
   },
+  locationCard: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+  },
+  locationStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  locationDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: ZEPTO_GREEN,
+  },
+  locationStatusText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#333',
+  },
+  locationCoords: {
+    fontSize: 13,
+    color: '#666',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  locationWarningText: {
+    fontSize: 13,
+    color: '#EF4444',
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  enableLocationBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EF4444',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    gap: 8,
+  },
+  enableLocationBtnText: {
+    color: 'white',
+    fontSize: 13,
+    fontWeight: '700',
+  },
   addressContainer: {
     backgroundColor: 'white',
     borderRadius: 20,
@@ -391,6 +554,12 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 4,
     lineHeight: 18,
+  },
+  coordText: {
+    fontSize: 11,
+    color: '#999',
+    marginTop: 4,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   inlineCall: {
     flexDirection: 'row',
@@ -543,6 +712,14 @@ const styles = StyleSheet.create({
   },
   acceptButton: {
     backgroundColor: ZEPTO_PURPLE,
+  },
+  disabledButton: {
+    backgroundColor: '#E5E5E5',
+  },
+  disabledAcceptText: {
+    color: '#999',
+    fontWeight: '900',
+    fontSize: 14,
   },
   rejectButtonText: {
     color: '#666',

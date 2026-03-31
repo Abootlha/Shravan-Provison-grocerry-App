@@ -42,16 +42,34 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   constructor(
     @Inject(forwardRef(() => OrdersService))
     private ordersService: OrdersService,
+    @Inject(forwardRef(() => RidersService))
     private ridersService: RidersService,
     @InjectModel(Order.name) private orderModel: Model<Order>,
   ) { }
 
   /**
    * Handle client connection
-   * Authentication is performed via WsJwtGuard on message handlers
+   * Auto-join rider room if the connected user is a rider
    */
   handleConnection(client: Socket): void {
     this.logger.log(`Client connected: ${client.id}`);
+  }
+
+  /**
+   * Handle rider joining their personal room for order notifications
+   */
+  @UseGuards(WsJwtGuard)
+  @SubscribeMessage('joinRiderRoom')
+  async handleJoinRiderRoom(@ConnectedSocket() client: Socket): Promise<void> {
+    const user = this.getUserFromSocket(client);
+    if (!user) {
+      throw new WsException('Unauthorized');
+    }
+
+    const roomName = this.getRiderRoomName(user.userId);
+    client.join(roomName);
+    this.logger.log(`Rider ${user.userId} joined room ${roomName}`);
+    client.emit('joinedRiderRoom', { riderId: user.userId, roomName });
   }
 
   /**
@@ -237,6 +255,46 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       estimatedDeliveryTime: order.estimatedDeliveryTime,
     });
     this.logger.log(`Broadcasted status update for order ${orderId}: ${order.orderStatus}`);
+  }
+
+  /**
+   * Notify a specific rider about a new order assignment
+   */
+  notifyRiderOfAssignment(riderId: string, order: Order): void {
+    const roomName = `rider_${riderId}`;
+    const orderDoc = order as any;
+    this.server.to(roomName).emit('newOrderAssignment', {
+      order: {
+        id: orderDoc._id?.toString(),
+        orderId: order.orderId,
+        orderNumber: order.orderId,
+        status: order.orderStatus.toLowerCase(),
+        pickup: {
+          name: 'Shravan Kirana Store',
+          phone: '',
+          address: {
+            full: 'Store pickup',
+            coordinates: { latitude: 0, longitude: 0 },
+          },
+        },
+        delivery: {
+          name: 'Customer',
+          phone: '',
+          address: {
+            full: order.deliveryAddress?.address || '',
+            coordinates: {
+              latitude: order.deliveryAddress?.coordinates?.coordinates?.[1] || 0,
+              longitude: order.deliveryAddress?.coordinates?.coordinates?.[0] || 0,
+            },
+          },
+        },
+        items: order.items || [],
+        totalAmount: order.totalAmount,
+        deliveryFee: order.deliveryFee || 0,
+        tip: 0,
+      },
+    });
+    this.logger.log(`Notified rider ${riderId} about new order ${order.orderId}`);
   }
 
   broadcastRiderLocationUpdate(

@@ -352,11 +352,10 @@ describe('RidersService - Property-Based Tests', () => {
 
             const result = await service.findAvailableRiders();
 
-            // All returned riders must have both flags true
+            // All returned riders must be available and active
             result.forEach(rider => {
-              expect(rider.isAvailable).toBe(true);
-              expect(rider.isOnline).toBe(true);
-              expect(rider.role).toBe(UserRole.RIDER);
+              expect(rider.status).toBe('available');
+              expect(rider.isActive).toBe(true);
             });
 
             // Count should match

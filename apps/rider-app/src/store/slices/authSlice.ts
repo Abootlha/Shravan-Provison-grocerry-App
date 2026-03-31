@@ -19,28 +19,16 @@ const initialState: AuthState = {
   error: null,
 };
 
-export const sendOtp = createAsyncThunk(
-  'auth/sendOtp',
-  async (phone: string, { rejectWithValue }) => {
+export const login = createAsyncThunk(
+  'auth/login',
+  async ({ username, password }: any, { rejectWithValue }) => {
     try {
-      await authApi.sendOtp(phone);
-      return { phone };
-    } catch (error) {
-      return rejectWithValue('Failed to send OTP');
-    }
-  }
-);
-
-export const verifyOtp = createAsyncThunk(
-  'auth/verifyOtp',
-  async ({ phone, otp, name }: { phone: string; otp: string; name?: string }, { rejectWithValue }) => {
-    try {
-      const response = await authApi.verifyOtp(phone, otp, name);
+      const response = await authApi.login(username, password);
       await storage.setToken(response.token);
       await storage.setUser(response.user);
       return response;
-    } catch (error) {
-      return rejectWithValue('Invalid OTP');
+    } catch (error: any) {
+      return rejectWithValue(error.response?.data?.message || 'Login failed');
     }
   }
 );
@@ -79,28 +67,17 @@ const authSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
-      .addCase(sendOtp.pending, (state) => {
+      .addCase(login.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
-      .addCase(sendOtp.fulfilled, (state) => {
-        state.loading = false;
-      })
-      .addCase(sendOtp.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload as string;
-      })
-      .addCase(verifyOtp.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(verifyOtp.fulfilled, (state, action) => {
+      .addCase(login.fulfilled, (state, action) => {
         state.loading = false;
         state.isAuthenticated = true;
         state.token = action.payload.token;
         state.user = action.payload.user as Rider;
       })
-      .addCase(verifyOtp.rejected, (state, action) => {
+      .addCase(login.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string;
       })

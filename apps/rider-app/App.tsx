@@ -18,7 +18,8 @@ const AppContent: React.FC = () => {
 
   useEffect(() => {
     if (isAuthenticated && token) {
-      socketService.connect(token);
+      const user = store.getState().auth.user;
+      socketService.connect(token, user?.id);
     }
     return () => {
       socketService.disconnect();

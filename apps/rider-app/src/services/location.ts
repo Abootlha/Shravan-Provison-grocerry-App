@@ -36,9 +36,24 @@ class LocationService {
   }
 
   async hasPermissions(): Promise<boolean> {
-    const foreground = await Location.getForegroundPermissionsAsync();
-    this.foregroundPermissionGranted = foreground.status === 'granted';
-    return this.foregroundPermissionGranted;
+    try {
+      const foreground = await Location.getForegroundPermissionsAsync();
+      this.foregroundPermissionGranted = foreground.status === 'granted';
+      if (!this.foregroundPermissionGranted) {
+        console.log('[LocationService] Foreground permission not granted:', foreground.status);
+        return false;
+      }
+
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        console.log('[LocationService] Global location services disabled');
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.log('[LocationService] hasPermissions error:', error);
+      return false;
+    }
   }
 
   async getCurrentLocation(): Promise<CurrentLocation | null> {

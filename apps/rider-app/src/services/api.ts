@@ -70,13 +70,19 @@ const orderClient = new ApiClient(ORDER_SERVICE_URL);
 const normalizeStatus = (status?: string) => {
   switch ((status || '').toUpperCase()) {
     case 'ASSIGNED':
-      return 'accepted';
+      return 'assigned';
     case 'OUT_FOR_DELIVERY':
       return 'picked_up';
     case 'DELIVERED':
       return 'delivered';
     case 'CANCELLED':
       return 'cancelled';
+    case 'ACCEPTED':
+      return 'accepted';
+    case 'PICKED_UP':
+      return 'picked_up';
+    case 'IN_TRANSIT':
+      return 'in_transit';
     case 'PENDING':
     case 'CONFIRMED':
     case 'PACKED':
@@ -141,17 +147,12 @@ const normalizeOrder = (order: any) => ({
 });
 
 export const authApi = {
-  sendOtp: (phone: string) =>
-    authClient.post<{ success: boolean; message: string }>('/auth/send-otp', { phone }),
-
-  verifyOtp: async (phone: string, otp: string, name?: string) => {
-    const response = await authClient.post<any>('/auth/verify-otp', {
-      phone,
-      otp,
-      name,
-      role: 'rider',
+  login: async (username: string, password: string) => {
+    const response = await authClient.post<any>('/auth/rider/login', {
+      username,
+      password,
     });
-    const token = response.tokens?.accessToken || response.accessToken;
+    const token = response.accessToken || response.tokens?.accessToken;
     const rider = normalizeRider(response.user || {});
     return { token, user: rider };
   },
