@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useDispatch, useSelector } from 'react-redux';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { addToCart, incrementQuantity, decrementQuantity } from '../store/slices/cartSlice';
 import { COLORS, SHADOWS, PRODUCTS } from '../constants';
 import { useTranslation } from '../hooks/useTranslation';
@@ -20,6 +21,7 @@ import { translateToHindi } from '../services/translationService';
 const { width } = Dimensions.get('window');
 
 const ProductDetailScreen = ({ route, navigation }) => {
+    const insets = useSafeAreaInsets();
     const { product } = route.params;
     const { currentLanguage } = useTranslation();
     const dispatch = useDispatch();
@@ -91,7 +93,7 @@ const ProductDetailScreen = ({ route, navigation }) => {
             <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
 
             {/* Header */}
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) + 8 }]}>
                 <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
                     <MaterialCommunityIcons name="arrow-left" size={24} color={COLORS.text} />
                 </TouchableOpacity>

@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, SHADOWS } from '../constants';
 import { useTranslation } from '../hooks/useTranslation';
 
@@ -18,11 +19,13 @@ const Header = ({
     whiteBackground = false,
 }) => {
     const { t } = useTranslation();
+    const insets = useSafeAreaInsets();
     
     if (showLocation) {
         return (
             <View style={[
                 styles.locationHeader, 
+                { paddingTop: Math.max(insets.top, 8) + 12 },
                 transparent && styles.transparentHeader,
                 whiteBackground && styles.whiteHeader
             ]}>
@@ -91,7 +94,7 @@ const Header = ({
     }
 
     return (
-        <View style={[styles.header, transparent && styles.transparentHeader]}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) + 8 }, transparent && styles.transparentHeader]}>
             {showBack && (
                 <TouchableOpacity style={styles.backButton} onPress={onBackPress}>
                     <View style={styles.backButtonInner}>

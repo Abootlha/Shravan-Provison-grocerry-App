@@ -15,12 +15,14 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
 import { CommonActions } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, SHADOWS } from '../constants';
 import { logout } from '../store/slices/authSlice';
 import { AuthService } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
 
 const ProfileScreen = ({ navigation }) => {
+    const insets = useSafeAreaInsets();
     const { t } = useTranslation();
     const dispatch = useDispatch();
     const { isAuthenticated, user } = useSelector((state) => state.auth);
@@ -94,7 +96,7 @@ const ProfileScreen = ({ navigation }) => {
             <StatusBar barStyle="dark-content" backgroundColor={COLORS.primary} />
 
             {/* Profile Header */}
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) + 12 }]}>
                 <View style={styles.headerContent}>
                     <View style={styles.avatar}>
                         <MaterialCommunityIcons name="account" size={36} color={COLORS.white} />

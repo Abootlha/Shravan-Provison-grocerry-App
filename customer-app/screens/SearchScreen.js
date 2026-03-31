@@ -10,12 +10,14 @@ import {
     StatusBar,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ProductCard } from '../components';
 import { COLORS, PRODUCTS, CATEGORIES } from '../constants';
 import { useTranslation } from '../hooks/useTranslation';
 import { translateToHindi } from '../services/translationService';
 
 const SearchScreen = ({ navigation }) => {
+    const insets = useSafeAreaInsets();
     const { currentLanguage } = useTranslation();
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState([]);
@@ -108,7 +110,7 @@ const SearchScreen = ({ navigation }) => {
             <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
 
             {/* Search Header */}
-            <View style={styles.searchHeader}>
+            <View style={[styles.searchHeader, { paddingTop: Math.max(insets.top, 8) + 8 }]}>
                 <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
                     <MaterialCommunityIcons name="arrow-left" size={24} color={COLORS.text} />
                 </TouchableOpacity>

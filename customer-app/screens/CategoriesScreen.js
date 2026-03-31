@@ -11,6 +11,7 @@ import {
     Dimensions,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, CATEGORIES, CATEGORY_GROUPS } from '../constants';
 import { useTranslation } from '../hooks/useTranslation';
 import { translateToHindi } from '../services/translationService';
@@ -22,6 +23,7 @@ const HORIZONTAL_PADDING = 16;
 const ITEM_WIDTH = (width - (HORIZONTAL_PADDING * 2) - (ITEM_SPACING * (COLUMN_COUNT - 1))) / COLUMN_COUNT;
 
 const CategoriesScreen = ({ navigation }) => {
+    const insets = useSafeAreaInsets();
     const { t, currentLanguage } = useTranslation();
     const [translatedCategories, setTranslatedCategories] = useState(CATEGORIES);
     const [translatedGroups, setTranslatedGroups] = useState(CATEGORY_GROUPS);
@@ -147,7 +149,7 @@ const CategoriesScreen = ({ navigation }) => {
             <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
 
             {/* Header */}
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) + 8 }]}>
                 <TouchableOpacity
                     style={styles.backButton}
                     onPress={() => navigation.goBack()}

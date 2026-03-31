@@ -14,6 +14,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useDispatch, useSelector } from 'react-redux';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants';
 import {
     setCurrentLocation,
@@ -25,6 +26,7 @@ import {
 import { UserService } from '../services';
 
 const LocationScreen = ({ navigation }) => {
+    const insets = useSafeAreaInsets();
     const dispatch = useDispatch();
     const { selectedAddress, savedAddresses, isLoading } = useSelector(
         (state) => state.location
@@ -221,7 +223,7 @@ const LocationScreen = ({ navigation }) => {
             <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
 
             {/* Header */}
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) + 8 }]}>
                 <TouchableOpacity style={styles.backButton} onPress={handleBack}>
                     <MaterialCommunityIcons
                         name="chevron-left"

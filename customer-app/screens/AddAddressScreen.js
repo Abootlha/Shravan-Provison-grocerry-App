@@ -15,6 +15,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { Platform } from 'react-native';
 import { useDispatch } from 'react-redux';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, SHADOWS } from '../constants';
 import { setSelectedAddress, addSavedAddress } from '../store/slices/locationSlice';
 import { UserService, SettingsService } from '../services';
@@ -27,6 +28,7 @@ const LATITUDE_DELTA = 0.01;
 const LONGITUDE_DELTA = LATITUDE_DELTA * ASPECT_RATIO;
 
 const AddAddressScreen = ({ navigation, route }) => {
+    const insets = useSafeAreaInsets();
     const dispatch = useDispatch();
     const mapRef = useRef(null);
     const searchQuery = route.params?.searchQuery || '';
@@ -276,7 +278,7 @@ const AddAddressScreen = ({ navigation, route }) => {
             <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
 
             {/* Header */}
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) + 8 }]}>
                 <TouchableOpacity style={styles.backButton} onPress={handleBack}>
                     <MaterialCommunityIcons
                         name="chevron-left"
