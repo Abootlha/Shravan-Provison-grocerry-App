@@ -53,6 +53,7 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
   }, []);
 
   const activeOrder = currentOrder?.id === orderId ? currentOrder : order;
+  const activeStatusLabel = ORDER_STATUS_LABELS[activeOrder?.status || 'pending'] || 'Pending';
 
   useEffect(() => {
     if (!activeOrder || activeOrder.status !== 'assigned') {
@@ -205,7 +206,7 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
           </View>
           <View style={styles.statusBadgeContainer}>
             <Text style={styles.statusBadgeText}>
-              {ORDER_STATUS_LABELS[activeOrder.status].toUpperCase()}
+              {activeStatusLabel.toUpperCase()}
             </Text>
           </View>
         </View>

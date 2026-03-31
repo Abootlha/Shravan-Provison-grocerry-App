@@ -22,6 +22,8 @@ export const OrderCard: React.FC<OrderCardProps> = ({
   onAccept,
   onReject,
 }) => {
+  const statusLabel = ORDER_STATUS_LABELS[order.status || 'pending'] || 'Pending';
+
   return (
     <TouchableOpacity
       style={styles.container}
@@ -34,7 +36,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({
           <Text style={styles.timeTag}>9:45 PM • 3.2 km away</Text>
         </View>
         <View style={styles.statusBadge}>
-          <Text style={styles.statusText}>{ORDER_STATUS_LABELS[order.status].toUpperCase()}</Text>
+          <Text style={styles.statusText}>{statusLabel.toUpperCase()}</Text>
         </View>
       </View>
 
@@ -217,4 +219,3 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 });
-

@@ -113,11 +113,12 @@ const normalizeOrder = (order: any) => {
   const assignedEntry = timeline.find?.((entry: any) => (entry.status || '').toUpperCase() === 'ASSIGNED');
   const pickedUpEntry = timeline.find?.((entry: any) => (entry.status || '').toUpperCase() === 'OUT_FOR_DELIVERY');
   const deliveredEntry = timeline.find?.((entry: any) => (entry.status || '').toUpperCase() === 'DELIVERED');
+  const normalizedStatus = normalizeStatus(order.orderStatus || order.status);
 
   return {
     id: order._id || order.id || order.orderId,
     orderNumber: order.orderId || order.id || order._id,
-    status: normalizeStatus(order.orderStatus || order.status),
+    status: normalizedStatus || 'pending',
     pickup: {
       name: order.storeName || 'Store',
       phone: order.storePhone || '',
