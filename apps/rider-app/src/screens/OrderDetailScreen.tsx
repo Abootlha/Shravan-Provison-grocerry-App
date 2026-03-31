@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import { StatusStepper } from '../components/StatusStepper';
 import { useOrders } from '../hooks/useOrders';
 import { useLocation } from '../hooks/useLocation';
 import { locationService } from '../services/location';
+import { notificationService } from '../services/notifications';
 import type { OrderDetailScreenProps } from '../types/navigation';
 import type { Order } from '../types/order';
 
@@ -35,6 +36,7 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
   const { currentLocation, isTracking } = useLocation();
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [riderCoords, setRiderCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const delayAlertShownRef = useRef(false);
 
   useEffect(() => {
     const checkLocation = async () => {
@@ -51,6 +53,46 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
   }, []);
 
   const activeOrder = currentOrder?.id === orderId ? currentOrder : order;
+
+  useEffect(() => {
+    if (!activeOrder || activeOrder.status !== 'assigned') {
+      delayAlertShownRef.current = false;
+      return;
+    }
+
+    const assignedAt = activeOrder.acceptedAt || activeOrder.createdAt;
+    if (!assignedAt) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      const assignedTime = new Date(assignedAt).getTime();
+      const minutesWaiting = (Date.now() - assignedTime) / 60000;
+
+      if (minutesWaiting >= 5 && !delayAlertShownRef.current) {
+        delayAlertShownRef.current = true;
+        notificationService.notifyOnce(
+          `pickup-delay-${orderId}`,
+          'Pickup Delay Alert',
+          'Please visit the store. This order has been waiting for more than 5 minutes.',
+        ).catch(() => {
+          // The in-app alert below is the fallback if notifications fail.
+        });
+        Alert.alert(
+          'Pickup Delay Alert',
+          'Please visit the store. This order has been waiting for more than 5 minutes.',
+        );
+      }
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [activeOrder]);
+
+  useEffect(() => {
+    if (activeOrder?.status !== 'assigned') {
+      notificationService.reset(`pickup-delay-${orderId}`);
+    }
+  }, [activeOrder?.status, orderId]);
 
   const handleCall = useCallback((phone: string) => {
     Linking.openURL(`tel:${phone}`).catch(() => {
@@ -752,4 +794,3 @@ const styles = StyleSheet.create({
     color: '#888',
   },
 });
-

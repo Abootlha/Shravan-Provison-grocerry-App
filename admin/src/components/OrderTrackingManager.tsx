@@ -167,11 +167,25 @@ export default function OrderTrackingManager() {
             console.log('Order status update:', data);
             setOrders(prev => prev.map(order =>
                 order._id === data.orderId
-                    ? { ...order, orderStatus: data.status, timeline: data.timeline, estimatedDeliveryTime: data.estimatedDeliveryTime }
+                    ? {
+                        ...order,
+                        ...(data.order || {}),
+                        orderStatus: data.status,
+                        timeline: data.timeline,
+                        estimatedDeliveryTime: data.estimatedDeliveryTime,
+                        riderId: data.rider ? { ...(order.riderId || {}), ...data.rider } as any : order.riderId,
+                    }
                     : order
             ));
             if (selectedOrder?._id === data.orderId) {
-                setSelectedOrder(prev => prev ? { ...prev, orderStatus: data.status, timeline: data.timeline } : null);
+                setSelectedOrder(prev => prev ? {
+                    ...prev,
+                    ...(data.order || {}),
+                    orderStatus: data.status,
+                    timeline: data.timeline,
+                    estimatedDeliveryTime: data.estimatedDeliveryTime,
+                    riderId: data.rider ? { ...(prev.riderId || {}), ...data.rider } as any : prev.riderId,
+                } : null);
             }
         });
 

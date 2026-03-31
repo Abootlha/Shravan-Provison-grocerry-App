@@ -10,6 +10,7 @@ import { OrdersController, AdminOrdersController } from './orders.controller';
 import { ETAService } from './eta.service';
 import { CartModule } from '../cart/cart.module';
 import { ProductsModule } from '../products/products.module';
+import { SettingsModule } from '../settings/settings.module';
 import { OrdersGateway } from '../../sockets/orders.gateway';
 import { TrackingModule } from '../../sockets/tracking.module';
 
@@ -24,6 +25,7 @@ import { TrackingModule } from '../../sockets/tracking.module';
         BullModule.registerQueue({ name: 'orders' }),
         CartModule,
         ProductsModule,
+        SettingsModule,
         forwardRef(() => TrackingModule),
     ],
     controllers: [OrdersController, AdminOrdersController],

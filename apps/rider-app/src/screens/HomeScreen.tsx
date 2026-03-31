@@ -249,7 +249,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
           <View style={styles.statsRow}>
             <StatsCard
               title="Rating"
-              value={user?.rating?.toFixed(1) || '4.8'}
+              value={typeof user?.rating === 'number' ? user.rating.toFixed(1) : '0.0'}
               color="#FF9800"
               icon="star"
             />

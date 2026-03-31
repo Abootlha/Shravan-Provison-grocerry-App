@@ -80,8 +80,11 @@ export class OrdersController {
             throw new NotFoundException('Order not found');
         }
 
-        // Verify ownership or admin role
-        if (order.userId.toString() !== req.user.userId && req.user.role !== UserRole.ADMIN) {
+        const isOwner = order.userId?.toString?.() === req.user.userId || order.userId?._id?.toString?.() === req.user.userId;
+        const isAssignedRider = order.riderId?.toString?.() === req.user.userId || order.riderId?._id?.toString?.() === req.user.userId;
+
+        // Verify ownership, assigned rider, or admin role
+        if (!isOwner && !isAssignedRider && req.user.role !== UserRole.ADMIN) {
             throw new ForbiddenException('You can only access your own orders');
         }
 

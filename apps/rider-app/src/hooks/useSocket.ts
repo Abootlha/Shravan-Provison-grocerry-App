@@ -3,17 +3,17 @@ import { useAppSelector } from './useAuth';
 import { socketService } from '../services/socket';
 
 export const useSocket = () => {
-  const { token, isAuthenticated } = useAppSelector((state) => state.auth);
+  const { token, isAuthenticated, user } = useAppSelector((state) => state.auth);
 
   useEffect(() => {
     if (isAuthenticated && token) {
-      socketService.connect(token);
+      socketService.connect(token, user?.id);
     }
 
     return () => {
       socketService.disconnect();
     };
-  }, [isAuthenticated, token]);
+  }, [isAuthenticated, token, user?.id]);
 
   const emit = useCallback((event: string, data?: unknown) => {
     socketService.emit(event, data);

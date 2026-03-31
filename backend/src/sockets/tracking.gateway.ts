@@ -246,13 +246,15 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   /**
    * Broadcast order status update to order room
    */
-  broadcastOrderStatusUpdate(orderId: string, order: Order): void {
+  broadcastOrderStatusUpdate(orderId: string, order: any): void {
     const roomName = `order_${orderId}`;
     this.server.to(roomName).emit('orderStatusUpdate', {
       orderId,
       status: order.orderStatus,
       timeline: order.timeline,
       estimatedDeliveryTime: order.estimatedDeliveryTime,
+      order,
+      rider: order.rider || null,
     });
     this.logger.log(`Broadcasted status update for order ${orderId}: ${order.orderStatus}`);
   }
@@ -260,26 +262,28 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   /**
    * Notify a specific rider about a new order assignment
    */
-  notifyRiderOfAssignment(riderId: string, order: Order): void {
+  notifyRiderOfAssignment(riderId: string, order: any): void {
     const roomName = `rider_${riderId}`;
-    const orderDoc = order as any;
     this.server.to(roomName).emit('newOrderAssignment', {
       order: {
-        id: orderDoc._id?.toString(),
+        id: order._id?.toString?.() || order.id?.toString?.(),
         orderId: order.orderId,
         orderNumber: order.orderId,
-        status: order.orderStatus.toLowerCase(),
+        status: order.orderStatus,
         pickup: {
-          name: 'Shravan Kirana Store',
-          phone: '',
+          name: order.storeName || 'Store',
+          phone: order.storePhone || '',
           address: {
-            full: 'Store pickup',
-            coordinates: { latitude: 0, longitude: 0 },
+            full: order.storeAddress || '',
+            coordinates: {
+              latitude: order.storeLocation?.latitude || 0,
+              longitude: order.storeLocation?.longitude || 0,
+            },
           },
         },
         delivery: {
-          name: 'Customer',
-          phone: '',
+          name: order.customerName || 'Customer',
+          phone: order.customerPhone || '',
           address: {
             full: order.deliveryAddress?.address || '',
             coordinates: {
@@ -293,6 +297,11 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
         deliveryFee: order.deliveryFee || 0,
         tip: 0,
       },
+    });
+    this.server.to(this.getOrderRoomName(order._id?.toString?.() || order.id)).emit('orderAssigned', {
+      orderId: order._id?.toString?.() || order.id,
+      rider: order.rider || null,
+      order,
     });
     this.logger.log(`Notified rider ${riderId} about new order ${order.orderId}`);
   }

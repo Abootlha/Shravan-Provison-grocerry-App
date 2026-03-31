@@ -33,6 +33,31 @@ export const login = createAsyncThunk(
   }
 );
 
+export const sendOtp = createAsyncThunk(
+  'auth/sendOtp',
+  async (phone: string, { rejectWithValue }) => {
+    try {
+      return await authApi.sendOtp(phone);
+    } catch (error: any) {
+      return rejectWithValue(error.response?.data?.message || 'Failed to send OTP');
+    }
+  }
+);
+
+export const verifyOtp = createAsyncThunk(
+  'auth/verifyOtp',
+  async ({ phone, otp, name }: { phone: string; otp: string; name?: string }, { rejectWithValue }) => {
+    try {
+      const response = await authApi.verifyOtp(phone, otp, name);
+      await storage.setToken(response.token);
+      await storage.setUser(response.user);
+      return response;
+    } catch (error: any) {
+      return rejectWithValue(error.response?.data?.message || 'OTP verification failed');
+    }
+  }
+);
+
 export const loadUser = createAsyncThunk(
   'auth/loadUser',
   async (_, { rejectWithValue }) => {
@@ -78,6 +103,31 @@ const authSlice = createSlice({
         state.user = action.payload.user as Rider;
       })
       .addCase(login.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
+      })
+      .addCase(sendOtp.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(sendOtp.fulfilled, (state) => {
+        state.loading = false;
+      })
+      .addCase(sendOtp.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
+      })
+      .addCase(verifyOtp.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(verifyOtp.fulfilled, (state, action) => {
+        state.loading = false;
+        state.isAuthenticated = true;
+        state.token = action.payload.token;
+        state.user = action.payload.user as Rider;
+      })
+      .addCase(verifyOtp.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string;
       })

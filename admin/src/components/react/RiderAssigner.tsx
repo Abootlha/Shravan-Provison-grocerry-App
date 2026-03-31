@@ -163,7 +163,7 @@ export default function RiderAssigner({ orderId, onClose, onAssign }: RiderAssig
                                             </h3>
                                             <div className="flex items-center gap-1 text-xs" style={{ color: '#E6A23C' }}>
                                                 <span>★</span>
-                                                <span>{rider.rating?.toFixed(1) || '4.8'}</span>
+                                                <span>{typeof rider.rating === 'number' ? rider.rating.toFixed(1) : 'NA'}</span>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-3 mt-1">

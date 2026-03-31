@@ -37,7 +37,14 @@ const orderTrackingSlice = createSlice({
         },
         updateOrderStatus: (state, action) => {
             if (state.currentOrder) {
-                const { status, timeline, estimatedDeliveryTime, rider } = action.payload;
+                const { status, timeline, estimatedDeliveryTime, rider, order } = action.payload;
+
+                if (order) {
+                    state.currentOrder = {
+                        ...state.currentOrder,
+                        ...order,
+                    };
+                }
 
                 if (status) {
                     state.currentOrder.orderStatus = status;
@@ -50,6 +57,10 @@ const orderTrackingSlice = createSlice({
                 }
                 if (rider) {
                     state.currentOrder.rider = { ...state.currentOrder.rider, ...rider };
+                    state.currentOrder.riderId = {
+                        ...(typeof state.currentOrder.riderId === 'object' ? state.currentOrder.riderId : {}),
+                        ...rider,
+                    };
                 }
             }
         },

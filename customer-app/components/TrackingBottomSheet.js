@@ -92,14 +92,20 @@ const TrackingBottomSheet = ({
     ).current;
 
     const getRiderName = () => {
+        if (order?.rider?.name) return order.rider.name;
         if (typeof order?.riderId === 'object' && order.riderId?.name) return order.riderId.name;
-        return 'Delivery Partner';
+        return 'Rider';
     };
 
     const handleCallRider = () => {
-        const phone = typeof order?.riderId === 'object' ? order.riderId.phone : null;
+        const phone = order?.rider?.phone || (typeof order?.riderId === 'object' ? order.riderId.phone : null);
         if (phone) Linking.openURL(`tel:${phone}`);
     };
+
+    const riderRating = order?.rider?.rating || order?.riderId?.rating || null;
+    const riderRoleLabel = order?.rider?.vehicleType || order?.riderId?.vehicleType || 'Delivery Rider';
+    const orderCode = order?.orderId || order?.orderCode || order?._id?.slice?.(-4)?.toUpperCase?.() || 'ORDER';
+    const addressText = order?.deliveryAddress?.address || order?.deliveryAddress?.addressLine || '';
 
     const bottomSheetHeight = translateY.interpolate({
         inputRange: [SNAP_POINTS.collapsed, SNAP_POINTS.expanded],
@@ -208,7 +214,7 @@ const TrackingBottomSheet = ({
                         <View style={styles.codeContainer}>
                             <View style={styles.codeLeft}>
                                 <Text style={styles.codeLabel}>Your code</Text>
-                                <Text style={styles.codeValue}>{order?.orderCode || '3594'}</Text>
+                                <Text style={styles.codeValue}>{orderCode}</Text>
                             </View>
                             <View style={styles.codeRight}>
                                 <MaterialCommunityIcons name="shield-check" size={24} color={ZEPTO_PURPLE} />
@@ -229,12 +235,12 @@ const TrackingBottomSheet = ({
                                 </View>
                                 <View style={styles.ratingBadge}>
                                     <MaterialCommunityIcons name="star" size={10} color="#FFB300" />
-                                    <Text style={styles.ratingText}>4.8</Text>
+                                    <Text style={styles.ratingText}>{riderRating ? Number(riderRating).toFixed(1) : 'NA'}</Text>
                                 </View>
                             </View>
                             <View style={styles.riderDetails}>
                                 <Text style={styles.riderNameText}>{getRiderName()}</Text>
-                                <Text style={styles.riderStatusText}>Delivery Partner</Text>
+                                <Text style={styles.riderStatusText}>{riderRoleLabel}</Text>
                             </View>
                         </View>
                         <View style={styles.riderActions}>
@@ -277,7 +283,7 @@ const TrackingBottomSheet = ({
                         <View style={styles.addressBox}>
                             <MaterialCommunityIcons name="map-marker-outline" size={18} color="#666" />
                             <Text style={styles.addressText} numberOfLines={2}>
-                                {order?.deliveryAddress?.addressLine || 'Home, Gorakhpur'}
+                                {addressText || 'Delivery address unavailable'}
                             </Text>
                         </View>
                     </View>
@@ -692,4 +698,3 @@ const styles = StyleSheet.create({
 });
 
 export default TrackingBottomSheet;
-

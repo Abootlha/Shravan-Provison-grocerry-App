@@ -102,6 +102,8 @@ class SocketService {
                 status: data.status,
                 timeline: data.timeline,
                 estimatedDeliveryTime: data.estimatedDeliveryTime,
+                rider: data.rider,
+                order: data.order,
             }));
         });
 
@@ -129,12 +131,11 @@ class SocketService {
 
         this.socket.on('orderAssigned', (data) => {
             console.log('Order assigned to rider:', data);
-            if (data.rider) {
-                store.dispatch(updateOrderStatus({
-                    status: 'ASSIGNED',
-                    rider: data.rider,
-                }));
-            }
+            store.dispatch(updateOrderStatus({
+                status: 'ASSIGNED',
+                rider: data.rider,
+                order: data.order,
+            }));
         });
 
         this.socket.on('error', (error) => {

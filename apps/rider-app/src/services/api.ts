@@ -72,7 +72,7 @@ const normalizeStatus = (status?: string) => {
     case 'ASSIGNED':
       return 'assigned';
     case 'OUT_FOR_DELIVERY':
-      return 'picked_up';
+      return 'in_transit';
     case 'DELIVERED':
       return 'delivered';
     case 'CANCELLED':
@@ -101,50 +101,60 @@ const normalizeRider = (record: any): Rider => ({
     number: record.vehicleNumber,
   },
   documents: {},
-  isOnline: Boolean(record.isOnline),
-  rating: record.stats?.avgRating || 0,
-  totalDeliveries: record.stats?.totalDeliveries || 0,
-  acceptanceRate: record.stats?.acceptanceRate || 0,
+  isOnline: Boolean(record.isOnline ?? (record.status && record.status !== 'offline')),
+  rating: record.rating ?? record.stats?.avgRating ?? 0,
+  totalDeliveries: record.totalDeliveries ?? record.stats?.totalDeliveries ?? 0,
+  acceptanceRate: record.acceptanceRate ?? record.stats?.acceptanceRate ?? 0,
   createdAt: record.createdAt || new Date().toISOString(),
 });
 
-const normalizeOrder = (order: any) => ({
-  id: order._id || order.id || order.orderId,
-  orderNumber: order.orderId || order.id || order._id,
-  status: normalizeStatus(order.orderStatus || order.status),
-  pickup: {
-    name: order.storeName || 'Shravan Kirana Store',
-    phone: order.storePhone || '',
-    address: {
-      full: order.storeAddress || 'Store pickup',
-      coordinates: {
-        latitude: order.storeLocation?.latitude || 26.7606,
-        longitude: order.storeLocation?.longitude || 83.3732,
+const normalizeOrder = (order: any) => {
+  const timeline = order.timeline || [];
+  const assignedEntry = timeline.find?.((entry: any) => (entry.status || '').toUpperCase() === 'ASSIGNED');
+  const pickedUpEntry = timeline.find?.((entry: any) => (entry.status || '').toUpperCase() === 'OUT_FOR_DELIVERY');
+  const deliveredEntry = timeline.find?.((entry: any) => (entry.status || '').toUpperCase() === 'DELIVERED');
+
+  return {
+    id: order._id || order.id || order.orderId,
+    orderNumber: order.orderId || order.id || order._id,
+    status: normalizeStatus(order.orderStatus || order.status),
+    pickup: {
+      name: order.storeName || 'Store',
+      phone: order.storePhone || '',
+      address: {
+        full: order.storeAddress || '',
+        coordinates: {
+          latitude: order.storeLocation?.latitude || 26.7606,
+          longitude: order.storeLocation?.longitude || 83.3732,
+        },
       },
     },
-  },
-  delivery: {
-    name: order.customerName || 'Customer',
-    phone: order.customerPhone || '',
-    address: {
-      full: order.deliveryAddress?.address || '',
-      coordinates: {
-        latitude: order.deliveryAddress?.coordinates?.coordinates?.[1] || 0,
-        longitude: order.deliveryAddress?.coordinates?.coordinates?.[0] || 0,
+    delivery: {
+      name: order.customerName || 'Customer',
+      phone: order.customerPhone || '',
+      address: {
+        full: order.deliveryAddress?.address || '',
+        coordinates: {
+          latitude: order.deliveryAddress?.coordinates?.coordinates?.[1] || 0,
+          longitude: order.deliveryAddress?.coordinates?.coordinates?.[0] || 0,
+        },
       },
     },
-  },
-  items: (order.items || []).map((item: any) => ({
-    id: item.productId || item.id,
-    name: item.name,
-    quantity: item.quantity,
-    price: item.price,
-  })),
-  totalAmount: order.totalAmount || 0,
-  deliveryFee: order.deliveryFee || 0,
-  createdAt: order.createdAt || new Date().toISOString(),
-  estimatedTime: order.estimatedDeliveryTime ? Date.parse(order.estimatedDeliveryTime) : undefined,
-});
+    items: (order.items || []).map((item: any) => ({
+      id: item.productId || item.id,
+      name: item.name,
+      quantity: item.quantity,
+      price: item.price,
+    })),
+    totalAmount: order.totalAmount || 0,
+    deliveryFee: order.deliveryFee || 0,
+    createdAt: order.createdAt || new Date().toISOString(),
+    estimatedTime: order.estimatedDeliveryTime ? Date.parse(order.estimatedDeliveryTime) : undefined,
+    acceptedAt: assignedEntry?.timestamp,
+    pickedUpAt: pickedUpEntry?.timestamp,
+    deliveredAt: deliveredEntry?.timestamp,
+  };
+};
 
 export const authApi = {
   login: async (username: string, password: string) => {
@@ -154,6 +164,22 @@ export const authApi = {
     });
     const token = response.accessToken || response.tokens?.accessToken;
     const rider = normalizeRider(response.user || {});
+    return { token, user: rider };
+  },
+
+  sendOtp: async (phone: string) => {
+    return authClient.post<any>('/auth/send-otp', { phone });
+  },
+
+  verifyOtp: async (phone: string, otp: string, name?: string) => {
+    const response = await authClient.post<any>('/auth/verify-otp', {
+      phone,
+      otp,
+      name,
+      role: 'rider',
+    });
+    const token = response.accessToken || response.tokens?.accessToken;
+    const rider = normalizeRider(response.user || { name, phone });
     return { token, user: rider };
   },
 };

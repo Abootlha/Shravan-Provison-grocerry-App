@@ -7,6 +7,7 @@ import { AppNavigator } from './src/navigation/AppNavigator';
 import { useAppDispatch, useAppSelector } from './src/hooks/useAuth';
 import { loadUser } from './src/store/slices/authSlice';
 import { socketService } from './src/services/socket';
+import { notificationService } from './src/services/notifications';
 
 const AppContent: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -15,6 +16,12 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     dispatch(loadUser());
   }, [dispatch]);
+
+  useEffect(() => {
+    notificationService.requestPermissions().catch(() => {
+      // Notifications are optional; keep app startup resilient.
+    });
+  }, []);
 
   useEffect(() => {
     if (isAuthenticated && token) {

@@ -9,6 +9,7 @@ import { User, UserDocument } from '../users/schemas/user.schema';
 import { Rider, RiderDocument } from '../riders/schemas/rider.schema';
 import { CartService } from '../cart/cart.service';
 import { ProductsService } from '../products/products.service';
+import { SettingsService } from '../settings/settings.service';
 import { RedisService } from '../../common/utils/redis.service';
 import { CacheService } from '../../common/utils/cache.service';
 import { TrackingGateway } from '../../sockets/tracking.gateway';
@@ -23,6 +24,7 @@ export class OrdersService {
         @InjectModel(Rider.name) private riderModel: Model<RiderDocument>,
         private cartService: CartService,
         private productsService: ProductsService,
+        private settingsService: SettingsService,
         private redisService: RedisService,
         private cacheService: CacheService,
         @Inject(forwardRef(() => TrackingGateway))
@@ -172,7 +174,8 @@ export class OrdersService {
         // Fallback to database query with rider population
         const order = await this.orderModel
             .findById(orderId)
-            .populate('riderId', 'name phone')
+            .populate('userId', 'name phone')
+            .populate('riderId', 'name phone vehicleType rating totalDeliveries currentLocation status')
             .lean()
             .exec();
 
@@ -185,7 +188,12 @@ export class OrdersService {
     }
 
     async findByOrderId(orderId: string): Promise<OrderDocument | null> {
-        return this.orderModel.findOne({ orderId }).lean().exec();
+        return this.orderModel
+            .findOne({ orderId })
+            .populate('userId', 'name phone')
+            .populate('riderId', 'name phone vehicleType rating totalDeliveries currentLocation status')
+            .lean()
+            .exec();
     }
 
     async findByUserId(userId: string): Promise<OrderDocument[]> {
@@ -216,8 +224,65 @@ export class OrdersService {
                 riderId: new Types.ObjectId(riderId),
             })
             .sort({ createdAt: -1 })
+            .populate('userId', 'name phone')
             .lean()
             .exec();
+    }
+
+    private async buildRealtimeOrderPayload(orderId: string): Promise<any> {
+        const [order, storeSettings] = await Promise.all([
+            this.orderModel
+                .findById(orderId)
+                .populate('userId', 'name phone')
+                .populate('riderId', 'name phone vehicleType rating totalDeliveries currentLocation status')
+                .lean()
+                .exec(),
+            this.settingsService.getStoreSettings(),
+        ]);
+
+        if (!order) {
+            throw new NotFoundException('Order not found');
+        }
+
+        const rider = order.riderId && typeof order.riderId === 'object'
+            ? {
+                id: (order.riderId as any)._id?.toString?.() || (order.riderId as any).id,
+                name: (order.riderId as any).name,
+                phone: (order.riderId as any).phone || '',
+                vehicleType: (order.riderId as any).vehicleType,
+                rating: (order.riderId as any).rating ?? 0,
+                totalDeliveries: (order.riderId as any).totalDeliveries ?? 0,
+                status: (order.riderId as any).status,
+                currentLocation: (order.riderId as any).currentLocation
+                    ? {
+                        latitude: (order.riderId as any).currentLocation.coordinates?.[1] ?? null,
+                        longitude: (order.riderId as any).currentLocation.coordinates?.[0] ?? null,
+                    }
+                    : null,
+            }
+            : null;
+
+        const user = order.userId && typeof order.userId === 'object'
+            ? {
+                id: (order.userId as any)._id?.toString?.() || (order.userId as any).id,
+                name: (order.userId as any).name || 'Customer',
+                phone: (order.userId as any).phone || '',
+            }
+            : null;
+
+        return {
+            ...order,
+            rider,
+            customerName: user?.name || 'Customer',
+            customerPhone: user?.phone || '',
+            storeName: storeSettings.storeName,
+            storePhone: storeSettings.contactPhone || '',
+            storeAddress: storeSettings.location.address,
+            storeLocation: {
+                latitude: storeSettings.location.latitude,
+                longitude: storeSettings.location.longitude,
+            },
+        };
     }
 
     validateStatusTransition(currentStatus: OrderStatus, newStatus: OrderStatus): boolean {
@@ -290,8 +355,10 @@ export class OrdersService {
             JSON.stringify({ orderId: order.orderId, status: newStatus })
         );
 
+        const trackingOrder = await this.buildRealtimeOrderPayload(order._id.toString());
+
         // Broadcast order status update via socket
-        this.trackingGateway.broadcastOrderStatusUpdate(order._id.toString(), order);
+        this.trackingGateway.broadcastOrderStatusUpdate(order._id.toString(), trackingOrder);
 
         // If cancelled, release stock
         if (newStatus === OrderStatus.CANCELLED) {
@@ -300,6 +367,24 @@ export class OrdersService {
                 quantity: item.quantity,
             }));
             await this.productsService.releaseStock(stockItems);
+        }
+
+        if (
+            order.riderId &&
+            (newStatus === OrderStatus.DELIVERED || newStatus === OrderStatus.CANCELLED)
+        ) {
+            try {
+                const rider = await this.riderModel.findById(order.riderId);
+                if (rider) {
+                    rider.status = 'available' as any;
+                    if (newStatus === OrderStatus.DELIVERED) {
+                        rider.totalDeliveries = (rider.totalDeliveries || 0) + 1;
+                    }
+                    await rider.save();
+                }
+            } catch (error) {
+                console.error(`Failed to update rider availability for order ${order._id}:`, error);
+            }
         }
 
         // If assigned, calculate initial ETA
@@ -315,7 +400,15 @@ export class OrdersService {
             }
         }
 
-        return order;
+        if (newStatus === OrderStatus.PACKED && !order.riderId) {
+            try {
+                await this.autoAssignNearestRider(order._id.toString());
+            } catch (error) {
+                console.error(`Failed to auto-assign rider for order ${order._id}:`, error);
+            }
+        }
+
+        return trackingOrder as OrderDocument;
     }
 
     async riderAcceptOrder(orderId: string, riderId: string): Promise<OrderDocument> {
@@ -333,33 +426,11 @@ export class OrdersService {
             throw new ForbiddenException('This order is not assigned to you');
         }
 
-        const previousStatus = order.orderStatus;
-        order.orderStatus = OrderStatus.OUT_FOR_DELIVERY;
-        this.addTimelineEntry(order, OrderStatus.OUT_FOR_DELIVERY, riderId);
-        await order.save();
+        // Accepting confirms ownership and live tracking, but pickup remains a separate rider step.
+        const trackingOrder = await this.buildRealtimeOrderPayload(order._id.toString());
 
-        // Invalidate cache
-        await this.cacheService.deleteOrder(order._id.toString());
-        await this.redisService.del(RedisService.Keys.orderStatus(order.orderId));
-        await this.redisService.set(
-            RedisService.Keys.orderStatus(order.orderId),
-            OrderStatus.OUT_FOR_DELIVERY,
-        );
-
-        await this.logStatusChange(
-            order._id,
-            previousStatus,
-            OrderStatus.OUT_FOR_DELIVERY,
-            new Types.ObjectId(riderId),
-        );
-
-        await this.redisService.publish(
-            'order-updates',
-            JSON.stringify({ orderId: order.orderId, status: OrderStatus.OUT_FOR_DELIVERY }),
-        );
-
-        // Broadcast to customer app - this triggers live tracking
-        this.trackingGateway.broadcastOrderStatusUpdate(order._id.toString(), order);
+        // Broadcast current assignment state so customer/admin/rider all receive the real rider details.
+        this.trackingGateway.broadcastOrderStatusUpdate(order._id.toString(), trackingOrder);
 
         // Start broadcasting rider location to the order room
         try {
@@ -378,17 +449,7 @@ export class OrdersService {
             console.error(`Failed to broadcast initial rider location for order ${order._id}:`, error);
         }
 
-        // Recalculate ETA
-        try {
-            const eta = await this.etaService.recalculateForOrder(order._id.toString());
-            if (eta) {
-                this.trackingGateway.broadcastETAUpdate(order._id.toString(), eta);
-            }
-        } catch (error) {
-            console.error(`Failed to recalculate ETA for order ${order._id}:`, error);
-        }
-
-        return order;
+        return trackingOrder as OrderDocument;
     }
 
     async assignRider(orderId: string, riderId: string): Promise<OrderDocument> {
@@ -401,6 +462,10 @@ export class OrdersService {
             );
         }
 
+        if (order.riderId && order.riderId.toString() !== riderId) {
+            throw new BadRequestException('This order is already assigned to another rider');
+        }
+
         // Validate rider exists and is available
         const rider = await this.riderModel.findById(riderId);
         if (!rider) throw new NotFoundException('Rider not found');
@@ -409,23 +474,51 @@ export class OrdersService {
             throw new BadRequestException('Rider is not available');
         }
 
-        // Assign rider
         const previousStatus = order.orderStatus;
-        order.riderId = new Types.ObjectId(riderId);
-        order.orderStatus = OrderStatus.ASSIGNED;
-        this.addTimelineEntry(order, OrderStatus.ASSIGNED, riderId);
-        await order.save();
+        const assignmentTimestamp = new Date();
+        const updatedOrder = await this.orderModel.findOneAndUpdate(
+            {
+                _id: order._id,
+                $or: [
+                    { riderId: { $exists: false } },
+                    { riderId: null },
+                    { riderId: new Types.ObjectId(riderId) },
+                ],
+                orderStatus: { $in: [OrderStatus.CONFIRMED, OrderStatus.PACKED, OrderStatus.ASSIGNED] },
+            },
+            {
+                $set: {
+                    riderId: new Types.ObjectId(riderId),
+                    orderStatus: OrderStatus.ASSIGNED,
+                },
+                $push: {
+                    timeline: {
+                        status: OrderStatus.ASSIGNED,
+                        timestamp: assignmentTimestamp,
+                        changedBy: new Types.ObjectId(riderId),
+                    },
+                },
+            },
+            { new: true },
+        );
+
+        if (!updatedOrder) {
+            throw new BadRequestException('This order was already assigned while processing the request');
+        }
+
+        rider.status = 'busy' as any;
+        await rider.save();
 
         // Invalidate cache
-        await this.cacheService.deleteOrder(order._id.toString());
-        await this.redisService.del(RedisService.Keys.orderStatus(order.orderId));
+        await this.cacheService.deleteOrder(updatedOrder._id.toString());
+        await this.redisService.del(RedisService.Keys.orderStatus(updatedOrder.orderId));
         await this.redisService.set(
-            RedisService.Keys.orderStatus(order.orderId),
+            RedisService.Keys.orderStatus(updatedOrder.orderId),
             OrderStatus.ASSIGNED,
         );
 
         await this.logStatusChange(
-            order._id,
+            updatedOrder._id,
             previousStatus,
             OrderStatus.ASSIGNED,
             new Types.ObjectId(riderId),
@@ -433,27 +526,25 @@ export class OrdersService {
 
         await this.redisService.publish(
             'order-updates',
-            JSON.stringify({ orderId: order.orderId, status: OrderStatus.ASSIGNED }),
+            JSON.stringify({ orderId: updatedOrder.orderId, status: OrderStatus.ASSIGNED }),
         );
 
-        this.trackingGateway.broadcastOrderStatusUpdate(order._id.toString(), order);
-        this.trackingGateway.notifyRiderOfAssignment(riderId, order);
+        const trackingOrder = await this.buildRealtimeOrderPayload(updatedOrder._id.toString());
+        this.trackingGateway.broadcastOrderStatusUpdate(updatedOrder._id.toString(), trackingOrder);
+        this.trackingGateway.notifyRiderOfAssignment(riderId, trackingOrder);
 
         // Calculate initial ETA
         try {
-            const eta = await this.etaService.recalculateForOrder(order._id.toString());
+            const eta = await this.etaService.recalculateForOrder(updatedOrder._id.toString());
             if (eta) {
-                this.trackingGateway.broadcastETAUpdate(order._id.toString(), eta);
+                this.trackingGateway.broadcastETAUpdate(updatedOrder._id.toString(), eta);
             }
         } catch (error) {
             // Log error but don't fail the assignment
-            console.error(`Failed to calculate initial ETA for order ${order._id}:`, error);
+            console.error(`Failed to calculate initial ETA for order ${updatedOrder._id}:`, error);
         }
 
-        // Notify the assigned rider about the new order via socket
-        this.trackingGateway.notifyRiderOfAssignment(riderId, order);
-
-        return order;
+        return trackingOrder as OrderDocument;
     }
 
     async unassignRider(orderId: string): Promise<OrderDocument> {
@@ -467,6 +558,39 @@ export class OrdersService {
         await this.redisService.del(RedisService.Keys.orderStatus(order.orderId));
 
         return order;
+    }
+
+    async autoAssignNearestRider(orderId: string): Promise<OrderDocument | null> {
+        const order = await this.orderModel.findById(orderId).lean().exec();
+        if (!order || order.riderId || order.orderStatus !== OrderStatus.PACKED) {
+            return null;
+        }
+
+        const storeSettings = await this.settingsService.getStoreSettings();
+        const nearbyRiders = await this.riderModel
+            .find({
+                status: 'available',
+                isActive: true,
+                currentLocation: {
+                    $near: {
+                        $geometry: {
+                            type: 'Point',
+                            coordinates: [storeSettings.location.longitude, storeSettings.location.latitude],
+                        },
+                        $maxDistance: Math.max(storeSettings.serviceRadiusKm, 2) * 1000,
+                    },
+                },
+            })
+            .limit(1)
+            .lean()
+            .exec();
+
+        const nearestRider = nearbyRiders[0];
+        if (!nearestRider) {
+            return null;
+        }
+
+        return this.assignRider(orderId, nearestRider._id.toString());
     }
 
     async getOrderStatus(orderId: string): Promise<string | null> {
