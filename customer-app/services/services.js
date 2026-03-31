@@ -129,9 +129,10 @@ export const UserService = {
 };
 
 export const SettingsService = {
-    getStoreSettings: async () => ({
-        serviceable: true,
-    }),
+    getStoreSettings: async () => {
+        const response = await locationApi.get('/settings/store');
+        return response.data;
+    },
 
     checkServiceability: async (latitude, longitude) => {
         const response = await locationApi.get('/settings/store');

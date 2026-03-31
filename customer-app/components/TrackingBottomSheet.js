@@ -163,11 +163,19 @@ const TrackingBottomSheet = ({
         </View>
     );
 
+    const getStepIndex = (status) => {
+        if (['PENDING', 'CONFIRMED'].includes(status)) return 0;
+        if (['PACKED', 'ASSIGNED'].includes(status)) return 1;
+        if (status === 'OUT_FOR_DELIVERY') return 2;
+        if (['ARRIVED', 'DELIVERED'].includes(status)) return 3;
+        return -1;
+    };
+
     const renderStepper = () => (
         <View style={styles.stepperContainer}>
             <View style={styles.stepperItems}>
                 {STATUS_STEPS.map((step, index) => {
-                    const isActive = index <= STATUS_STEPS.findIndex(s => s.key === order?.orderStatus);
+                    const isActive = index <= getStepIndex(order?.orderStatus);
                     return (
                         <View key={step.key} style={styles.stepperItem}>
                             <View style={[styles.stepperNode, isActive && { backgroundColor: ZEPTO_GREEN }]}>
@@ -179,7 +187,7 @@ const TrackingBottomSheet = ({
                 })}
             </View>
             <View style={styles.stepperLineTrack}>
-                <View style={[styles.stepperLineFill, { width: `${(STATUS_STEPS.findIndex(s => s.key === order?.orderStatus) / (STATUS_STEPS.length - 1)) * 100}%` }]} />
+                <View style={[styles.stepperLineFill, { width: `${(Math.max(0, getStepIndex(order?.orderStatus)) / (STATUS_STEPS.length - 1)) * 100}%` }]} />
             </View>
         </View>
     );

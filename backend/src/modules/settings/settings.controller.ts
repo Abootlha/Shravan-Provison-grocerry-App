@@ -12,6 +12,8 @@ export class SettingsController {
         return {
             storeName: settings.storeName,
             location: settings.location,
+            storeTimings: settings.storeTimings,
+            contactPhone: settings.contactPhone,
             serviceRadiusKm: settings.serviceRadiusKm,
             estimatedDeliveryMinutes: settings.estimatedDeliveryMinutes,
             isActive: settings.isActive,
@@ -46,8 +48,11 @@ export class SettingsController {
             settings: {
                 storeName: settings.storeName,
                 location: settings.location,
+                storeTimings: settings.storeTimings,
+                contactPhone: settings.contactPhone,
                 serviceRadiusKm: settings.serviceRadiusKm,
                 estimatedDeliveryMinutes: settings.estimatedDeliveryMinutes,
+                isActive: settings.isActive,
             },
         };
     }

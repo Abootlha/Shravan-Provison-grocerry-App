@@ -96,6 +96,17 @@ export class OrdersService {
         const discount = Math.round(itemTotal * 0.05); // 5% discount
         const totalAmount = itemTotal + deliveryFee + packagingFee - discount;
 
+        const deliveryAddress = {
+            type: data.deliveryAddress.type,
+            address: data.deliveryAddress.address,
+            city: data.deliveryAddress.city,
+            pincode: data.deliveryAddress.pincode,
+            coordinates: {
+                type: 'Point',
+                coordinates: [data.deliveryAddress.longitude || 0, data.deliveryAddress.latitude || 0],
+            },
+        };
+
         // Create order
         const order = new this.orderModel({
             orderId,
@@ -106,7 +117,7 @@ export class OrdersService {
             packagingFee,
             discount,
             totalAmount,
-            deliveryAddress: data.deliveryAddress,
+            deliveryAddress: deliveryAddress,
             paymentMethod: data.paymentMethod,
             orderStatus: OrderStatus.PENDING,
             estimatedDeliveryTime: dayjs().add(15, 'minutes').toDate(),

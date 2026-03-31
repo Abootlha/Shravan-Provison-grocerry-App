@@ -21,6 +21,8 @@ interface LocationUpdatePayload {
   latitude: number;
   longitude: number;
   accuracy?: number;
+  heading?: number;
+  speed?: number;
 }
 
 interface JoinOrderRoomPayload {
@@ -42,7 +44,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     private ordersService: OrdersService,
     private ridersService: RidersService,
     @InjectModel(Order.name) private orderModel: Model<Order>,
-  ) {}
+  ) { }
 
   /**
    * Handle client connection
@@ -146,7 +148,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   ): Promise<void> {
     const { orderId } = payload;
     const roomName = this.getOrderRoomName(orderId);
-    
+
     client.leave(roomName);
     this.logger.log(`Client ${client.id} left room ${roomName}`);
 
@@ -198,7 +200,12 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       for (const order of activeOrders) {
         this.broadcastRiderLocationUpdate(
           order._id.toString(),
-          { latitude: payload.latitude, longitude: payload.longitude },
+          {
+            latitude: payload.latitude,
+            longitude: payload.longitude,
+            heading: payload.heading,
+            speed: payload.speed
+          },
           user.userId,
         );
       }
@@ -232,12 +239,9 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.logger.log(`Broadcasted status update for order ${orderId}: ${order.orderStatus}`);
   }
 
-  /**
-   * Broadcast rider location update to order room
-   */
   broadcastRiderLocationUpdate(
     orderId: string,
-    location: { latitude: number; longitude: number },
+    location: { latitude: number; longitude: number; heading?: number; speed?: number },
     riderId: string,
   ): void {
     const roomName = `order_${orderId}`;
@@ -256,7 +260,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     const roomName = `order_${orderId}`;
     const now = new Date();
     const durationMinutes = Math.round((eta.getTime() - now.getTime()) / 60000);
-    
+
     this.server.to(roomName).emit('etaUpdate', {
       orderId,
       estimatedDeliveryTime: eta,
