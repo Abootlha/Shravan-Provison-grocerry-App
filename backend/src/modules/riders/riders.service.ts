@@ -55,7 +55,14 @@ export class RidersService {
   }
 
   async findByPhone(phone: string): Promise<Rider | null> {
-    return this.riderModel.findOne({ phone }).lean().exec();
+    const normalizedPhone = phone.startsWith('+91') ? phone : `+91${phone.replace(/\s/g, '')}`;
+    return this.riderModel.findOne({
+      $or: [
+        { phone: normalizedPhone },
+        { phone: phone.replace(/\s/g, '') },
+        { phone },
+      ],
+    }).lean().exec();
   }
 
   async updatePresence(
@@ -258,6 +265,53 @@ export class RidersService {
       password: hashedPassword,
       phone: normalizedPhone,
       vehicleType: vehicleType || VehicleType.TWO_WHEELER,
+      status: RiderStatus.OFFLINE,
+      isActive: true,
+      currentLocation: {
+        type: 'Point',
+        coordinates: [0, 0],
+      },
+    });
+
+    return rider.save();
+  }
+
+  async ensureOtpRider(phone: string, name?: string): Promise<RiderDocument> {
+    const normalizedPhone = phone.startsWith('+91') ? phone : `+91${phone.replace(/\s/g, '')}`;
+    const existingRider = await this.riderModel.findOne({
+      $or: [
+        { phone: normalizedPhone },
+        { phone: phone.replace(/\s/g, '') },
+        { phone },
+      ],
+    });
+
+    if (existingRider) {
+      if (name && existingRider.name !== name) {
+        existingRider.name = name;
+        await existingRider.save();
+      }
+      return existingRider;
+    }
+
+    const phoneDigits = normalizedPhone.replace(/\D/g, '').slice(-10);
+    let usernameBase = `rider${phoneDigits}`;
+    let username = usernameBase;
+    let suffix = 1;
+
+    while (await this.riderModel.findOne({ username })) {
+      username = `${usernameBase}${suffix}`;
+      suffix += 1;
+    }
+
+    const hashedPassword = await bcrypt.hash(`otp-${phoneDigits}-${Date.now()}`, 10);
+
+    const rider = new this.riderModel({
+      name: name || 'Rider',
+      username,
+      password: hashedPassword,
+      phone: normalizedPhone,
+      vehicleType: VehicleType.TWO_WHEELER,
       status: RiderStatus.OFFLINE,
       isActive: true,
       currentLocation: {

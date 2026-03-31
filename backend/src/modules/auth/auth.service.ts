@@ -140,6 +140,30 @@ export class AuthService {
         // Verify OTP using OtpService
         await this.otpService.verifyOtp(phone, otp);
 
+        if (role === UserRole.RIDER) {
+            const rider = await this.ridersService.ensureOtpRider(phone, name);
+            const tokens = await this.generateTokens(rider._id.toString(), 'rider');
+
+            const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
+            await this.redisService.set(
+                this.getRefreshTokenKey(rider._id.toString()),
+                hashedRefreshToken,
+                this.refreshTokenExpiry
+            );
+
+            return {
+                user: {
+                    id: rider._id,
+                    name: rider.name,
+                    username: rider.username,
+                    role: 'rider',
+                    phone: rider.phone,
+                    vehicleType: rider.vehicleType,
+                },
+                ...tokens,
+            };
+        }
+
         // Find or create user
         let user = await this.usersService.findByPhone(phone);
 
