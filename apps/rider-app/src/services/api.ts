@@ -144,8 +144,13 @@ export const authApi = {
   sendOtp: (phone: string) =>
     authClient.post<{ success: boolean; message: string }>('/auth/send-otp', { phone }),
 
-  verifyOtp: async (phone: string, otp: string) => {
-    const response = await authClient.post<any>('/auth/verify-otp', { phone, otp });
+  verifyOtp: async (phone: string, otp: string, name?: string) => {
+    const response = await authClient.post<any>('/auth/verify-otp', {
+      phone,
+      otp,
+      name,
+      role: 'rider',
+    });
     const token = response.tokens?.accessToken || response.accessToken;
     const rider = normalizeRider(response.user || {});
     return { token, user: rider };

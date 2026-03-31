@@ -16,27 +16,35 @@ class LocationService {
   private locationSubscription: Location.LocationSubscription | null = null;
   private lastUpdate: number = 0;
   private callbacks: Set<LocationCallback> = new Set();
+  private foregroundPermissionGranted = false;
 
   async requestPermissions(): Promise<boolean> {
     const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
-    if (foregroundStatus !== 'granted') {
+    this.foregroundPermissionGranted = foregroundStatus === 'granted';
+
+    if (!this.foregroundPermissionGranted) {
       return false;
     }
 
-    const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
-    return backgroundStatus === 'granted';
+    try {
+      await Location.requestBackgroundPermissionsAsync();
+    } catch {
+      // Background permission is optional for live in-app tracking on Android.
+    }
+
+    return true;
   }
 
   async hasPermissions(): Promise<boolean> {
     const foreground = await Location.getForegroundPermissionsAsync();
-    const background = await Location.getBackgroundPermissionsAsync();
-    return foreground.status === 'granted' && background.status === 'granted';
+    this.foregroundPermissionGranted = foreground.status === 'granted';
+    return this.foregroundPermissionGranted;
   }
 
   async getCurrentLocation(): Promise<CurrentLocation | null> {
     try {
       const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
+        accuracy: Location.Accuracy.Balanced,
       });
       return {
         latitude: location.coords.latitude,
@@ -47,7 +55,23 @@ class LocationService {
         altitude: location.coords.altitude,
       };
     } catch {
-      return null;
+      try {
+        const location = await Location.getLastKnownPositionAsync();
+        if (!location) {
+          return null;
+        }
+
+        return {
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          heading: location.coords.heading,
+          speed: location.coords.speed,
+          accuracy: location.coords.accuracy,
+          altitude: location.coords.altitude,
+        };
+      } catch {
+        return null;
+      }
     }
   }
 
@@ -64,7 +88,7 @@ class LocationService {
 
     this.locationSubscription = await Location.watchPositionAsync(
       {
-        accuracy: Location.Accuracy.High,
+        accuracy: Location.Accuracy.Balanced,
         distanceInterval: 10,
         timeInterval: LOCATION_UPDATE_THROTTLE,
       },

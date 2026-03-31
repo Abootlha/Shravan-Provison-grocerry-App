@@ -10,6 +10,7 @@ export const useLocation = () => {
     (state) => state.location
   );
   const locationRef = useRef<CurrentLocation | null>(null);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
 
   const handleLocationUpdate = useCallback(
     (location: CurrentLocation) => {
@@ -35,7 +36,8 @@ export const useLocation = () => {
     const started = await locationService.startTracking();
     if (started) {
       dispatch(setTracking(true));
-      const unsubscribe = locationService.subscribe(handleLocationUpdate);
+      unsubscribeRef.current?.();
+      unsubscribeRef.current = locationService.subscribe(handleLocationUpdate);
 
       const location = await locationService.getCurrentLocation();
       if (location) {
@@ -48,27 +50,27 @@ export const useLocation = () => {
   }, [dispatch, handleLocationUpdate]);
 
   const stopTracking = useCallback(() => {
+    unsubscribeRef.current?.();
+    unsubscribeRef.current = null;
     locationService.stopTracking();
     dispatch(setTracking(false));
   }, [dispatch]);
 
   const startSocketTracking = useCallback(
-    (riderId: string) => {
-      if (isTracking) {
-        socketService.startLocationUpdates(() => {
-          if (locationRef.current) {
-            return {
-              latitude: locationRef.current.latitude,
-              longitude: locationRef.current.longitude,
-              heading: locationRef.current.heading ?? undefined,
-              speed: locationRef.current.speed ?? undefined,
-            };
-          }
-          return null;
-        });
-      }
+    (_riderId: string) => {
+      socketService.startLocationUpdates(() => {
+        if (locationRef.current) {
+          return {
+            latitude: locationRef.current.latitude,
+            longitude: locationRef.current.longitude,
+            heading: locationRef.current.heading ?? undefined,
+            speed: locationRef.current.speed ?? undefined,
+          };
+        }
+        return null;
+      });
     },
-    [isTracking]
+    []
   );
 
   const stopSocketTracking = useCallback(() => {
@@ -77,6 +79,7 @@ export const useLocation = () => {
 
   useEffect(() => {
     return () => {
+      unsubscribeRef.current?.();
       locationService.stopTracking();
     };
   }, []);

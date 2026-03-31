@@ -48,7 +48,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       );
 
       if (value) {
-        await startTracking();
+        const trackingStarted = await startTracking();
+        if (!trackingStarted) {
+          Alert.alert('Location Required', 'Please allow location access to go online and receive live navigation updates.');
+          await riderApi.updateAvailability(false);
+          dispatch(
+            setUser({
+              ...(user as Rider),
+              isOnline: false,
+            })
+          );
+          return;
+        }
+
         startSocketTracking(user?.id || '');
       } else {
         stopTracking();
@@ -411,4 +423,3 @@ const styles = StyleSheet.create({
     height: 100,
   },
 });
-

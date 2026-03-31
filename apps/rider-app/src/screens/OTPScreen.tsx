@@ -12,11 +12,11 @@ import {
 } from 'react-native';
 import { COLORS, SPACING } from '../utils/constants';
 import { useAppDispatch, useAppSelector } from '../hooks/useAuth';
-import { verifyOtp, clearError } from '../store/slices/authSlice';
+import { verifyOtp, clearError, sendOtp } from '../store/slices/authSlice';
 import type { OTPScreenProps } from '../types/navigation';
 
 export const OTPScreen: React.FC<OTPScreenProps> = ({ navigation, route }) => {
-  const { phone } = route.params;
+  const { phone, name, isNewAccount } = route.params;
   const otpLength = 4;
   const [otp, setOtp] = useState<string[]>(Array(otpLength).fill(''));
   const [timer, setTimer] = useState(30);
@@ -74,7 +74,7 @@ export const OTPScreen: React.FC<OTPScreenProps> = ({ navigation, route }) => {
 
     verifyInFlightRef.current = true;
     try {
-      const result = await dispatch(verifyOtp({ phone, otp: otpCode }));
+      const result = await dispatch(verifyOtp({ phone, otp: otpCode, name }));
       if (verifyOtp.fulfilled.match(result)) {
         navigation.replace('Home');
       }
@@ -89,7 +89,6 @@ export const OTPScreen: React.FC<OTPScreenProps> = ({ navigation, route }) => {
     }
     setTimer(30);
     setOtp(Array(otpLength).fill(''));
-    const { sendOtp } = await import('../store/slices/authSlice');
     await dispatch(sendOtp(phone));
     inputRefs.current[0]?.focus();
   };
@@ -105,6 +104,9 @@ export const OTPScreen: React.FC<OTPScreenProps> = ({ navigation, route }) => {
           <Text style={styles.subtitle}>
             We sent a code to{'\n'}+91 {phone.slice(-10)}
           </Text>
+          {isNewAccount && Boolean(name) && (
+            <Text style={styles.helperText}>Creating rider account for {name}</Text>
+          )}
         </View>
 
         <View style={styles.otpContainer}>
@@ -112,7 +114,7 @@ export const OTPScreen: React.FC<OTPScreenProps> = ({ navigation, route }) => {
             <TextInput
               key={index}
               ref={(ref) => { inputRefs.current[index] = ref; }}
-              style={[styles.otpInput, error && styles.otpInputError]}
+              style={[styles.otpInput, error ? styles.otpInputError : null]}
               value={digit}
               onChangeText={(value) => handleChange(value.replace(/\D/g, ''), index)}
               onKeyPress={(e) => handleKeyPress(e, index)}
@@ -133,7 +135,7 @@ export const OTPScreen: React.FC<OTPScreenProps> = ({ navigation, route }) => {
           {loading ? (
             <ActivityIndicator color={COLORS.surface} />
           ) : (
-            <Text style={styles.buttonText}>Verify</Text>
+            <Text style={styles.buttonText}>{isNewAccount ? 'Verify & Create Account' : 'Verify'}</Text>
           )}
         </TouchableOpacity>
 
@@ -174,6 +176,13 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: COLORS.textSecondary,
+    textAlign: 'center',
+  },
+  helperText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: COLORS.primary,
+    fontWeight: '600',
     textAlign: 'center',
   },
   otpContainer: {

@@ -5,6 +5,7 @@ import { UsersService } from '../users/users.service';
 import { OtpService } from './otp.service';
 import { RedisService } from '../../common/utils/redis.service';
 import * as bcrypt from 'bcrypt';
+import { UserRole } from '../users/schemas/user.schema';
 
 @Injectable()
 export class AuthService {
@@ -81,7 +82,7 @@ export class AuthService {
         return this.otpService.sendOtp(phone);
     }
 
-    async verifyOtp(phone: string, otp: string, name?: string): Promise<any> {
+    async verifyOtp(phone: string, otp: string, name?: string, role?: UserRole): Promise<any> {
         // Verify OTP using OtpService
         await this.otpService.verifyOtp(phone, otp);
 
@@ -92,7 +93,10 @@ export class AuthService {
             user = await this.usersService.create({
                 name: name || 'User',
                 phone,
+                role: role || UserRole.CUSTOMER,
             });
+        } else if (role && user.role !== role) {
+            throw new UnauthorizedException(`This phone number is not registered as a ${role}`);
         }
 
         // Generate tokens

@@ -1,8 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import { v4 as uuidv4 } from 'uuid';
 import dayjs from 'dayjs';
 import { Order, OrderDocument, OrderStatus, PaymentMethod, PaymentStatus, ORDER_STATUS_TRANSITIONS } from './schemas/order.schema';
@@ -21,7 +19,6 @@ export class OrdersService {
         @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
         @InjectModel(OrderStatusLog.name) private orderStatusLogModel: Model<OrderStatusLogDocument>,
         @InjectModel(User.name) private userModel: Model<UserDocument>,
-        @InjectQueue('orders') private ordersQueue: Queue,
         private cartService: CartService,
         private productsService: ProductsService,
         private redisService: RedisService,
@@ -126,9 +123,6 @@ export class OrdersService {
 
         // Clear user's cart
         await this.cartService.clearCart(userId);
-
-        // Add to queue for confirmation (in production: after payment verification)
-        await this.ordersQueue.add('confirmOrder', { orderId: order._id.toString() }, { delay: 5000 });
 
         return order;
     }
@@ -314,6 +308,12 @@ export class OrdersService {
     async assignRider(orderId: string, riderId: string): Promise<OrderDocument> {
         const order = await this.orderModel.findById(orderId);
         if (!order) throw new NotFoundException('Order not found');
+
+        if (!this.validateStatusTransition(order.orderStatus, OrderStatus.ASSIGNED)) {
+            throw new BadRequestException(
+                `Cannot assign rider while order is ${order.orderStatus}`
+            );
+        }
 
         // Validate rider exists and is available
         const rider = await this.userModel.findById(riderId);

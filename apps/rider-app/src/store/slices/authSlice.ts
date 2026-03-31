@@ -33,9 +33,9 @@ export const sendOtp = createAsyncThunk(
 
 export const verifyOtp = createAsyncThunk(
   'auth/verifyOtp',
-  async ({ phone, otp }: { phone: string; otp: string }, { rejectWithValue }) => {
+  async ({ phone, otp, name }: { phone: string; otp: string; name?: string }, { rejectWithValue }) => {
     try {
-      const response = await authApi.verifyOtp(phone, otp);
+      const response = await authApi.verifyOtp(phone, otp, name);
       await storage.setToken(response.token);
       await storage.setUser(response.user);
       return response;

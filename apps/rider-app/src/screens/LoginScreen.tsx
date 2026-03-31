@@ -17,6 +17,8 @@ import type { LoginScreenProps } from '../types/navigation';
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
   const [phone, setPhone] = useState('');
+  const [name, setName] = useState('');
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const dispatch = useAppDispatch();
   const { loading, error } = useAppSelector((state) => state.auth);
 
@@ -27,9 +29,18 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
       return;
     }
 
+    if (isCreatingAccount && name.trim().length < 2) {
+      Alert.alert('Error', 'Please enter your name to create a rider account');
+      return;
+    }
+
     const result = await dispatch(sendOtp(cleanPhone));
     if (sendOtp.fulfilled.match(result)) {
-      navigation.navigate('OTP', { phone: cleanPhone });
+      navigation.navigate('OTP', {
+        phone: cleanPhone,
+        name: isCreatingAccount ? name.trim() : undefined,
+        isNewAccount: isCreatingAccount,
+      });
     }
   };
 
@@ -46,6 +57,36 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
         </View>
 
         <View style={styles.form}>
+          <View style={styles.modeRow}>
+            <TouchableOpacity
+              style={[styles.modeButton, !isCreatingAccount && styles.modeButtonActive]}
+              onPress={() => setIsCreatingAccount(false)}
+            >
+              <Text style={[styles.modeButtonText, !isCreatingAccount && styles.modeButtonTextActive]}>
+                Login
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modeButton, isCreatingAccount && styles.modeButtonActive]}
+              onPress={() => setIsCreatingAccount(true)}
+            >
+              <Text style={[styles.modeButtonText, isCreatingAccount && styles.modeButtonTextActive]}>
+                Create Account
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {isCreatingAccount && (
+            <TextInput
+              style={styles.nameInput}
+              value={name}
+              onChangeText={setName}
+              placeholder="Enter your full name"
+              placeholderTextColor={COLORS.disabled}
+              autoCapitalize="words"
+            />
+          )}
+
           <View style={styles.phoneContainer}>
             <View style={styles.countryCode}>
               <Text style={styles.countryCodeText}>+91</Text>
@@ -71,7 +112,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
             {loading ? (
               <ActivityIndicator color={COLORS.surface} />
             ) : (
-              <Text style={styles.buttonText}>Send OTP</Text>
+              <Text style={styles.buttonText}>{isCreatingAccount ? 'Create Rider Account' : 'Send OTP'}</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -117,6 +158,38 @@ const styles = StyleSheet.create({
   },
   form: {
     marginBottom: 24,
+  },
+  modeRow: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 16,
+  },
+  modeButton: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: 10,
+  },
+  modeButtonActive: {
+    backgroundColor: COLORS.primary,
+  },
+  modeButtonText: {
+    color: COLORS.textSecondary,
+    fontWeight: '600',
+  },
+  modeButtonTextActive: {
+    color: COLORS.surface,
+  },
+  nameInput: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    marginBottom: 16,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md,
+    fontSize: 16,
+    color: COLORS.text,
   },
   phoneContainer: {
     flexDirection: 'row',

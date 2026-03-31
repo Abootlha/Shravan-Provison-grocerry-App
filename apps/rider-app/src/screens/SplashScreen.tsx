@@ -1,16 +1,23 @@
 import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { COLORS } from '../utils/constants';
+import { useAppDispatch } from '../hooks/useAuth';
+import { loadUser } from '../store/slices/authSlice';
 import type { SplashScreenProps } from '../types/navigation';
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({ navigation }) => {
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      navigation.replace('Login');
-    }, 2000);
+  const dispatch = useAppDispatch();
 
-    return () => clearTimeout(timer);
-  }, [navigation]);
+  useEffect(() => {
+    const bootstrap = async () => {
+      const result = await dispatch(loadUser());
+      const hasSession = loadUser.fulfilled.match(result) && Boolean(result.payload?.token);
+
+      navigation.replace(hasSession ? 'Home' : 'Login');
+    };
+
+    bootstrap();
+  }, [dispatch, navigation]);
 
   return (
     <View style={styles.container}>

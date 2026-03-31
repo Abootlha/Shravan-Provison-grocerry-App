@@ -3,6 +3,7 @@ import { IsString, IsOptional, Length } from 'class-validator';
 import type { Response } from 'express';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { UserRole } from '../users/schemas/user.schema';
 
 class SendOtpDto {
     @IsString()
@@ -22,6 +23,10 @@ class VerifyOtpDto {
     @IsOptional()
     @IsString()
     name?: string;
+
+    @IsOptional()
+    @IsString()
+    role?: UserRole;
 }
 
 class RefreshTokenDto {
@@ -91,7 +96,7 @@ export class AuthController {
         @Body() dto: VerifyOtpDto,
         @Res({ passthrough: true }) res: Response
     ) {
-        const result = await this.authService.verifyOtp(dto.phone, dto.otp, dto.name);
+        const result = await this.authService.verifyOtp(dto.phone, dto.otp, dto.name, dto.role);
 
         // Set tokens as HTTP-only cookies
         res.cookie('accessToken', result.accessToken, COOKIE_OPTIONS);

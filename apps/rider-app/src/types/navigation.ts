@@ -4,7 +4,7 @@ import type { Order } from './order';
 export type RootStackParamList = {
   Splash: undefined;
   Login: undefined;
-  OTP: { phone: string };
+  OTP: { phone: string; name?: string; isNewAccount?: boolean };
   Home: undefined;
   AvailableOrders: undefined;
   OrderDetail: { orderId: string; order?: Order };
