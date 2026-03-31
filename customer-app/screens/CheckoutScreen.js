@@ -115,7 +115,7 @@ const CheckoutScreen = ({ navigation }) => {
                     longitude: selectedAddress.longitude || 0,
                 },
                 paymentMethod: PAYMENT_MAP[selectedPayment] || 'COD',
-                paymentStatus: 'PENDING',
+                paymentStatus: selectedPayment === 'cod' ? 'PENDING' : 'COMPLETED',
             };
 
             const response = await OrderService.createOrder(orderData);
@@ -284,4 +284,3 @@ const styles = StyleSheet.create({
 });
 
 export default CheckoutScreen;
-

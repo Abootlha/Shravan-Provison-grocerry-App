@@ -107,8 +107,8 @@ export default function OrdersManager() {
             if (selectedOrder?._id === orderId) {
                 setSelectedOrder({ ...selectedOrder, orderStatus: newStatus });
             }
-        } catch (error) {
-            alert('Error updating status');
+        } catch (error: any) {
+            alert(error?.message || 'Error updating status');
         }
     }
 

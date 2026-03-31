@@ -3,7 +3,7 @@ import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { OrderStatus, PaymentMethod } from './schemas/order.schema';
-import { UpdateStatusDto, AssignRiderDto } from './dto';
+import { CreateOrderDto, UpdateStatusDto, AssignRiderDto } from './dto';
 import { UserRole } from '../users/schemas/user.schema';
 
 @Controller('orders')
@@ -14,12 +14,7 @@ export class OrdersController {
     @Post()
     async createOrder(
         @Request() req: any,
-        @Body() body: {
-            deliveryAddress: any;
-            paymentMethod: PaymentMethod;
-            deliveryInstructions?: string;
-            items?: any[];
-        },
+        @Body() body: CreateOrderDto,
     ) {
         const order = await this.ordersService.createOrder(req.user.userId, body);
         return { order };

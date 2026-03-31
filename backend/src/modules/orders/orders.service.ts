@@ -57,6 +57,7 @@ export class OrdersService {
     async createOrder(userId: string, data: {
         deliveryAddress: any;
         paymentMethod: PaymentMethod;
+        paymentStatus?: PaymentStatus;
         deliveryInstructions?: string;
         items?: any[];
     }): Promise<OrderDocument> {
@@ -143,6 +144,7 @@ export class OrdersService {
             totalAmount,
             deliveryAddress: deliveryAddress,
             paymentMethod: data.paymentMethod,
+            paymentStatus: data.paymentStatus ?? (data.paymentMethod === PaymentMethod.COD ? PaymentStatus.PENDING : PaymentStatus.COMPLETED),
             orderStatus: OrderStatus.PENDING,
             estimatedDeliveryTime: dayjs().add(15, 'minutes').toDate(),
             deliveryInstructions: data.deliveryInstructions,
@@ -343,6 +345,14 @@ export class OrdersService {
         const order = await this.orderModel.findById(orderId);
         if (!order) throw new NotFoundException('Order not found');
 
+        if (newStatus === OrderStatus.ASSIGNED) {
+            const assignedOrder = await this.autoAssignNearestRider(orderId);
+            if (!assignedOrder) {
+                throw new BadRequestException('No available rider could be assigned to this order');
+            }
+            return assignedOrder as OrderDocument;
+        }
+
         // Validate transition
         if (!this.validateStatusTransition(order.orderStatus, newStatus)) {
             throw new BadRequestException(
@@ -352,10 +362,9 @@ export class OrdersService {
 
         // Verify payment status before confirming
         if (newStatus === OrderStatus.CONFIRMED) {
-            if (order.paymentStatus !== PaymentStatus.COMPLETED && order.paymentMethod !== 'COD') {
-                throw new BadRequestException(
-                    'Payment must be completed before confirming order (or use COD)'
-                );
+            if (order.paymentStatus !== PaymentStatus.COMPLETED && order.paymentMethod !== PaymentMethod.COD) {
+                // Online payments are currently simulated in-app, so admin confirmation should not dead-end.
+                order.paymentStatus = PaymentStatus.COMPLETED;
             }
         }
 
@@ -418,19 +427,6 @@ export class OrdersService {
                 }
             } catch (error) {
                 console.error(`Failed to update rider availability for order ${order._id}:`, error);
-            }
-        }
-
-        // If assigned, calculate initial ETA
-        if (newStatus === OrderStatus.ASSIGNED && order.riderId) {
-            try {
-                const eta = await this.etaService.recalculateForOrder(order._id.toString());
-                if (eta) {
-                    this.trackingGateway.broadcastETAUpdate(order._id.toString(), eta);
-                }
-            } catch (error) {
-                // Log error but don't fail the status update
-                console.error(`Failed to calculate initial ETA for order ${order._id}:`, error);
             }
         }
 
@@ -596,13 +592,13 @@ export class OrdersService {
 
     async autoAssignNearestRider(orderId: string): Promise<OrderDocument | null> {
         const order = await this.orderModel.findById(orderId).lean().exec();
-        if (!order || order.riderId || order.orderStatus !== OrderStatus.PACKED) {
+        if (!order || order.riderId || ![OrderStatus.PACKED, OrderStatus.CONFIRMED].includes(order.orderStatus)) {
             return null;
         }
 
         const storeSettings = await this.settingsService.getStoreSettings();
-        const nearbyRiders = await this.riderModel
-            .find({
+        let nearestRider = await this.riderModel
+            .findOne({
                 status: 'available',
                 isActive: true,
                 currentLocation: {
@@ -615,11 +611,20 @@ export class OrdersService {
                     },
                 },
             })
-            .limit(1)
             .lean()
             .exec();
 
-        const nearestRider = nearbyRiders[0];
+        if (!nearestRider) {
+            nearestRider = await this.riderModel
+                .findOne({
+                    status: 'available',
+                    isActive: true,
+                })
+                .sort({ lastActiveAt: -1, updatedAt: -1, createdAt: 1 })
+                .lean()
+                .exec();
+        }
+
         if (!nearestRider) {
             return null;
         }

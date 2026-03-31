@@ -102,9 +102,9 @@ export default function OrderDetail({ order, onClose, onStatusChange }: OrderDet
             if (onStatusChange) {
                 onStatusChange(order._id, newStatus);
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error updating status:', error);
-            alert('Failed to update status. Please try again.');
+            alert(error?.message || 'Failed to update status. Please try again.');
         } finally {
             setUpdating(false);
         }

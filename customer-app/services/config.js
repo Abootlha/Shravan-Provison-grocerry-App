@@ -25,8 +25,8 @@ export const CART_URL = Constants.expoConfig?.extra?.CART_SERVICE_URL || API_BAS
 export const LOCATION_URL = Constants.expoConfig?.extra?.LOCATION_SERVICE_URL || API_BASE_URL;
 
 export const TRACKING_URL = __DEV__
-    ? (Platform.OS === 'web' ? 'ws://localhost:3000/tracking' : `ws://${LOCAL_IP}:3000/tracking`)
-    : 'wss://api.shravankirana.com/tracking';
+    ? (Platform.OS === 'web' ? 'http://localhost:3000/tracking' : `http://${LOCAL_IP}:3000/tracking`)
+    : 'https://api.shravankirana.com/tracking';
 
 export const API_URL = ORDER_URL;
 

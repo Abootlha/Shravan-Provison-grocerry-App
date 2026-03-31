@@ -37,7 +37,7 @@ class SocketService {
             auth: {
                 token: token,
             },
-            transports: ['websocket'],
+            transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionDelay: this.reconnectionDelay,
             reconnectionDelayMax: this.reconnectionDelayMax,
@@ -68,7 +68,7 @@ class SocketService {
         });
 
         this.socket.on('connect_error', (error) => {
-            console.error('Socket connection error:', error.message);
+            console.warn('Socket connection warning:', error.message);
             this.reconnectAttempts++;
 
             if (this.reconnectAttempts >= this.maxReconnectAttempts) {
@@ -91,7 +91,7 @@ class SocketService {
         });
 
         this.socket.on('reconnect_failed', () => {
-            console.error('Socket reconnection failed');
+            console.warn('Socket reconnection failed');
             store.dispatch(setConnectionStatus('disconnected'));
             store.dispatch(setError('Failed to reconnect to tracking server'));
         });
@@ -139,7 +139,7 @@ class SocketService {
         });
 
         this.socket.on('error', (error) => {
-            console.error('Socket error:', error);
+            console.warn('Socket error:', error);
             store.dispatch(setError(error.message || 'Socket error occurred'));
         });
     }
