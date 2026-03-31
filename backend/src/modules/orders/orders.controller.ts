@@ -44,7 +44,7 @@ export class OrdersController {
             throw new ForbiddenException('Only riders can access available orders');
         }
 
-        const orders = await this.ordersService.findAvailableForRiders();
+        const orders = await this.ordersService.findAvailableForRiders(req.user.userId);
         return { orders };
     }
 
@@ -54,7 +54,7 @@ export class OrdersController {
             throw new ForbiddenException('Only riders can accept orders');
         }
 
-        const order = await this.ordersService.assignRider(id, req.user.userId);
+        const order = await this.ordersService.riderAcceptOrder(id, req.user.userId);
         return { order };
     }
 

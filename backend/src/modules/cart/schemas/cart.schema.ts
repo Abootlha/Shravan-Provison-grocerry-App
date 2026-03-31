@@ -25,6 +25,3 @@ export class Cart {
 }
 
 export const CartSchema = SchemaFactory.createForClass(Cart);
-
-// Unique index on userId
-CartSchema.index({ userId: 1 }, { unique: true });

@@ -1,17 +1,50 @@
-import { Controller, Get, Param, Query, UseGuards, Request, Put, Body, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards, Request, Put, Body, ForbiddenException, Post } from '@nestjs/common';
 import { RidersService } from './riders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { UserRole } from '../users/schemas/user.schema';
 
+import { IsString, IsNotEmpty, Length, IsOptional } from 'class-validator';
+
+class CreateRiderDto {
+    @IsString()
+    @IsNotEmpty()
+    name!: string;
+
+    @IsString()
+    @IsNotEmpty()
+    username!: string;
+
+    @IsString()
+    @IsNotEmpty()
+    @Length(6, 20)
+    password!: string;
+
+    @IsString()
+    @IsNotEmpty()
+    @Length(10, 15)
+    phone!: string;
+
+    @IsOptional()
+    @IsString()
+    vehicleType?: string;
+}
+
 @Controller('riders')
 @UseGuards(JwtAuthGuard)
 export class RidersController {
-    constructor(private readonly ridersService: RidersService) {}
+    constructor(private readonly ridersService: RidersService) { }
+
+    @Post()
+    @UseGuards(AdminGuard)
+    async createRider(@Body() dto: CreateRiderDto) {
+        const rider = await this.ridersService.createRider(dto);
+        return { rider, message: 'Rider created successfully' };
+    }
 
     @Get('me')
     async getCurrentRider(@Request() req: any) {
-        const rider = await this.ridersService.findRiderForUser(req.user.userId);
+        const rider = await this.ridersService.findRiderById(req.user.userId);
         return { rider };
     }
 

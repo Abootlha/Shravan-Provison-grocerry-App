@@ -107,9 +107,15 @@ function normalizeRider(rider: any) {
         status: rider.status || (rider.isOnline ? (rider.isAvailable ? 'available' : 'busy') : 'offline'),
         name: rider.name || rider.userId?.name || rider.fullName || 'Rider',
         phone: rider.phone || rider.userId?.phone || '',
+        username: rider.username || '',
+        vehicleType: rider.vehicleType || 'Two Wheeler',
+        isActive: rider.isActive !== undefined ? rider.isActive : true,
+        totalRatings: rider.totalRatings || 0,
         rating: rider.rating || rider.stats?.avgRating || 0,
         totalDeliveries: rider.totalDeliveries || rider.stats?.totalDeliveries || 0,
         acceptanceRate: rider.acceptanceRate || rider.stats?.acceptanceRate || 0,
+        createdAt: rider.createdAt || rider.joinedAt || new Date().toISOString(),
+        updatedAt: rider.updatedAt || new Date().toISOString(),
     };
 }
 
@@ -235,6 +241,12 @@ export const api = {
     },
     getRiderLocation: (riderId: string) =>
         apiRequest(RIDER_SERVICE, `/riders/${riderId}`).then((data) => data.rider || data),
+
+    createRider: (data: any) =>
+        apiRequest(RIDER_SERVICE, '/riders', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        }),
 
     getDailyAnalytics: (date?: string) => {
         const query = new URLSearchParams();

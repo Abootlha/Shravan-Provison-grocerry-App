@@ -150,9 +150,6 @@ export class Order {
 export const OrderSchema = SchemaFactory.createForClass(Order);
 
 // Indexes for efficient queries
-OrderSchema.index({ userId: 1 });
-OrderSchema.index({ orderStatus: 1 });
-OrderSchema.index({ riderId: 1 });
 OrderSchema.index({ orderStatus: 1, createdAt: 1 }); // Compound index for stale order queries
 OrderSchema.index({ userId: 1, createdAt: -1 });
 OrderSchema.index({ createdAt: -1 });
@@ -170,14 +167,12 @@ OrderSchema.pre('save', async function () {
         }
     }
 
-    // Validate riderId references existing User with rider role
+    // Validate riderId references existing Rider
     if (order.riderId) {
-        const rider = await UserModel.findById(order.riderId).lean() as { role?: string } | null;
+        const RiderModel = this.db.model('Rider');
+        const rider = await RiderModel.findById(order.riderId).lean() as { _id?: string } | null;
         if (!rider) {
-            throw new Error(`Invalid riderId: User with ID ${order.riderId} does not exist`);
-        }
-        if (rider.role !== 'rider') {
-            throw new Error(`Invalid riderId: User with ID ${order.riderId} is not a rider`);
+            throw new Error(`Invalid riderId: Rider with ID ${order.riderId} does not exist`);
         }
     }
 });
@@ -185,8 +180,8 @@ OrderSchema.pre('save', async function () {
 // Valid status transitions
 export const ORDER_STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
     [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
-    [OrderStatus.CONFIRMED]: [OrderStatus.PACKED, OrderStatus.CANCELLED],
-    [OrderStatus.PACKED]: [OrderStatus.ASSIGNED, OrderStatus.CANCELLED],
+    [OrderStatus.CONFIRMED]: [OrderStatus.PACKED, OrderStatus.ASSIGNED, OrderStatus.CANCELLED],
+    [OrderStatus.PACKED]: [OrderStatus.ASSIGNED, OrderStatus.OUT_FOR_DELIVERY, OrderStatus.CANCELLED],
     [OrderStatus.ASSIGNED]: [OrderStatus.OUT_FOR_DELIVERY, OrderStatus.CANCELLED],
     [OrderStatus.OUT_FOR_DELIVERY]: [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
     [OrderStatus.DELIVERED]: [],

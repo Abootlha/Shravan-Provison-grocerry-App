@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
@@ -6,6 +6,7 @@ import dayjs from 'dayjs';
 import { Order, OrderDocument, OrderStatus, PaymentMethod, PaymentStatus, ORDER_STATUS_TRANSITIONS } from './schemas/order.schema';
 import { OrderStatusLog, OrderStatusLogDocument } from './schemas/order-status-log.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
+import { Rider, RiderDocument } from '../riders/schemas/rider.schema';
 import { CartService } from '../cart/cart.service';
 import { ProductsService } from '../products/products.service';
 import { RedisService } from '../../common/utils/redis.service';
@@ -19,6 +20,7 @@ export class OrdersService {
         @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
         @InjectModel(OrderStatusLog.name) private orderStatusLogModel: Model<OrderStatusLogDocument>,
         @InjectModel(User.name) private userModel: Model<UserDocument>,
+        @InjectModel(Rider.name) private riderModel: Model<RiderDocument>,
         private cartService: CartService,
         private productsService: ProductsService,
         private redisService: RedisService,
@@ -207,11 +209,11 @@ export class OrdersService {
             .exec();
     }
 
-    async findAvailableForRiders(): Promise<OrderDocument[]> {
+    async findAvailableForRiders(riderId: string): Promise<OrderDocument[]> {
         return this.orderModel
             .find({
-                orderStatus: OrderStatus.PACKED,
-                riderId: { $exists: false },
+                orderStatus: OrderStatus.ASSIGNED,
+                riderId: new Types.ObjectId(riderId),
             })
             .sort({ createdAt: -1 })
             .lean()
@@ -316,6 +318,79 @@ export class OrdersService {
         return order;
     }
 
+    async riderAcceptOrder(orderId: string, riderId: string): Promise<OrderDocument> {
+        const order = await this.orderModel.findById(orderId);
+        if (!order) throw new NotFoundException('Order not found');
+
+        // Rider can accept if order is ASSIGNED to them
+        if (order.orderStatus !== OrderStatus.ASSIGNED) {
+            throw new BadRequestException(
+                `Order is in ${order.orderStatus} status, only ASSIGNED orders can be accepted by rider`
+            );
+        }
+
+        if (!order.riderId || order.riderId.toString() !== riderId) {
+            throw new ForbiddenException('This order is not assigned to you');
+        }
+
+        const previousStatus = order.orderStatus;
+        order.orderStatus = OrderStatus.OUT_FOR_DELIVERY;
+        this.addTimelineEntry(order, OrderStatus.OUT_FOR_DELIVERY, riderId);
+        await order.save();
+
+        // Invalidate cache
+        await this.cacheService.deleteOrder(order._id.toString());
+        await this.redisService.del(RedisService.Keys.orderStatus(order.orderId));
+        await this.redisService.set(
+            RedisService.Keys.orderStatus(order.orderId),
+            OrderStatus.OUT_FOR_DELIVERY,
+        );
+
+        await this.logStatusChange(
+            order._id,
+            previousStatus,
+            OrderStatus.OUT_FOR_DELIVERY,
+            new Types.ObjectId(riderId),
+        );
+
+        await this.redisService.publish(
+            'order-updates',
+            JSON.stringify({ orderId: order.orderId, status: OrderStatus.OUT_FOR_DELIVERY }),
+        );
+
+        // Broadcast to customer app - this triggers live tracking
+        this.trackingGateway.broadcastOrderStatusUpdate(order._id.toString(), order);
+
+        // Start broadcasting rider location to the order room
+        try {
+            const rider = await this.riderModel.findById(riderId);
+            if (rider?.currentLocation) {
+                this.trackingGateway.broadcastRiderLocationUpdate(
+                    order._id.toString(),
+                    {
+                        latitude: rider.currentLocation.coordinates[1],
+                        longitude: rider.currentLocation.coordinates[0],
+                    },
+                    riderId,
+                );
+            }
+        } catch (error) {
+            console.error(`Failed to broadcast initial rider location for order ${order._id}:`, error);
+        }
+
+        // Recalculate ETA
+        try {
+            const eta = await this.etaService.recalculateForOrder(order._id.toString());
+            if (eta) {
+                this.trackingGateway.broadcastETAUpdate(order._id.toString(), eta);
+            }
+        } catch (error) {
+            console.error(`Failed to recalculate ETA for order ${order._id}:`, error);
+        }
+
+        return order;
+    }
+
     async assignRider(orderId: string, riderId: string): Promise<OrderDocument> {
         const order = await this.orderModel.findById(orderId);
         if (!order) throw new NotFoundException('Order not found');
@@ -327,11 +402,11 @@ export class OrdersService {
         }
 
         // Validate rider exists and is available
-        const rider = await this.userModel.findById(riderId);
+        const rider = await this.riderModel.findById(riderId);
         if (!rider) throw new NotFoundException('Rider not found');
 
-        if (!rider.isAvailable || !rider.isOnline) {
-            throw new BadRequestException('Rider is not available or offline');
+        if (rider.status !== 'available') {
+            throw new BadRequestException('Rider is not available');
         }
 
         // Assign rider
@@ -362,6 +437,7 @@ export class OrdersService {
         );
 
         this.trackingGateway.broadcastOrderStatusUpdate(order._id.toString(), order);
+        this.trackingGateway.notifyRiderOfAssignment(riderId, order);
 
         // Calculate initial ETA
         try {
@@ -373,6 +449,9 @@ export class OrdersService {
             // Log error but don't fail the assignment
             console.error(`Failed to calculate initial ETA for order ${order._id}:`, error);
         }
+
+        // Notify the assigned rider about the new order via socket
+        this.trackingGateway.notifyRiderOfAssignment(riderId, order);
 
         return order;
     }

@@ -84,6 +84,26 @@ export class AuthController {
         };
     }
 
+    @Post('rider/login')
+    @HttpCode(HttpStatus.OK)
+    async riderLogin(
+        @Body() dto: AdminLoginDto,
+        @Res({ passthrough: true }) res: Response
+    ) {
+        const result = await this.authService.riderLogin(dto.username, dto.password);
+
+        // Set tokens as HTTP-only cookies
+        res.cookie('accessToken', result.accessToken, COOKIE_OPTIONS);
+        res.cookie('refreshToken', result.refreshToken, REFRESH_COOKIE_OPTIONS);
+
+        return {
+            user: result.user,
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
+            message: 'Login successful',
+        };
+    }
+
     @Post('send-otp')
     @HttpCode(HttpStatus.OK)
     async sendOtp(@Body() dto: SendOtpDto) {

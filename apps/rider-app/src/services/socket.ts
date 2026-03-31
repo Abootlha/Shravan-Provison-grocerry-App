@@ -8,22 +8,32 @@ type SocketEventHandler = (...args: unknown[]) => void;
 class SocketService {
   private socket: Socket | null = null;
   private locationUpdateInterval: ReturnType<typeof setInterval> | null = null;
+  private riderId: string = '';
 
-  connect(token: string): void {
+  connect(token: string, riderId?: string): void {
     if (this.socket?.connected) {
       return;
+    }
+
+    if (riderId) {
+      this.riderId = riderId;
     }
 
     this.socket = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket'],
       reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 10000,
     });
 
     this.socket.on('connect', () => {
-      console.log('Socket connected');
+      console.log('Socket connected:', this.socket?.id);
+      // Auto-join rider room to receive order assignments
+      if (this.riderId) {
+        this.socket?.emit('joinRiderRoom', { riderId: this.riderId });
+      }
     });
 
     this.socket.on('disconnect', (reason) => {
@@ -33,6 +43,21 @@ class SocketService {
     this.socket.on('connect_error', (error) => {
       console.error('Socket connection error:', error.message);
     });
+
+    this.socket.on('reconnect', (attemptNumber) => {
+      console.log('Socket reconnected after', attemptNumber, 'attempts');
+      // Re-join rider room on reconnect
+      if (this.riderId) {
+        this.socket?.emit('joinRiderRoom', { riderId: this.riderId });
+      }
+    });
+  }
+
+  setRiderId(riderId: string): void {
+    this.riderId = riderId;
+    if (this.socket?.connected) {
+      this.socket.emit('joinRiderRoom', { riderId });
+    }
   }
 
   disconnect(): void {

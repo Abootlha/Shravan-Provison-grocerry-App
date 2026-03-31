@@ -12,35 +12,24 @@ import {
 } from 'react-native';
 import { COLORS, SPACING } from '../utils/constants';
 import { useAppDispatch, useAppSelector } from '../hooks/useAuth';
-import { sendOtp } from '../store/slices/authSlice';
+import { login } from '../store/slices/authSlice';
 import type { LoginScreenProps } from '../types/navigation';
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
-  const [phone, setPhone] = useState('');
-  const [name, setName] = useState('');
-  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const dispatch = useAppDispatch();
   const { loading, error } = useAppSelector((state) => state.auth);
 
-  const handleSendOtp = async () => {
-    const cleanPhone = phone.replace(/\D/g, '');
-    if (cleanPhone.length < 10) {
-      Alert.alert('Error', 'Please enter a valid phone number');
+  const handleLogin = async () => {
+    if (!username.trim() || !password.trim()) {
+      Alert.alert('Error', 'Please enter both username and password');
       return;
     }
 
-    if (isCreatingAccount && name.trim().length < 2) {
-      Alert.alert('Error', 'Please enter your name to create a rider account');
-      return;
-    }
-
-    const result = await dispatch(sendOtp(cleanPhone));
-    if (sendOtp.fulfilled.match(result)) {
-      navigation.navigate('OTP', {
-        phone: cleanPhone,
-        name: isCreatingAccount ? name.trim() : undefined,
-        isNewAccount: isCreatingAccount,
-      });
+    const result = await dispatch(login({ username: username.trim(), password }));
+    if (login.fulfilled.match(result)) {
+      // Navigation will be handled by the auth state change in App.tsx/Navigator
     }
   };
 
@@ -53,66 +42,39 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
         <View style={styles.header}>
           <Text style={styles.logo}>SK</Text>
           <Text style={styles.title}>Welcome Rider</Text>
-          <Text style={styles.subtitle}>Enter your phone number to continue</Text>
+          <Text style={styles.subtitle}>Log in with your rider credentials</Text>
         </View>
 
         <View style={styles.form}>
-          <View style={styles.modeRow}>
-            <TouchableOpacity
-              style={[styles.modeButton, !isCreatingAccount && styles.modeButtonActive]}
-              onPress={() => setIsCreatingAccount(false)}
-            >
-              <Text style={[styles.modeButtonText, !isCreatingAccount && styles.modeButtonTextActive]}>
-                Login
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modeButton, isCreatingAccount && styles.modeButtonActive]}
-              onPress={() => setIsCreatingAccount(true)}
-            >
-              <Text style={[styles.modeButtonText, isCreatingAccount && styles.modeButtonTextActive]}>
-                Create Account
-              </Text>
-            </TouchableOpacity>
-          </View>
+          <TextInput
+            style={styles.input}
+            value={username}
+            onChangeText={setUsername}
+            placeholder="Username"
+            placeholderTextColor={COLORS.disabled}
+            autoCapitalize="none"
+          />
 
-          {isCreatingAccount && (
-            <TextInput
-              style={styles.nameInput}
-              value={name}
-              onChangeText={setName}
-              placeholder="Enter your full name"
-              placeholderTextColor={COLORS.disabled}
-              autoCapitalize="words"
-            />
-          )}
-
-          <View style={styles.phoneContainer}>
-            <View style={styles.countryCode}>
-              <Text style={styles.countryCodeText}>+91</Text>
-            </View>
-            <TextInput
-              style={styles.phoneInput}
-              value={phone}
-              onChangeText={setPhone}
-              placeholder="Enter phone number"
-              placeholderTextColor={COLORS.disabled}
-              keyboardType="phone-pad"
-              maxLength={10}
-            />
-          </View>
+          <TextInput
+            style={styles.input}
+            value={password}
+            onChangeText={setPassword}
+            placeholder="Password"
+            placeholderTextColor={COLORS.disabled}
+            secureTextEntry
+          />
 
           {error && <Text style={styles.error}>{error}</Text>}
 
           <TouchableOpacity
             style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleSendOtp}
+            onPress={handleLogin}
             disabled={loading}
           >
             {loading ? (
               <ActivityIndicator color={COLORS.surface} />
             ) : (
-              <Text style={styles.buttonText}>{isCreatingAccount ? 'Create Rider Account' : 'Send OTP'}</Text>
+              <Text style={styles.buttonText}>Login</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -159,30 +121,7 @@ const styles = StyleSheet.create({
   form: {
     marginBottom: 24,
   },
-  modeRow: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: 4,
-    marginBottom: 16,
-  },
-  modeButton: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderRadius: 10,
-  },
-  modeButtonActive: {
-    backgroundColor: COLORS.primary,
-  },
-  modeButtonText: {
-    color: COLORS.textSecondary,
-    fontWeight: '600',
-  },
-  modeButtonTextActive: {
-    color: COLORS.surface,
-  },
-  nameInput: {
+  input: {
     backgroundColor: COLORS.surface,
     borderRadius: 12,
     marginBottom: 16,
@@ -190,30 +129,8 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.md,
     fontSize: 16,
     color: COLORS.text,
-  },
-  phoneContainer: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    marginBottom: 16,
-    overflow: 'hidden',
-  },
-  countryCode: {
-    backgroundColor: COLORS.border,
-    paddingHorizontal: SPACING.md,
-    justifyContent: 'center',
-  },
-  countryCodeText: {
-    fontSize: 18,
-    color: COLORS.text,
-    fontWeight: '600',
-  },
-  phoneInput: {
-    flex: 1,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    fontSize: 18,
-    color: COLORS.text,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   error: {
     color: COLORS.error,

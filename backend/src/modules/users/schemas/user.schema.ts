@@ -93,8 +93,6 @@ export class User {
 export const UserSchema = SchemaFactory.createForClass(User);
 
 // Indexes
-UserSchema.index({ phone: 1 }, { unique: true, sparse: true });
-UserSchema.index({ username: 1 }, { unique: true, sparse: true });
 UserSchema.index({ role: 1 });
 UserSchema.index({ currentLocation: '2dsphere' });
 UserSchema.index({ isOnline: 1, isAvailable: 1 });

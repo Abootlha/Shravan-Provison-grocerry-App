@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { UsersService } from '../users/users.service';
+import { RidersService } from '../riders/riders.service';
 import { OtpService } from './otp.service';
 import { RedisService } from '../../common/utils/redis.service';
 import * as bcrypt from 'bcrypt';
@@ -14,6 +15,7 @@ export class AuthService {
 
     constructor(
         private usersService: UsersService,
+        private ridersService: RidersService,
         private jwtService: JwtService,
         private configService: ConfigService,
         private otpService: OtpService,
@@ -73,6 +75,58 @@ export class AuthService {
                 name: user.name,
                 username: user.username,
                 role: user.role,
+            },
+            ...tokens,
+        };
+    }
+
+    // Rider login with username and password - checks Rider collection
+    async riderLogin(username: string, password: string): Promise<any> {
+        const rider = await this.ridersService.findByUsername(username);
+
+        if (!rider) {
+            throw new UnauthorizedException('Invalid credentials');
+        }
+
+        if (!rider.password) {
+            throw new UnauthorizedException('Password not set for this rider');
+        }
+
+        const isPasswordValid = await bcrypt.compare(password, rider.password);
+        if (!isPasswordValid) {
+            throw new UnauthorizedException('Invalid credentials');
+        }
+
+        if (!rider.isActive) {
+            throw new UnauthorizedException('Account is disabled');
+        }
+
+        // Generate tokens with rider role
+        const tokens = await this.generateTokens(rider._id.toString(), 'rider');
+
+        // Store hashed refresh token in Redis (28 days expiry)
+        const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
+        await this.redisService.set(
+            this.getRefreshTokenKey(rider._id.toString()),
+            hashedRefreshToken,
+            this.refreshTokenExpiry
+        );
+
+        // Store access token in Redis with 2-hour expiry
+        await this.redisService.set(
+            this.getAccessTokenKey(rider._id.toString()),
+            tokens.accessToken,
+            this.accessTokenExpiry
+        );
+
+        return {
+            user: {
+                id: rider._id,
+                name: rider.name,
+                username: rider.username,
+                role: 'rider',
+                phone: rider.phone,
+                vehicleType: rider.vehicleType,
             },
             ...tokens,
         };
