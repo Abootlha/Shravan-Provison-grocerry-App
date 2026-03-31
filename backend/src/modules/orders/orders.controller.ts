@@ -123,7 +123,9 @@ export class OrdersController {
         else if (req.user.role === UserRole.CUSTOMER) {
             throw new ForbiddenException('Customers cannot update order status');
         }
-        // Admins can update any order (no additional check needed)
+        else if (req.user.role === UserRole.ADMIN && updateStatusDto.status === OrderStatus.OUT_FOR_DELIVERY) {
+            throw new ForbiddenException('Admins cannot mark orders as out for delivery');
+        }
 
         const updatedOrder = await this.ordersService.updateStatus(
             id,
@@ -174,6 +176,10 @@ export class AdminOrdersController {
         @Param('id') id: string,
         @Body() body: { status: OrderStatus; note?: string },
     ) {
+        if (body.status === OrderStatus.OUT_FOR_DELIVERY) {
+            throw new ForbiddenException('Admins cannot mark orders as out for delivery');
+        }
+
         const order = await this.ordersService.updateStatus(
             id,
             body.status,

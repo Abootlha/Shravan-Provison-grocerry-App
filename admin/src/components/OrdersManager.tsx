@@ -21,13 +21,13 @@ interface Order {
     createdAt: string;
     deliveryAddress?: { street?: string; city?: string; pincode?: string };
 }
-const STATUS_OPTIONS = ['PENDING', 'CONFIRMED', 'PACKED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'];
+const STATUS_OPTIONS = ['PENDING', 'CONFIRMED', 'PACKED', 'ASSIGNED', 'DELIVERED', 'CANCELLED'];
 
 const NEXT_STATUS: Record<string, string[]> = {
     PENDING: ['CONFIRMED'],
     CONFIRMED: ['PACKED'],
-    PACKED: ['ASSIGNED', 'OUT_FOR_DELIVERY'],
-    ASSIGNED: ['OUT_FOR_DELIVERY'],
+    PACKED: ['ASSIGNED'],
+    ASSIGNED: [],
     OUT_FOR_DELIVERY: ['DELIVERED'],
 };
 
@@ -81,7 +81,7 @@ export default function OrdersManager() {
             let queryStatus = statusFilter;
 
             if (pageMode === 'live' && !statusFilter) {
-                queryStatus = 'PENDING,CONFIRMED,PACKED,OUT_FOR_DELIVERY';
+                queryStatus = 'PENDING,CONFIRMED,PACKED,ASSIGNED,OUT_FOR_DELIVERY';
             }
 
             const data = await api.getOrders({ page, status: queryStatus || undefined });
@@ -265,7 +265,7 @@ export default function OrdersManager() {
                         All ({orders.length})
                     </button>
                     {(pageMode === 'live'
-                        ? ['PENDING', 'CONFIRMED', 'PACKED', 'OUT_FOR_DELIVERY']
+                        ? ['PENDING', 'CONFIRMED', 'PACKED', 'ASSIGNED', 'OUT_FOR_DELIVERY']
                         : pageMode === 'completed'
                             ? ['DELIVERED', 'CANCELLED']
                             : ['CANCELLED']

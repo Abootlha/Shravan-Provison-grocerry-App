@@ -110,18 +110,18 @@ const OrderTrackingMap = ({
 
         if (showFullMap && coordinates.length >= 2) {
             mapRef.current.fitToCoordinates(coordinates, {
-                edgePadding: { top: 100, right: 60, bottom: 400, left: 60 },
+                edgePadding: { top: 56, right: 32, bottom: 160, left: 32 },
                 animated: true,
             });
         } else if (riderLocation) {
             mapRef.current.animateToRegion({
                 ...riderLocation,
-                latitudeDelta: 0.005,
-                longitudeDelta: 0.005,
+                latitudeDelta: 0.0035,
+                longitudeDelta: 0.0035,
             }, 1000);
         } else if (coordinates.length >= 2) {
             mapRef.current.fitToCoordinates(coordinates, {
-                edgePadding: { top: 100, right: 60, bottom: 400, left: 60 },
+                edgePadding: { top: 56, right: 32, bottom: 160, left: 32 },
                 animated: true,
             });
         }
@@ -136,14 +136,14 @@ const OrderTrackingMap = ({
         ? {
             latitude: customerLocation.latitude,
             longitude: customerLocation.longitude,
-            latitudeDelta: 0.015,
-            longitudeDelta: 0.015,
+            latitudeDelta: 0.006,
+            longitudeDelta: 0.006,
         }
         : {
             latitude: 26.7606,
             longitude: 83.3732,
-            latitudeDelta: 0.02,
-            longitudeDelta: 0.02,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
         };
 
     const mapStyle = [
@@ -237,7 +237,7 @@ const OrderTrackingMap = ({
                     if (customerLocation) coords.push(customerLocation);
                     if (storeLocation) coords.push(storeLocation);
                     mapRef.current?.fitToCoordinates(coords, {
-                        edgePadding: { top: 80, right: 60, bottom: 400, left: 60 },
+                        edgePadding: { top: 56, right: 32, bottom: 160, left: 32 },
                         animated: true,
                     });
                 }}
@@ -349,4 +349,3 @@ const styles = StyleSheet.create({
 });
 
 export default OrderTrackingMap;
-

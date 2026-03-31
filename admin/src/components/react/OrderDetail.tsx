@@ -26,7 +26,7 @@ interface Order {
     riderId?: { name: string; phone?: string };
 }
 
-const STATUS_OPTIONS = ['PENDING', 'CONFIRMED', 'PACKED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'];
+const STATUS_OPTIONS = ['PENDING', 'CONFIRMED', 'PACKED', 'ASSIGNED', 'DELIVERED', 'CANCELLED'];
 
 const STATUS_CONFIG: Record<string, { color: string; glow: string; icon: React.ReactNode; label: string }> = {
     PENDING: { color: '#3B82F6', glow: 'rgba(59, 130, 246, 0.2)', icon: <Clock className="w-4 h-4" />, label: 'Placed' },

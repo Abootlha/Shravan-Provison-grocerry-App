@@ -63,14 +63,14 @@ export const MapViewComponent: React.FC<MapViewProps> = ({
     ? {
         latitude: (pickup || delivery || currentLocation)!.latitude,
         longitude: (pickup || delivery || currentLocation)!.longitude,
-        latitudeDelta: 0.02,
-        longitudeDelta: 0.02,
+        latitudeDelta: 0.008,
+        longitudeDelta: 0.008,
       }
     : {
         latitude: 28.6139,
         longitude: 77.209,
-        latitudeDelta: 0.1,
-        longitudeDelta: 0.1,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
       };
 
   return (

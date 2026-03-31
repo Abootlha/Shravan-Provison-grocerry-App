@@ -111,8 +111,8 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
   const mapRegion = {
     latitude: currentLocation?.latitude || pickupCoords.latitude,
     longitude: currentLocation?.longitude || pickupCoords.longitude,
-    latitudeDelta: 0.02,
-    longitudeDelta: 0.02,
+    latitudeDelta: 0.008,
+    longitudeDelta: 0.008,
   };
 
   return (
@@ -448,4 +448,3 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 });
-

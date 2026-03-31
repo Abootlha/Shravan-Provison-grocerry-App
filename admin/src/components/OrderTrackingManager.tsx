@@ -637,6 +637,7 @@ export default function OrderTrackingManager() {
                                         </h3>
                                         <div className="flex flex-wrap gap-2">
                                             {Object.keys(STATUS_CONFIG)
+                                                .filter(s => s !== 'OUT_FOR_DELIVERY')
                                                 .filter(s => s !== selectedOrder.orderStatus)
                                                 .map((status) => {
                                                     const config = STATUS_CONFIG[status];
