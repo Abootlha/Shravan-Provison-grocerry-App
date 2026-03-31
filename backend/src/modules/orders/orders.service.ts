@@ -17,6 +17,27 @@ import { ETAService } from './eta.service';
 
 @Injectable()
 export class OrdersService {
+    private generateDeliveryOtp(): string {
+        return `${Math.floor(1000 + Math.random() * 9000)}`;
+    }
+
+    private async ensureDeliveryOtpById(orderId: string): Promise<any> {
+        const updated = await this.orderModel.findOneAndUpdate(
+            {
+                _id: orderId,
+                $or: [
+                    { deliveryOtp: { $exists: false } },
+                    { deliveryOtp: null },
+                    { deliveryOtp: '' },
+                ],
+            },
+            { $set: { deliveryOtp: this.generateDeliveryOtp() } },
+            { new: true },
+        ).exec();
+
+        return updated;
+    }
+
     constructor(
         @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
         @InjectModel(OrderStatusLog.name) private orderStatusLogModel: Model<OrderStatusLogDocument>,
@@ -109,6 +130,8 @@ export class OrdersService {
         };
 
         // Create order
+        const deliveryOtp = this.generateDeliveryOtp();
+
         const order = new this.orderModel({
             orderId,
             userId: new Types.ObjectId(userId),
@@ -123,6 +146,7 @@ export class OrdersService {
             orderStatus: OrderStatus.PENDING,
             estimatedDeliveryTime: dayjs().add(15, 'minutes').toDate(),
             deliveryInstructions: data.deliveryInstructions,
+            deliveryOtp,
         });
 
         await order.save();
@@ -171,6 +195,8 @@ export class OrdersService {
             return cached;
         }
 
+        await this.ensureDeliveryOtpById(orderId);
+
         // Fallback to database query with rider population
         const order = await this.orderModel
             .findById(orderId)
@@ -188,6 +214,11 @@ export class OrdersService {
     }
 
     async findByOrderId(orderId: string): Promise<OrderDocument | null> {
+        const existingOrder = await this.orderModel.findOne({ orderId }).select('_id deliveryOtp').lean().exec();
+        if (existingOrder?._id && !existingOrder.deliveryOtp) {
+            await this.ensureDeliveryOtpById(existingOrder._id.toString());
+        }
+
         return this.orderModel
             .findOne({ orderId })
             .populate('userId', 'name phone')
@@ -230,6 +261,8 @@ export class OrdersService {
     }
 
     private async buildRealtimeOrderPayload(orderId: string): Promise<any> {
+        await this.ensureDeliveryOtpById(orderId);
+
         const [order, storeSettings] = await Promise.all([
             this.orderModel
                 .findById(orderId)
@@ -275,6 +308,7 @@ export class OrdersService {
             rider,
             customerName: user?.name || 'Customer',
             customerPhone: user?.phone || '',
+            deliveryOtp: order.deliveryOtp,
             storeName: storeSettings.storeName,
             storePhone: storeSettings.contactPhone || '',
             storeAddress: storeSettings.location.address,

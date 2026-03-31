@@ -7,7 +7,7 @@ interface StatusStepperProps {
   currentStatus: OrderStatus;
 }
 
-const statuses: OrderStatus[] = ['accepted', 'picked_up', 'in_transit', 'delivered'];
+const statuses: OrderStatus[] = ['assigned', 'in_transit', 'delivered'];
 
 export const StatusStepper: React.FC<StatusStepperProps> = ({ currentStatus }) => {
   const currentIndex = statuses.indexOf(currentStatus);

@@ -26,6 +26,11 @@ export const useOrders = () => {
     const handleStatusUpdate = (data: { orderId: string; status: OrderStatus; order?: Order }) => {
       if (data.orderId === currentOrder?.id && data.order) {
         dispatch(setCurrentOrder(data.order));
+        return;
+      }
+
+      if (String(data.status).toUpperCase() === 'ASSIGNED' && data.order) {
+        dispatch(addAvailableOrder(data.order as AvailableOrder));
       }
     };
 

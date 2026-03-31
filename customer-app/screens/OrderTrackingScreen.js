@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants';
 import { OrderService, SettingsService } from '../services';
 import socketService from '../services/socketService';
@@ -41,6 +42,7 @@ const ZEPTO_PURPLE = '#7C3AED';
 const ZEPTO_GREEN = '#10B981';
 
 const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
+    const insets = useSafeAreaInsets();
     const dispatch = useDispatch();
     const { orderId } = navRoute.params || {};
 
@@ -289,7 +291,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
                 showFullMap={showFullMap}
             />
 
-            <Animated.View style={[styles.floatingHeader, { opacity: headerOpacity }]}>
+            <Animated.View style={[styles.floatingHeader, { opacity: headerOpacity, top: Math.max(insets.top + 8, Platform.OS === 'ios' ? 60 : 50) }]}>
                 <TouchableOpacity
                     style={styles.floatingBackBtn}
                     onPress={() => navigation.goBack()}
@@ -316,7 +318,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
             </Animated.View>
 
             {error && (
-                <View style={styles.errorBanner}>
+                <View style={[styles.errorBanner, { top: Math.max(insets.top + 72, 120) }]}>
                     <MaterialCommunityIcons name="alert-circle" size={16} color="#F44336" />
                     <Text style={styles.errorText} numberOfLines={1}>{error}</Text>
                 </View>
@@ -813,4 +815,3 @@ const styles = StyleSheet.create({
 });
 
 export default OrderTrackingScreen;
-

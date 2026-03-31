@@ -19,6 +19,7 @@ import {
     CartScreen,
     CheckoutScreen,
     OrderTrackingScreen,
+    OrderDetailsScreen,
     ProfileScreen,
     OrdersHistoryScreen,
     LocationScreen,
@@ -125,6 +126,7 @@ const AppNavigator = () => {
             <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
             <Stack.Screen name="Checkout" component={CheckoutScreen} />
             <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
+            <Stack.Screen name="OrderDetails" component={OrderDetailsScreen} />
             <Stack.Screen name="OrdersHistory" component={OrdersHistoryScreen} />
             <Stack.Screen name="Location" component={LocationScreen} />
             <Stack.Screen name="AddAddress" component={AddAddressScreen} />

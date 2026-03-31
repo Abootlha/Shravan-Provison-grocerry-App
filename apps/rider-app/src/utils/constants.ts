@@ -75,9 +75,7 @@ export const SPACING = {
 export const ORDER_STATUS_LABELS: Record<string, string> = {
   pending: 'Pending',
   assigned: 'Assigned',
-  accepted: 'Accepted',
-  picked_up: 'Picked Up',
-  in_transit: 'In Transit',
+  in_transit: 'Out for Delivery',
   delivered: 'Delivered',
   cancelled: 'Cancelled',
 };
@@ -85,8 +83,6 @@ export const ORDER_STATUS_LABELS: Record<string, string> = {
 export const ORDER_STATUS_COLORS: Record<string, string> = {
   pending: COLORS.warning,
   assigned: COLORS.primary,
-  accepted: COLORS.primaryDark,
-  picked_up: '#8B5CF6',
   in_transit: '#EC4899',
   delivered: COLORS.success,
   cancelled: COLORS.error,

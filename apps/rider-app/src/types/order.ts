@@ -20,8 +20,6 @@ export interface OrderItem {
 export type OrderStatus =
   | 'pending'
   | 'assigned'
-  | 'accepted'
-  | 'picked_up'
   | 'in_transit'
   | 'delivered'
   | 'cancelled';
@@ -46,6 +44,7 @@ export interface Order {
   tip?: number;
   estimatedDistance?: number;
   estimatedTime?: number;
+  deliveryOtp?: string;
   createdAt: string;
   acceptedAt?: string;
   pickedUpAt?: string;

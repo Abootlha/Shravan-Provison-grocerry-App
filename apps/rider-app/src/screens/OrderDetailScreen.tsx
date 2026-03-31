@@ -157,7 +157,7 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
     }
 
     setLoading(true);
-    const result = await updateStatus(orderId, 'picked_up', {
+    const result = await updateStatus(orderId, 'in_transit', {
       latitude: riderCoords.lat,
       longitude: riderCoords.lng,
     });
@@ -382,7 +382,7 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
           </View>
         )}
 
-        {activeOrder.status === 'accepted' && (
+        {activeOrder.status === 'assigned' && (
           <TouchableOpacity
             style={[styles.fullButton, { backgroundColor: ZEPTO_PURPLE }]}
             onPress={handleNavigate}
@@ -392,7 +392,7 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
           </TouchableOpacity>
         )}
 
-        {activeOrder.status === 'picked_up' && (
+        {activeOrder.status === 'in_transit' && (
           <View style={styles.actionsRow}>
             <TouchableOpacity
               style={[styles.button, { backgroundColor: '#333' }]}
@@ -406,13 +406,13 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
                 styles.button,
                 { backgroundColor: riderCoords ? ZEPTO_GREEN : '#999' },
               ]}
-              onPress={handleMarkPickedUp}
+              onPress={handleNavigate}
               disabled={loading || !riderCoords}
             >
               {loading ? (
                 <ActivityIndicator color="white" />
               ) : (
-                <Text style={styles.buttonText}>DELIVERED</Text>
+                <Text style={styles.buttonText}>CONTINUE</Text>
               )}
             </TouchableOpacity>
           </View>

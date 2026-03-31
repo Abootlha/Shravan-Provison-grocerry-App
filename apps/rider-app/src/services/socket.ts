@@ -9,6 +9,7 @@ class SocketService {
   private socket: Socket | null = null;
   private locationUpdateInterval: ReturnType<typeof setInterval> | null = null;
   private riderId: string = '';
+  private listeners = new Map<string, Set<SocketEventHandler>>();
 
   connect(token: string, riderId?: string): void {
     if (this.socket?.connected) {
@@ -50,7 +51,10 @@ class SocketService {
       if (this.riderId) {
         this.socket?.emit('joinRiderRoom', { riderId: this.riderId });
       }
+      this.attachStoredListeners();
     });
+
+    this.attachStoredListeners();
   }
 
   setRiderId(riderId: string): void {
@@ -69,10 +73,19 @@ class SocketService {
   }
 
   on(event: string, handler: SocketEventHandler): void {
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, new Set());
+    }
+    this.listeners.get(event)?.add(handler);
     this.socket?.on(event, handler);
   }
 
   off(event: string, handler?: SocketEventHandler): void {
+    if (handler) {
+      this.listeners.get(event)?.delete(handler);
+    } else {
+      this.listeners.delete(event);
+    }
     if (handler) {
       this.socket?.off(event, handler);
     } else {
@@ -143,6 +156,19 @@ class SocketService {
 
   isConnected(): boolean {
     return this.socket?.connected ?? false;
+  }
+
+  private attachStoredListeners(): void {
+    if (!this.socket) {
+      return;
+    }
+
+    for (const [event, handlers] of this.listeners.entries()) {
+      for (const handler of handlers) {
+        this.socket.off(event, handler);
+        this.socket.on(event, handler);
+      }
+    }
   }
 }
 

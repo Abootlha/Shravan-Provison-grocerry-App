@@ -57,6 +57,26 @@ const OrdersHistoryScreen = ({ navigation }) => {
         navigation.goBack();
     };
 
+    const getOrderIdentifier = (order) => order?._id || order?.id || order?.orderId;
+
+    const openOrderDetails = (order) => {
+        const orderId = getOrderIdentifier(order);
+        if (!orderId) {
+            return;
+        }
+
+        navigation.navigate('OrderTracking', { orderId });
+    };
+
+    const openInvoiceDetails = (order) => {
+        const orderId = getOrderIdentifier(order);
+        if (!orderId) {
+            return;
+        }
+
+        navigation.navigate('OrderDetails', { orderId });
+    };
+
     const getStatusColor = (status) => {
         switch (status?.toUpperCase()) {
             case 'DELIVERED':
@@ -83,7 +103,7 @@ const OrdersHistoryScreen = ({ navigation }) => {
             : '--';
 
         return (
-            <TouchableOpacity style={styles.orderCard}>
+            <TouchableOpacity style={styles.orderCard} onPress={() => openOrderDetails(item)} activeOpacity={0.85}>
                 <View style={styles.orderHeader}>
                     <View>
                         <Text style={styles.orderNumber}>{item.orderId}</Text>
@@ -126,15 +146,15 @@ const OrdersHistoryScreen = ({ navigation }) => {
                 </View>
 
                 <View style={styles.orderActions}>
-                    <TouchableOpacity style={styles.reorderButton}>
+                    <TouchableOpacity style={styles.reorderButton} onPress={() => openOrderDetails(item)}>
                         <MaterialCommunityIcons
-                            name="refresh"
+                            name="package-variant"
                             size={18}
                             color={COLORS.secondary}
                         />
-                        <Text style={styles.reorderText}>Reorder</Text>
+                        <Text style={styles.reorderText}>Open Order</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.detailsButton}>
+                    <TouchableOpacity style={styles.detailsButton} onPress={() => openInvoiceDetails(item)}>
                         <Text style={styles.detailsText}>View Details</Text>
                         <MaterialCommunityIcons
                             name="chevron-right"
@@ -165,7 +185,7 @@ const OrdersHistoryScreen = ({ navigation }) => {
                 <FlatList
                     data={orders}
                     renderItem={renderOrder}
-                    keyExtractor={(item) => item.id || item.orderId}
+                    keyExtractor={(item) => getOrderIdentifier(item) || item.orderId}
                     contentContainerStyle={styles.ordersList}
                     showsVerticalScrollIndicator={false}
                 />

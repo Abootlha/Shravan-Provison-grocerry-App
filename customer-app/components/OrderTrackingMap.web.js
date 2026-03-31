@@ -169,7 +169,22 @@ const OrderTrackingMap = ({
     };
 
     updateMarkers();
-  }, [mapLoaded, customerLocation, storeLocation, routeCoordinates]);
+    const map = mapInstanceRef.current;
+    const bounds = [];
+    if (customerLocation?.latitude && customerLocation?.longitude) {
+      bounds.push([customerLocation.latitude, customerLocation.longitude]);
+    }
+    if (storeLocation?.latitude && storeLocation?.longitude) {
+      bounds.push([storeLocation.latitude, storeLocation.longitude]);
+    }
+    if (riderLocation?.latitude && riderLocation?.longitude) {
+      bounds.push([riderLocation.latitude, riderLocation.longitude]);
+    }
+
+    if (bounds.length >= 2) {
+      map.fitBounds(bounds, { padding: [32, 32] });
+    }
+  }, [mapLoaded, customerLocation, storeLocation, routeCoordinates, riderLocation, orderStatus]);
 
   useEffect(() => {
     if (!mapLoaded || !riderLocation || !mapInstanceRef.current) return;

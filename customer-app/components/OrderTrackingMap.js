@@ -125,7 +125,17 @@ const OrderTrackingMap = ({
                 animated: true,
             });
         }
-    }, [isMapReady, showFullMap, riderLocation?.latitude, riderLocation?.longitude, customerLocation?.latitude, customerLocation?.longitude, storeLocation?.latitude, storeLocation?.longitude]);
+    }, [
+        isMapReady,
+        showFullMap,
+        orderStatus,
+        riderLocation?.latitude,
+        riderLocation?.longitude,
+        customerLocation?.latitude,
+        customerLocation?.longitude,
+        storeLocation?.latitude,
+        storeLocation?.longitude,
+    ]);
 
     const handleMapReady = () => {
         setIsMapReady(true);

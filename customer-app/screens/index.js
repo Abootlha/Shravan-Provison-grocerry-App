@@ -11,10 +11,10 @@ export { default as SearchScreen } from './SearchScreen';
 export { default as CartScreen } from './CartScreen';
 export { default as CheckoutScreen } from './CheckoutScreen';
 export { default as OrderTrackingScreen } from './OrderTrackingScreen';
+export { default as OrderDetailsScreen } from './OrderDetailsScreen';
 export { default as ProfileScreen } from './ProfileScreen';
 export { default as OrdersHistoryScreen } from './OrdersHistoryScreen';
 export { default as LocationScreen } from './LocationScreen';
 export { default as AddAddressScreen } from './AddAddressScreen';
-
 
 

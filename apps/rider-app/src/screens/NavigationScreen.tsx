@@ -9,6 +9,8 @@ import {
   ActivityIndicator,
   StatusBar,
   Platform,
+  Modal,
+  TextInput,
 } from 'react-native';
 import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -57,6 +59,8 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
   const { updateStatus, currentOrder } = useOrders();
   const { currentLocation } = useLocation();
   const [loading, setLoading] = useState(false);
+  const [otpModalVisible, setOtpModalVisible] = useState(false);
+  const [deliveryOtpInput, setDeliveryOtpInput] = useState('');
   const mapRef = useRef<MapView>(null);
 
   const activeOrder = currentOrder?.id === order.id ? currentOrder : order;
@@ -67,10 +71,10 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
   const handleOpenMapMyIndia = useCallback(async () => {
     const startLat = currentLocation?.latitude || 0;
     const startLng = currentLocation?.longitude || 0;
-    const endLat = activeOrder.status === 'picked_up'
+    const endLat = activeOrder.status === 'in_transit'
       ? deliveryCoords.latitude
       : pickupCoords.latitude;
-    const endLng = activeOrder.status === 'picked_up'
+    const endLng = activeOrder.status === 'in_transit'
       ? deliveryCoords.longitude
       : pickupCoords.longitude;
 
@@ -89,7 +93,7 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
 
   const handleMarkPickedUp = useCallback(async () => {
     setLoading(true);
-    const result = await updateStatus(order.id, 'picked_up', currentLocation ?? undefined);
+    const result = await updateStatus(order.id, 'in_transit', currentLocation ?? undefined);
     setLoading(false);
     if (result) {
       Alert.alert('Success', 'Order marked as picked up!');
@@ -97,16 +101,23 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
   }, [updateStatus, order.id, currentLocation]);
 
   const handleMarkDelivered = useCallback(async () => {
+    if ((activeOrder.deliveryOtp || '').trim() !== deliveryOtpInput.trim()) {
+      Alert.alert('Invalid OTP', 'Please enter the delivery OTP shown in the customer app.');
+      return;
+    }
+
     setLoading(true);
     const result = await updateStatus(order.id, 'delivered', currentLocation ?? undefined);
     setLoading(false);
     if (result) {
+      setOtpModalVisible(false);
+      setDeliveryOtpInput('');
       navigation.replace('DeliveryComplete', {
         order: result,
         tip: result.tip,
       });
     }
-  }, [updateStatus, order.id, currentLocation, navigation]);
+  }, [updateStatus, order.id, currentLocation, navigation, activeOrder.deliveryOtp, deliveryOtpInput]);
 
   const mapRegion = {
     latitude: currentLocation?.latitude || pickupCoords.latitude,
@@ -147,7 +158,7 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
           </TouchableOpacity>
           <View style={styles.headerContent}>
             <Text style={styles.headerTitle}>
-              {activeOrder.status === 'picked_up' ? 'Delivery Location' : 'Store Pickup'}
+              {activeOrder.status === 'in_transit' ? 'Delivery Location' : 'Store Pickup'}
             </Text>
             <View style={styles.liveIndicator}>
               <View style={styles.liveDot} />
@@ -164,7 +175,7 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
           <View>
             <Text style={styles.orderNumber}>#{order.orderNumber}</Text>
             <Text style={styles.statusBadge}>
-              {activeOrder.status === 'picked_up' ? 'OUT FOR DELIVERY' : 'HEADING TO STORE'}
+              {activeOrder.status === 'in_transit' ? 'OUT FOR DELIVERY' : 'HEADING TO STORE'}
             </Text>
           </View>
           <TouchableOpacity style={styles.callButton}>
@@ -174,9 +185,9 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
 
         <View style={styles.addressSection}>
           <View style={styles.addressRow}>
-            <View style={[styles.addressDot, { backgroundColor: activeOrder.status === 'picked_up' ? ZEPTO_GREEN : '#333' }]} />
+            <View style={[styles.addressDot, { backgroundColor: activeOrder.status === 'in_transit' ? ZEPTO_GREEN : '#333' }]} />
             <Text style={styles.addressText} numberOfLines={2}>
-              {activeOrder.status === 'picked_up'
+              {activeOrder.status === 'in_transit'
                 ? order.delivery.address.full
                 : order.pickup.address.full}
             </Text>
@@ -192,7 +203,7 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
             <Text style={styles.navButtonText}>NAVIGATE</Text>
           </TouchableOpacity>
 
-          {activeOrder.status === 'accepted' && (
+          {activeOrder.status === 'assigned' && (
             <TouchableOpacity
               style={[styles.actionButton, styles.pickupButton]}
               onPress={handleMarkPickedUp}
@@ -206,10 +217,10 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
             </TouchableOpacity>
           )}
 
-          {activeOrder.status === 'picked_up' && (
+          {activeOrder.status === 'in_transit' && (
             <TouchableOpacity
               style={[styles.actionButton, styles.deliverButton]}
-              onPress={handleMarkDelivered}
+              onPress={() => setOtpModalVisible(true)}
               disabled={loading}
             >
               {loading ? (
@@ -221,6 +232,38 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
           )}
         </View>
       </View>
+
+      <Modal
+        visible={otpModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOtpModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Confirm Delivery OTP</Text>
+            <Text style={styles.modalSubtitle}>
+              Ask the customer for the 4-digit delivery OTP and enter it below.
+            </Text>
+            <TextInput
+              style={styles.otpInput}
+              value={deliveryOtpInput}
+              onChangeText={(value) => setDeliveryOtpInput(value.replace(/\D/g, '').slice(0, 4))}
+              keyboardType="number-pad"
+              placeholder="Enter OTP"
+              maxLength={4}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={[styles.modalButton, styles.modalCancel]} onPress={() => setOtpModalVisible(false)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalButton, styles.modalConfirm]} onPress={handleMarkDelivered} disabled={loading}>
+                <Text style={styles.modalConfirmText}>{loading ? 'Verifying...' : 'Verify & Deliver'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -446,5 +489,66 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     fontWeight: '900',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1F1F1F',
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  otpInput: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    fontSize: 24,
+    fontWeight: '700',
+    letterSpacing: 8,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  modalCancel: {
+    backgroundColor: '#F3F4F6',
+  },
+  modalConfirm: {
+    backgroundColor: ZEPTO_GREEN,
+  },
+  modalCancelText: {
+    color: '#111827',
+    fontWeight: '700',
+  },
+  modalConfirmText: {
+    color: 'white',
+    fontWeight: '800',
   },
 });

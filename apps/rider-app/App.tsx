@@ -4,14 +4,12 @@ import { Provider } from 'react-redux';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { store } from './src/store';
 import { AppNavigator } from './src/navigation/AppNavigator';
-import { useAppDispatch, useAppSelector } from './src/hooks/useAuth';
+import { useAppDispatch } from './src/hooks/useAuth';
 import { loadUser } from './src/store/slices/authSlice';
-import { socketService } from './src/services/socket';
 import { notificationService } from './src/services/notifications';
 
 const AppContent: React.FC = () => {
   const dispatch = useAppDispatch();
-  const { isAuthenticated, token } = useAppSelector((state) => state.auth);
 
   useEffect(() => {
     dispatch(loadUser());
@@ -22,16 +20,6 @@ const AppContent: React.FC = () => {
       // Notifications are optional; keep app startup resilient.
     });
   }, []);
-
-  useEffect(() => {
-    if (isAuthenticated && token) {
-      const user = store.getState().auth.user;
-      socketService.connect(token, user?.id);
-    }
-    return () => {
-      socketService.disconnect();
-    };
-  }, [isAuthenticated, token]);
 
   return (
     <>

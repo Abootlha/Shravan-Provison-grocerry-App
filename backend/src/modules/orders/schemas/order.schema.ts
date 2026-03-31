@@ -145,6 +145,9 @@ export class Order {
 
     @Prop()
     cancellationReason?: string;
+
+    @Prop({ required: true })
+    deliveryOtp!: string;
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);

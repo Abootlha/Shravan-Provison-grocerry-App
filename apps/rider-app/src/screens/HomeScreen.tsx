@@ -34,7 +34,7 @@ const ZEPTO_GREEN = '#10B981';
 export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const dispatch = useAppDispatch();
   const { user } = useAppSelector((state) => state.auth);
-  const { currentOrder, availableOrders } = useOrders();
+  const { currentOrder, availableOrders, loadAvailableOrders } = useOrders();
   const { isTracking, currentLocation, startTracking, stopTracking, startSocketTracking, stopSocketTracking } = useLocation();
   const [refreshing, setRefreshing] = React.useState(false);
   const [toggling, setToggling] = React.useState(false);
@@ -66,6 +66,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       subscription.remove();
     };
   }, [checkLocationPermission]);
+
+  useEffect(() => {
+    loadAvailableOrders();
+  }, [loadAvailableOrders]);
 
   const handleEnableLocation = useCallback(async () => {
     const granted = await locationService.requestPermissions();
@@ -158,8 +162,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await checkLocationPermission();
+    loadAvailableOrders();
     setTimeout(() => setRefreshing(false), 1000);
-  }, [checkLocationPermission]);
+  }, [checkLocationPermission, loadAvailableOrders]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

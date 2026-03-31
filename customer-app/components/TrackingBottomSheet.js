@@ -104,7 +104,7 @@ const TrackingBottomSheet = ({
 
     const riderRating = order?.rider?.rating || order?.riderId?.rating || null;
     const riderRoleLabel = order?.rider?.vehicleType || order?.riderId?.vehicleType || 'Delivery Rider';
-    const orderCode = order?.orderId || order?.orderCode || order?._id?.slice?.(-4)?.toUpperCase?.() || 'ORDER';
+    const orderCode = order?.deliveryOtp || order?.otp || order?.orderCode || '----';
     const addressText = order?.deliveryAddress?.address || order?.deliveryAddress?.addressLine || '';
 
     const bottomSheetHeight = translateY.interpolate({

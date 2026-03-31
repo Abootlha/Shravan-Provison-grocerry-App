@@ -148,6 +148,7 @@ const normalizeOrder = (order: any) => {
     })),
     totalAmount: order.totalAmount || 0,
     deliveryFee: order.deliveryFee || 0,
+    deliveryOtp: order.deliveryOtp,
     createdAt: order.createdAt || new Date().toISOString(),
     estimatedTime: order.estimatedDeliveryTime ? Date.parse(order.estimatedDeliveryTime) : undefined,
     acceptedAt: assignedEntry?.timestamp,
