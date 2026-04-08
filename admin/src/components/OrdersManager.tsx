@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { io, Socket } from 'socket.io-client';
 import { api } from '../lib/api';
 import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
@@ -42,6 +43,8 @@ const STATUS_CONFIG: Record<string, { color: string; glow: string; icon: React.R
     DELIVERED: { color: '#22C55E', glow: 'rgba(34, 197, 94, 0.2)', icon: <CheckCircle className="w-4 h-4" />, label: 'Delivered' },
     CANCELLED: { color: '#EF4444', glow: 'rgba(239, 68, 68, 0.2)', icon: <XCircle className="w-4 h-4" />, label: 'Cancelled' },
 };
+const ACTIVE_STATUSES = ['PENDING', 'CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'];
+const TRACKING_SOCKET_URL = import.meta.env.PUBLIC_TRACKING_SERVICE_URL || 'http://localhost:3000/tracking';
 
 export default function OrdersManager() {
     const [orders, setOrders] = useState<Order[]>([]);
@@ -54,6 +57,8 @@ export default function OrdersManager() {
     const [search, setSearch] = useState('');
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
     const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+    const socketRef = useRef<Socket | null>(null);
+    const selectedOrderRef = useRef<Order | null>(null);
 
     useEffect(() => {
         // Parse URL params
@@ -75,6 +80,73 @@ export default function OrdersManager() {
     useEffect(() => {
         fetchOrders();
     }, [page, statusFilter, pageMode]);
+
+    useEffect(() => {
+        selectedOrderRef.current = selectedOrder;
+    }, [selectedOrder]);
+
+    useEffect(() => {
+        const token = localStorage.getItem('adminToken');
+        if (!token) {
+            return;
+        }
+
+        const socket = io(TRACKING_SOCKET_URL, {
+            auth: { token },
+            transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            reconnectionAttempts: 5,
+        });
+
+        socket.on('connect', () => {
+            orders.forEach((order) => {
+                if (ACTIVE_STATUSES.includes(order.orderStatus)) {
+                    socket.emit('joinOrderRoom', { orderId: order._id });
+                }
+            });
+        });
+
+        socket.on('orderStatusUpdate', (data: any) => {
+            setOrders((prev) => prev.map((order) => (
+                order._id === data.orderId
+                    ? {
+                        ...order,
+                        ...(data.order || {}),
+                        orderStatus: data.status,
+                    }
+                    : order
+            )));
+
+            if (selectedOrderRef.current?._id === data.orderId) {
+                setSelectedOrder((prev) => prev ? {
+                    ...prev,
+                    ...(data.order || {}),
+                    orderStatus: data.status,
+                } : null);
+            }
+        });
+
+        socketRef.current = socket;
+
+        return () => {
+            socket.disconnect();
+            socketRef.current = null;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!socketRef.current?.connected) {
+            return;
+        }
+
+        orders.forEach((order) => {
+            if (ACTIVE_STATUSES.includes(order.orderStatus)) {
+                socketRef.current?.emit('joinOrderRoom', { orderId: order._id });
+            }
+        });
+    }, [orders]);
 
     async function fetchOrders() {
         try {

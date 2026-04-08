@@ -70,6 +70,7 @@ const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactNode; labe
 };
 
 const ACTIVE_STATUSES = ['PENDING', 'CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'];
+const TRACKING_SOCKET_URL = import.meta.env.PUBLIC_TRACKING_SERVICE_URL || 'http://localhost:3000/tracking';
 
 export default function OrderTrackingManager() {
     const [orders, setOrders] = useState<Order[]>([]);
@@ -128,7 +129,7 @@ export default function OrderTrackingManager() {
 
         setConnectionStatus('connecting');
 
-        const socket = io(import.meta.env.PUBLIC_TRACKING_SERVICE_URL || 'http://localhost:3000', {
+        const socket = io(TRACKING_SOCKET_URL, {
             auth: { token },
             transports: ['websocket', 'polling'],
             reconnection: true,

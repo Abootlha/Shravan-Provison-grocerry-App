@@ -24,11 +24,17 @@ class SocketService {
     }
 
     connect(token) {
-        if (this.socket) {
+        if (this.socket?.connected) {
             console.log('Socket already connected');
             if (this.currentOrderId && this.socket.connected) {
                 this.joinOrderRoom(this.currentOrderId);
             }
+            return;
+        }
+
+        if (this.socket && !this.socket.connected) {
+            this.socket.auth = { token };
+            this.socket.connect();
             return;
         }
 
