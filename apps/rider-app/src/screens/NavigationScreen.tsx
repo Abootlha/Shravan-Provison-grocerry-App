@@ -56,7 +56,7 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
   route,
 }) => {
   const { order } = route.params;
-  const { updateStatus, currentOrder } = useOrders();
+  const { updateStatus, currentOrder, error } = useOrders();
   const { currentLocation } = useLocation();
   const [loading, setLoading] = useState(false);
   const [otpModalVisible, setOtpModalVisible] = useState(false);
@@ -99,9 +99,9 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
     if (result) {
       Alert.alert('Success', 'Order marked as picked up!');
     } else {
-      Alert.alert('Unable to update status', 'The pickup status could not be updated. Please try again.');
+      Alert.alert('Unable to update status', error || 'The pickup status could not be updated. Please try again.');
     }
-  }, [updateStatus, activeOrderId, currentLocation]);
+  }, [updateStatus, activeOrderId, currentLocation, error]);
 
   const handleStartDelivery = useCallback(async () => {
     setLoading(true);
@@ -110,9 +110,9 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
     if (result) {
       Alert.alert('Success', 'Order marked as out for delivery!');
     } else {
-      Alert.alert('Unable to update status', 'The delivery status could not be updated. Please try again.');
+      Alert.alert('Unable to update status', error || 'The delivery status could not be updated. Please try again.');
     }
-  }, [updateStatus, activeOrderId, currentLocation]);
+  }, [updateStatus, activeOrderId, currentLocation, error]);
 
   const handleMarkDelivered = useCallback(async () => {
     if ((activeOrder.deliveryOtp || '').trim() !== deliveryOtpInput.trim()) {
@@ -131,9 +131,9 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
         tip: result.tip,
       });
     } else {
-      Alert.alert('Unable to update status', 'The delivery could not be completed. Please try again.');
+      Alert.alert('Unable to update status', error || 'The delivery could not be completed. Please try again.');
     }
-  }, [updateStatus, activeOrderId, currentLocation, navigation, activeOrder.deliveryOtp, deliveryOtpInput]);
+  }, [updateStatus, activeOrderId, currentLocation, navigation, activeOrder.deliveryOtp, deliveryOtpInput, error]);
 
   const mapRegion = {
     latitude: currentLocation?.latitude || pickupCoords.latitude,
