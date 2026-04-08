@@ -35,8 +35,8 @@ export const ORDER_SERVICE_URL = getBaseUrl();
 
 export const SOCKET_URL = getSocketUrl();
 
-export const LOCATION_UPDATE_INTERVAL = 3000;
-export const LOCATION_UPDATE_THROTTLE = 3000;
+export const LOCATION_UPDATE_INTERVAL = 5000;
+export const LOCATION_UPDATE_THROTTLE = 5000;
 
 export const MAPMYINDIA_APP_ID = 'MAPMYINDIA_APP_ID';
 export const MAPMYINDIA_APP_CODE = 'MAPMYINDIA_APP_CODE';
