@@ -1,6 +1,5 @@
 import * as Linking from 'expo-linking';
 import { Platform } from 'react-native';
-import { MAPMYINDIA_APP_ID, MAPMYINDIA_APP_CODE } from './constants';
 
 interface MapMyIndiaRouteParams {
   startLat: number;
@@ -17,29 +16,28 @@ export const openMapMyIndiaNavigation = async ({
   endLng,
   vehicleType = 'bike',
 }: MapMyIndiaRouteParams): Promise<void> => {
-  const scheme = 'maps.mapmyindia.com';
-  const path = `route/${vehicleType}/${startLat},${startLng};${endLat},${endLng}`;
+  const travelMode = vehicleType === 'walk' ? 'walking' : 'driving';
+  const googleMapsAppUrl = Platform.OS === 'ios'
+    ? `comgooglemaps://?saddr=${startLat},${startLng}&daddr=${endLat},${endLng}&directionsmode=${travelMode}`
+    : `google.navigation:q=${endLat},${endLng}&mode=${vehicleType === 'walk' ? 'w' : 'd'}`;
+  const googleMapsWebUrl = `https://www.google.com/maps/dir/?api=1&origin=${startLat},${startLng}&destination=${endLat},${endLng}&travelmode=${travelMode}`;
+  const appleMapsUrl = `http://maps.apple.com/?saddr=${startLat},${startLng}&daddr=${endLat},${endLng}&dirflg=${vehicleType === 'walk' ? 'w' : 'd'}`;
 
-  const url = Linking.createURL(path, {
-    scheme,
-    queryParams: {
-      ref: `ridersdk://order?appId=${MAPMYINDIA_APP_ID}&appCode=${MAPMYINDIA_APP_CODE}`,
-    },
-  });
-
-  const canOpen = await Linking.canOpenURL(url);
-  if (canOpen) {
-    await Linking.openURL(url);
-  } else {
-    const googleMapsUrl = Platform.OS === 'ios'
-      ? `http://maps.apple.com/?saddr=${startLat},${startLng}&daddr=${endLat},${endLng}&dirflg=d`
-      : `https://www.google.com/maps/dir/?api=1&origin=${startLat},${startLng}&destination=${endLat},${endLng}&travelmode=driving`;
-
-    const fallbackUrl = `https://www.mapmyindia.com/secure-web/Route/${startLat},${startLng}/${endLat},${endLng}/${vehicleType}`;
-
-    const canOpenGoogle = await Linking.canOpenURL(googleMapsUrl);
-    await Linking.openURL(canOpenGoogle ? googleMapsUrl : fallbackUrl);
+  const canOpenGoogleApp = await Linking.canOpenURL(googleMapsAppUrl);
+  if (canOpenGoogleApp) {
+    await Linking.openURL(googleMapsAppUrl);
+    return;
   }
+
+  if (Platform.OS === 'ios') {
+    const canOpenAppleMaps = await Linking.canOpenURL(appleMapsUrl);
+    if (canOpenAppleMaps) {
+      await Linking.openURL(appleMapsUrl);
+      return;
+    }
+  }
+
+  await Linking.openURL(googleMapsWebUrl);
 };
 
 export const openMapMyIndiaDirections = async (
@@ -47,21 +45,27 @@ export const openMapMyIndiaDirections = async (
   longitude: number,
   label?: string
 ): Promise<void> => {
-  const url = Linking.createURL('', {
-    scheme: 'maps.mapmyindia.com',
-    queryParams: {
-      q: `${latitude},${longitude}`,
-      ref: label || 'RiderApp',
-    },
-  });
+  const googleMapsAppUrl = Platform.OS === 'ios'
+    ? `comgooglemaps://?q=${latitude},${longitude}${label ? `(${encodeURIComponent(label)})` : ''}`
+    : `geo:${latitude},${longitude}?q=${latitude},${longitude}${label ? `(${encodeURIComponent(label)})` : ''}`;
+  const googleMapsWebUrl = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+  const appleMapsUrl = `http://maps.apple.com/?ll=${latitude},${longitude}&q=${encodeURIComponent(label || 'Destination')}`;
 
-  const canOpen = await Linking.canOpenURL(url);
-  if (canOpen) {
-    await Linking.openURL(url);
-  } else {
-    const webUrl = `https://www.mapmyindia.com/mobile/geo/${latitude},${longitude}`;
-    await Linking.openURL(webUrl);
+  const canOpenGoogleApp = await Linking.canOpenURL(googleMapsAppUrl);
+  if (canOpenGoogleApp) {
+    await Linking.openURL(googleMapsAppUrl);
+    return;
   }
+
+  if (Platform.OS === 'ios') {
+    const canOpenAppleMaps = await Linking.canOpenURL(appleMapsUrl);
+    if (canOpenAppleMaps) {
+      await Linking.openURL(appleMapsUrl);
+      return;
+    }
+  }
+
+  await Linking.openURL(googleMapsWebUrl);
 };
 
 export const formatMapMyIndiaCoords = (
