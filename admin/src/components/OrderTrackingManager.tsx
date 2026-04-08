@@ -36,6 +36,18 @@ interface Order {
     riderId?: { _id: string; name: string; phone: string };
     timeline?: TimelineEntry[];
     estimatedDeliveryTime?: string;
+    tracking?: {
+        activeLeg?: 'to_store' | 'to_customer' | null;
+        riderLocation?: { latitude: number; longitude: number } | null;
+        routeCoordinates?: { latitude: number; longitude: number }[];
+        durationMinutes?: number | null;
+        distanceRemaining?: number | null;
+        lastLocationUpdateAt?: string | null;
+    };
+    storeLocation?: {
+        latitude: number;
+        longitude: number;
+    };
 }
 
 interface Rider {
@@ -193,6 +205,7 @@ export default function OrderTrackingManager() {
                         timeline: data.timeline,
                         estimatedDeliveryTime: data.estimatedDeliveryTime,
                         riderId: data.rider ? { ...(order.riderId || {}), ...data.rider } as any : order.riderId,
+                        tracking: data.order?.tracking || order.tracking,
                     }
                     : order
             ));
@@ -204,12 +217,20 @@ export default function OrderTrackingManager() {
                     timeline: data.timeline,
                     estimatedDeliveryTime: data.estimatedDeliveryTime,
                     riderId: data.rider ? { ...(prev.riderId || {}), ...data.rider } as any : prev.riderId,
+                    tracking: data.order?.tracking || prev.tracking,
                 } : null);
             }
         });
 
         socket.on('riderLocationUpdate', (data: any) => {
             console.log('Rider location update:', data);
+            if (data.order && selectedOrderRef.current?._id === data.orderId) {
+                setSelectedOrder(prev => prev ? {
+                    ...prev,
+                    ...(data.order || {}),
+                    tracking: data.order?.tracking || prev.tracking,
+                } : null);
+            }
             // Update rider locations for map
             setRiderLocations(prev => {
                 const existing = prev.find(r => r.riderId === data.riderId);
@@ -237,9 +258,16 @@ export default function OrderTrackingManager() {
             console.log('ETA update:', data);
             setOrders(prev => prev.map(order =>
                 order._id === data.orderId
-                    ? { ...order, estimatedDeliveryTime: data.estimatedDeliveryTime }
+                    ? { ...order, estimatedDeliveryTime: data.estimatedDeliveryTime, tracking: data.order?.tracking || order.tracking }
                     : order
             ));
+            if (selectedOrderRef.current?._id === data.orderId) {
+                setSelectedOrder(prev => prev ? {
+                    ...prev,
+                    estimatedDeliveryTime: data.estimatedDeliveryTime,
+                    tracking: data.order?.tracking || prev.tracking,
+                } : null);
+            }
         });
 
         socket.on('disconnect', (reason) => {
@@ -430,7 +458,12 @@ export default function OrderTrackingManager() {
                         <h2 className="text-xl font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
                             Live Rider Locations
                         </h2>
-                        <RiderTrackingMap riders={riderLocations} />
+                        <RiderTrackingMap
+                            riders={riderLocations}
+                            routeCoordinates={selectedOrder?.tracking?.routeCoordinates}
+                            storeLocation={selectedOrder?.storeLocation ? [selectedOrder.storeLocation.latitude, selectedOrder.storeLocation.longitude] : undefined}
+                            customerLocation={selectedOrder?.deliveryAddress?.coordinates?.coordinates ? [selectedOrder.deliveryAddress.coordinates.coordinates[1], selectedOrder.deliveryAddress.coordinates.coordinates[0]] : undefined}
+                        />
                     </div>
                 )}
 

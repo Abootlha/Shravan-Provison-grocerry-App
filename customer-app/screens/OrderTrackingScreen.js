@@ -57,6 +57,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
         connectionStatus,
         error,
         isLoading,
+        activeLeg,
     } = useSelector((state) => state.orderTracking);
 
     const { token } = useSelector((state) => state.auth);
@@ -96,14 +97,21 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
         if (!riderLocation || !currentOrder?.deliveryAddress?.coordinates?.coordinates) return;
 
         if (!['ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'].includes(currentOrder.orderStatus)) return;
+        if (currentOrder?.tracking?.routeCoordinates?.length > 1) return;
 
-        const customerCoords = {
-            latitude: currentOrder.deliveryAddress.coordinates.coordinates[1],
-            longitude: currentOrder.deliveryAddress.coordinates.coordinates[0],
-        };
+        const destination = activeLeg === 'to_store' && storeLocation
+            ? storeLocation
+            : currentOrder?.deliveryAddress?.coordinates?.coordinates
+                ? {
+                    latitude: currentOrder.deliveryAddress.coordinates.coordinates[1],
+                    longitude: currentOrder.deliveryAddress.coordinates.coordinates[0],
+                }
+                : null;
 
-        fetchRouteData(riderLocation, customerCoords);
-    }, [riderLocation?.latitude, riderLocation?.longitude, currentOrder?.orderStatus]);
+        if (!destination) return;
+
+        fetchRouteData(riderLocation, destination);
+    }, [riderLocation?.latitude, riderLocation?.longitude, currentOrder?.orderStatus, activeLeg, storeLocation?.latitude, storeLocation?.longitude, currentOrder?.tracking?.routeCoordinates?.length]);
 
     useEffect(() => {
         if (riderLocation && previousRiderLocation) {
@@ -135,6 +143,21 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
             const data = await OrderService.getOrderById(orderId);
             const order = data.order || data;
             dispatch(setCurrentOrder(order));
+            if (order?.tracking?.routeCoordinates?.length) {
+                dispatch(setRouteCoordinates(order.tracking.routeCoordinates));
+            }
+            if (order?.tracking) {
+                dispatch(setRouteInfo({
+                    distanceValue: order.tracking.distanceRemaining ?? null,
+                    durationValue: order.tracking.durationMinutes ? order.tracking.durationMinutes * 60 : null,
+                    distance: order.tracking.distanceRemaining != null
+                        ? `${(order.tracking.distanceRemaining / 1000).toFixed(1)} km`
+                        : null,
+                    duration: order.tracking.durationMinutes != null
+                        ? `${order.tracking.durationMinutes} min`
+                        : null,
+                }));
+            }
         } catch (err) {
             dispatch(setError(err.message || 'Failed to load order details'));
         }
@@ -280,16 +303,17 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
         <SafeAreaView style={styles.container}>
             <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
 
-            <OrderTrackingMap
-                riderLocation={riderLocation}
-                customerLocation={getCustomerLocation()}
-                storeLocation={storeLocation}
-                routeCoordinates={routeCoordinates}
-                riderHeading={riderHeading}
-                orderStatus={currentOrder.orderStatus}
-                onMapReady={() => setMapReady(true)}
-                showFullMap={showFullMap}
-            />
+                        <OrderTrackingMap
+                            riderLocation={riderLocation}
+                            customerLocation={getCustomerLocation()}
+                            storeLocation={storeLocation}
+                            routeCoordinates={currentOrder?.tracking?.routeCoordinates?.length ? currentOrder.tracking.routeCoordinates : routeCoordinates}
+                            riderHeading={riderHeading}
+                            orderStatus={currentOrder.orderStatus}
+                            activeLeg={currentOrder?.tracking?.activeLeg || activeLeg}
+                            onMapReady={() => setMapReady(true)}
+                            showFullMap={showFullMap}
+                        />
 
             <Animated.View style={[styles.floatingHeader, { opacity: headerOpacity, top: Math.max(insets.top + 8, Platform.OS === 'ios' ? 60 : 50) }]}>
                 <TouchableOpacity
@@ -324,12 +348,13 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
                 </View>
             )}
 
-            <TrackingBottomSheet
-                order={currentOrder}
-                riderLocation={riderLocation}
-                routeInfo={routeInfo}
-                connectionStatus={connectionStatus}
-            />
+                        <TrackingBottomSheet
+                            order={currentOrder}
+                            riderLocation={riderLocation}
+                            routeInfo={routeInfo}
+                            connectionStatus={connectionStatus}
+                            activeLeg={currentOrder?.tracking?.activeLeg || activeLeg}
+                        />
         </SafeAreaView>
     );
 };

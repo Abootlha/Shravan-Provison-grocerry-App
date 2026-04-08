@@ -98,7 +98,8 @@ export class OrdersController {
             throw new ForbiddenException('You can only access your own orders');
         }
 
-        return { order };
+        const trackingOrder = await this.ordersService.getTrackingOrderById(id);
+        return { order: trackingOrder };
     }
 
     @Get(':orderId/status')

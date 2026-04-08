@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -23,6 +23,9 @@ interface RiderTrackingMapProps {
     riders: RiderLocation[];
     center?: [number, number];
     zoom?: number;
+    routeCoordinates?: { latitude: number; longitude: number }[];
+    storeLocation?: [number, number];
+    customerLocation?: [number, number];
 }
 
 // Custom marker icon for riders
@@ -48,7 +51,14 @@ function MapUpdater({ riders }: { riders: RiderLocation[] }) {
     return null;
 }
 
-export default function RiderTrackingMap({ riders, center = [28.6139, 77.2090], zoom = 12 }: RiderTrackingMapProps) {
+export default function RiderTrackingMap({
+    riders,
+    center = [28.6139, 77.2090],
+    zoom = 12,
+    routeCoordinates = [],
+    storeLocation,
+    customerLocation,
+}: RiderTrackingMapProps) {
     const [isClient, setIsClient] = useState(false);
 
     useEffect(() => {
@@ -79,6 +89,14 @@ export default function RiderTrackingMap({ riders, center = [28.6139, 77.2090], 
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
                 <MapUpdater riders={riders} />
+                {routeCoordinates.length > 1 && (
+                    <Polyline
+                        positions={routeCoordinates.map((point) => [point.latitude, point.longitude] as [number, number])}
+                        pathOptions={{ color: '#7C3AED', weight: 4 }}
+                    />
+                )}
+                {storeLocation && <Marker position={storeLocation}><Popup>Store</Popup></Marker>}
+                {customerLocation && <Marker position={customerLocation}><Popup>Customer</Popup></Marker>}
                 {riders.map((rider) => (
                     <Marker
                         key={rider.riderId}

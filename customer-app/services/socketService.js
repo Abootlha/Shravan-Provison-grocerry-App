@@ -113,6 +113,7 @@ class SocketService {
                 estimatedDeliveryTime: data.estimatedDeliveryTime,
                 rider: data.rider,
                 order: data.order,
+                tracking: data.order?.tracking || null,
             }));
         });
 
@@ -126,6 +127,7 @@ class SocketService {
                     speed: data.speed,
                 },
                 timestamp: data.timestamp,
+                tracking: data.tracking || data.order?.tracking || null,
             }));
         });
 
@@ -135,6 +137,7 @@ class SocketService {
                 estimatedDeliveryTime: data.estimatedDeliveryTime || data.eta,
                 durationMinutes: data.durationMinutes,
                 distanceRemaining: data.distanceRemaining,
+                tracking: data.tracking || data.order?.tracking || null,
             }));
         });
 
@@ -144,6 +147,7 @@ class SocketService {
                 status: 'ASSIGNED',
                 rider: data.rider,
                 order: data.order,
+                tracking: data.order?.tracking || null,
             }));
         });
 

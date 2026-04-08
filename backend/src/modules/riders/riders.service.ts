@@ -207,7 +207,14 @@ export class RidersService {
         try {
           const eta = await this.etaService.recalculateForOrder(order._id.toString());
           if (eta) {
-            this.trackingGateway.broadcastETAUpdate(order._id.toString(), eta);
+            const trackingOrder = await this.orderModel
+              .findById(order._id)
+              .populate('userId', 'name phone')
+              .populate('riderId', 'name phone vehicleType rating totalDeliveries currentLocation status lastLocationUpdate')
+              .lean()
+              .exec();
+
+            this.trackingGateway.broadcastETAUpdate(order._id.toString(), eta, trackingOrder);
           }
         } catch (error) {
           console.error(`Failed to recalculate ETA for order ${order._id}:`, error);

@@ -39,6 +39,7 @@ const TrackingBottomSheet = ({
     riderLocation,
     routeInfo,
     connectionStatus,
+    activeLeg,
 }) => {
     const translateY = useRef(new Animated.Value(SNAP_POINTS.collapsed)).current;
     const lastSnap = useRef(SNAP_POINTS.collapsed);
@@ -165,7 +166,8 @@ const TrackingBottomSheet = ({
                     <MaterialCommunityIcons name="account" size={16} color="#999" />
                 </View>
                 <Text style={styles.riderBarText}>
-                    <Text style={{ fontWeight: '800' }}>{getRiderName()}</Text> is on the way
+                    <Text style={{ fontWeight: '800' }}>{getRiderName()}</Text>{' '}
+                    {activeLeg === 'to_store' ? 'is heading to the store' : 'is on the way to you'}
                 </Text>
             </View>
         </View>

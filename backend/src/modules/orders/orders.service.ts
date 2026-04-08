@@ -17,6 +17,18 @@ import { ETAService } from './eta.service';
 
 @Injectable()
 export class OrdersService {
+    private getActiveTrackingLeg(status: OrderStatus): 'to_store' | 'to_customer' | null {
+        if ([OrderStatus.ASSIGNED, OrderStatus.PACKED].includes(status)) {
+            return 'to_store';
+        }
+
+        if ([OrderStatus.PICKED_UP, OrderStatus.OUT_FOR_DELIVERY].includes(status)) {
+            return 'to_customer';
+        }
+
+        return null;
+    }
+
     private generateDeliveryOtp(): string {
         return `${Math.floor(1000 + Math.random() * 9000)}`;
     }
@@ -203,7 +215,7 @@ export class OrdersService {
         const order = await this.orderModel
             .findById(orderId)
             .populate('userId', 'name phone')
-            .populate('riderId', 'name phone vehicleType rating totalDeliveries currentLocation status')
+            .populate('riderId', 'name phone vehicleType rating totalDeliveries currentLocation status lastLocationUpdate')
             .lean()
             .exec();
 
@@ -224,7 +236,7 @@ export class OrdersService {
         return this.orderModel
             .findOne({ orderId })
             .populate('userId', 'name phone')
-            .populate('riderId', 'name phone vehicleType rating totalDeliveries currentLocation status')
+            .populate('riderId', 'name phone vehicleType rating totalDeliveries currentLocation status lastLocationUpdate')
             .lean()
             .exec();
     }
@@ -262,14 +274,14 @@ export class OrdersService {
             .exec();
     }
 
-    private async buildRealtimeOrderPayload(orderId: string): Promise<any> {
+    async buildRealtimeOrderPayload(orderId: string): Promise<any> {
         await this.ensureDeliveryOtpById(orderId);
 
         const [order, storeSettings] = await Promise.all([
             this.orderModel
                 .findById(orderId)
                 .populate('userId', 'name phone')
-                .populate('riderId', 'name phone vehicleType rating totalDeliveries currentLocation status')
+                .populate('riderId', 'name phone vehicleType rating totalDeliveries currentLocation status lastLocationUpdate')
                 .lean()
                 .exec(),
             this.settingsService.getStoreSettings(),
@@ -305,6 +317,36 @@ export class OrdersService {
             }
             : null;
 
+        const activeLeg = this.getActiveTrackingLeg(order.orderStatus);
+        const riderLocation = rider?.currentLocation?.latitude != null && rider?.currentLocation?.longitude != null
+            ? {
+                latitude: rider.currentLocation.latitude,
+                longitude: rider.currentLocation.longitude,
+            }
+            : null;
+
+        const destination = activeLeg === 'to_store'
+            ? {
+                street: storeSettings.location.address,
+                city: 'Store',
+                postalCode: '',
+                latitude: storeSettings.location.latitude,
+                longitude: storeSettings.location.longitude,
+            }
+            : activeLeg === 'to_customer'
+                ? {
+                    street: order.deliveryAddress.address,
+                    city: order.deliveryAddress.city,
+                    postalCode: order.deliveryAddress.pincode,
+                    latitude: order.deliveryAddress.coordinates.coordinates[1],
+                    longitude: order.deliveryAddress.coordinates.coordinates[0],
+                }
+                : null;
+
+        const trackingSnapshot = riderLocation && destination
+            ? await this.etaService.buildTrackingRouteSnapshot(riderLocation, destination)
+            : null;
+
         return {
             ...order,
             rider,
@@ -318,7 +360,20 @@ export class OrdersService {
                 latitude: storeSettings.location.latitude,
                 longitude: storeSettings.location.longitude,
             },
+            tracking: {
+                activeLeg,
+                riderLocation,
+                routeCoordinates: trackingSnapshot?.routeCoordinates || [],
+                estimatedDeliveryTime: trackingSnapshot?.estimatedDeliveryTime || order.estimatedDeliveryTime || null,
+                durationMinutes: trackingSnapshot?.durationMinutes ?? null,
+                distanceRemaining: trackingSnapshot?.distanceRemaining ?? null,
+                lastLocationUpdateAt: (order.riderId as any)?.lastLocationUpdate || null,
+            },
         };
+    }
+
+    async getTrackingOrderById(orderId: string): Promise<any> {
+        return this.buildRealtimeOrderPayload(orderId);
     }
 
     validateStatusTransition(currentStatus: OrderStatus, newStatus: OrderStatus): boolean {
@@ -576,7 +631,8 @@ export class OrdersService {
         try {
             const eta = await this.etaService.recalculateForOrder(updatedOrder._id.toString());
             if (eta) {
-                this.trackingGateway.broadcastETAUpdate(updatedOrder._id.toString(), eta);
+                const refreshedTrackingOrder = await this.buildRealtimeOrderPayload(updatedOrder._id.toString());
+                this.trackingGateway.broadcastETAUpdate(updatedOrder._id.toString(), eta, refreshedTrackingOrder);
             }
         } catch (error) {
             // Log error but don't fail the assignment

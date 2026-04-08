@@ -233,6 +233,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
 
       // Broadcast location update to all order rooms
       for (const order of activeOrders) {
+        const trackingOrder = await this.ordersService.buildRealtimeOrderPayload(order._id.toString());
         this.broadcastRiderLocationUpdate(
           order._id.toString(),
           {
@@ -242,6 +243,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
             speed: payload.speed
           },
           user.userId,
+          trackingOrder,
         );
       }
 
@@ -272,6 +274,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       estimatedDeliveryTime: order.estimatedDeliveryTime,
       order,
       rider: order.rider || null,
+      tracking: order.tracking || null,
     });
     this.logger.log(`Broadcasted status update for order ${orderId}: ${order.orderStatus}`);
   }
@@ -341,12 +344,15 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     orderId: string,
     location: { latitude: number; longitude: number; heading?: number; speed?: number },
     riderId: string,
+    order?: any,
   ): void {
     const roomName = `order_${orderId}`;
     this.server.to(roomName).emit('riderLocationUpdate', {
       riderId,
       location,
       timestamp: new Date(),
+      tracking: order?.tracking || null,
+      order: order || null,
     });
     this.logger.log(`Broadcasted location update for rider ${riderId} to order ${orderId}`);
   }
@@ -354,7 +360,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   /**
    * Broadcast ETA update to order room
    */
-  broadcastETAUpdate(orderId: string, eta: Date): void {
+  broadcastETAUpdate(orderId: string, eta: Date, order?: any): void {
     const roomName = `order_${orderId}`;
     const now = new Date();
     const durationMinutes = Math.round((eta.getTime() - now.getTime()) / 60000);
@@ -363,6 +369,9 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       orderId,
       estimatedDeliveryTime: eta,
       durationMinutes,
+      distanceRemaining: order?.tracking?.distanceRemaining ?? null,
+      tracking: order?.tracking || null,
+      order: order || null,
     });
     this.logger.log(`Broadcasted ETA update for order ${orderId}: ${durationMinutes} minutes`);
   }

@@ -94,6 +94,7 @@ const OrderTrackingMap = ({
     routeCoordinates = [],
     riderHeading = 0,
     orderStatus,
+    activeLeg,
     onMapReady,
     showFullMap,
 }) => {
@@ -208,7 +209,11 @@ const OrderTrackingMap = ({
 
                 {(!routeCoordinates || routeCoordinates.length === 0) && storeLocation && customerLocation && (
                     <Polyline
-                        coordinates={createParabolicCurve(storeLocation, customerLocation, 0.25)}
+                        coordinates={createParabolicCurve(
+                            activeLeg === 'to_customer' && riderLocation ? riderLocation : storeLocation,
+                            customerLocation,
+                            0.25
+                        )}
                         strokeColor="#616161"
                         strokeWidth={2}
                         lineDashPattern={[5, 5]}

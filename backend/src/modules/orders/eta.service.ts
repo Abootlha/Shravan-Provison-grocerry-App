@@ -26,6 +26,18 @@ export interface ETAResult {
   distanceMeters: number;
 }
 
+export interface RouteCoordinate {
+  latitude: number;
+  longitude: number;
+}
+
+export interface TrackingRouteSnapshot {
+  routeCoordinates: RouteCoordinate[];
+  estimatedDeliveryTime: Date;
+  durationMinutes: number;
+  distanceRemaining: number;
+}
+
 @Injectable()
 export class ETAService {
   private readonly logger = new Logger(ETAService.name);
@@ -109,10 +121,51 @@ export class ETAService {
   /**
    * Call Mappls directions API
    */
+  private decodePolyline(encoded: string): RouteCoordinate[] {
+    const points: RouteCoordinate[] = [];
+    let index = 0;
+    let lat = 0;
+    let lng = 0;
+
+    while (index < encoded.length) {
+      let b;
+      let shift = 0;
+      let result = 0;
+
+      do {
+        b = encoded.charCodeAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+
+      const dlat = result & 1 ? ~(result >> 1) : result >> 1;
+      lat += dlat;
+
+      shift = 0;
+      result = 0;
+
+      do {
+        b = encoded.charCodeAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+
+      const dlng = result & 1 ? ~(result >> 1) : result >> 1;
+      lng += dlng;
+
+      points.push({
+        latitude: lat / 1e5,
+        longitude: lng / 1e5,
+      });
+    }
+
+    return points;
+  }
+
   private async callMapplsDirectionsAPI(
     riderLocation: LocationDto,
     deliveryAddress: AddressDto,
-  ): Promise<{ durationSeconds: number; distanceMeters: number }> {
+  ): Promise<{ durationSeconds: number; distanceMeters: number; routeCoordinates: RouteCoordinate[] }> {
     if (!this.mapplsApiKey) {
       throw new Error('MAPMYINDIA_API_KEY is not configured');
     }
@@ -141,9 +194,12 @@ export class ETAService {
       throw new Error('Mappls directions response did not contain a route');
     }
 
+    const encodedPolyline = route.polyline || leg.points || '';
+
     return {
       durationSeconds: leg.duration || route.duration || 0,
       distanceMeters: leg.distance || route.distance || 0,
+      routeCoordinates: encodedPolyline ? this.decodePolyline(encodedPolyline) : [],
     };
   }
 
@@ -249,6 +305,30 @@ export class ETAService {
       // Error handling is done in calculateETA, just log and return null
       this.logger.error(
         `Failed to recalculate ETA for order ${orderId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
+  async buildTrackingRouteSnapshot(
+    riderLocation: LocationDto,
+    destination: AddressDto,
+  ): Promise<TrackingRouteSnapshot | null> {
+    try {
+      const { durationSeconds, distanceMeters, routeCoordinates } = await this.callMapplsDirectionsAPI(
+        riderLocation,
+        destination,
+      );
+
+      return {
+        routeCoordinates,
+        estimatedDeliveryTime: new Date(Date.now() + durationSeconds * 1000),
+        durationMinutes: Math.ceil(durationSeconds / 60),
+        distanceRemaining: distanceMeters,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Failed to build tracking route snapshot: ${error instanceof Error ? error.message : String(error)}`,
       );
       return null;
     }

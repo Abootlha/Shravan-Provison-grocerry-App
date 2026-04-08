@@ -13,6 +13,8 @@ const initialState = {
     isLoading: false,
     distanceRemaining: null,
     durationRemaining: null,
+    activeLeg: null,
+    lastLocationUpdateAt: null,
 };
 
 const orderTrackingSlice = createSlice({
@@ -34,6 +36,8 @@ const orderTrackingSlice = createSlice({
             state.error = null;
             state.distanceRemaining = null;
             state.durationRemaining = null;
+            state.activeLeg = null;
+            state.lastLocationUpdateAt = null;
         },
         updateOrderStatus: (state, action) => {
             if (state.currentOrder) {
@@ -62,6 +66,33 @@ const orderTrackingSlice = createSlice({
                         ...rider,
                     };
                 }
+
+                const tracking = order?.tracking || action.payload.tracking;
+                if (tracking) {
+                    state.activeLeg = tracking.activeLeg || state.activeLeg;
+                    state.lastLocationUpdateAt = tracking.lastLocationUpdateAt || state.lastLocationUpdateAt;
+                    state.routeCoordinates = tracking.routeCoordinates || state.routeCoordinates;
+                    state.distanceRemaining = tracking.distanceRemaining ?? state.distanceRemaining;
+                    state.durationRemaining = tracking.durationMinutes ?? state.durationRemaining;
+                    if (tracking.estimatedDeliveryTime && state.currentOrder) {
+                        state.currentOrder.estimatedDeliveryTime = tracking.estimatedDeliveryTime;
+                    }
+                    if (tracking.riderLocation) {
+                        if (state.riderLocation) {
+                            state.previousRiderLocation = {
+                                latitude: state.riderLocation.latitude,
+                                longitude: state.riderLocation.longitude,
+                            };
+                        }
+                        state.riderLocation = {
+                            latitude: tracking.riderLocation.latitude,
+                            longitude: tracking.riderLocation.longitude,
+                            timestamp: tracking.lastLocationUpdateAt || new Date().toISOString(),
+                            heading: tracking.riderLocation.heading || null,
+                            speed: tracking.riderLocation.speed || null,
+                        };
+                    }
+                }
             }
         },
 
@@ -79,6 +110,13 @@ const orderTrackingSlice = createSlice({
                 heading: action.payload.location.heading || null,
                 speed: action.payload.location.speed || null,
             };
+            state.lastLocationUpdateAt = action.payload.timestamp;
+            if (action.payload.tracking?.routeCoordinates) {
+                state.routeCoordinates = action.payload.tracking.routeCoordinates;
+            }
+            if (action.payload.tracking?.activeLeg) {
+                state.activeLeg = action.payload.tracking.activeLeg;
+            }
         },
         clearRiderLocation: (state) => {
             state.riderLocation = null;
@@ -122,6 +160,12 @@ const orderTrackingSlice = createSlice({
                 if (state.currentOrder) {
                     state.currentOrder.distanceRemaining = distanceRemaining;
                 }
+            }
+            if (action.payload.tracking?.routeCoordinates) {
+                state.routeCoordinates = action.payload.tracking.routeCoordinates;
+            }
+            if (action.payload.tracking?.activeLeg) {
+                state.activeLeg = action.payload.tracking.activeLeg;
             }
         },
 
