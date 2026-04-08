@@ -11,6 +11,21 @@ import { UserRole } from '../users/schemas/user.schema';
 export class OrdersController {
     constructor(private readonly ordersService: OrdersService) { }
 
+    private extractEntityId(value: any): string | null {
+        if (!value) return null;
+        if (typeof value === 'string') return value;
+        if (typeof value.toString === 'function' && value.constructor?.name === 'ObjectId') {
+            return value.toString();
+        }
+        if (value._id) {
+            return typeof value._id === 'string' ? value._id : value._id?.toString?.() || null;
+        }
+        if (value.id) {
+            return typeof value.id === 'string' ? value.id : value.id?.toString?.() || null;
+        }
+        return value?.toString?.() || null;
+    }
+
     @Post()
     async createOrder(
         @Request() req: any,
@@ -75,8 +90,8 @@ export class OrdersController {
             throw new NotFoundException('Order not found');
         }
 
-        const isOwner = order.userId?.toString?.() === req.user.userId || order.userId?._id?.toString?.() === req.user.userId;
-        const isAssignedRider = order.riderId?.toString?.() === req.user.userId || order.riderId?._id?.toString?.() === req.user.userId;
+        const isOwner = this.extractEntityId(order.userId) === req.user.userId;
+        const isAssignedRider = this.extractEntityId(order.riderId) === req.user.userId;
 
         // Verify ownership, assigned rider, or admin role
         if (!isOwner && !isAssignedRider && req.user.role !== UserRole.ADMIN) {
@@ -113,7 +128,7 @@ export class OrdersController {
         // Role-based authorization
         // Riders can only update their assigned orders
         if (req.user.role === UserRole.RIDER) {
-            if (!order.riderId || order.riderId.toString() !== req.user.userId) {
+            if (this.extractEntityId(order.riderId) !== req.user.userId) {
                 throw new ForbiddenException('You can only update orders assigned to you');
             }
 
