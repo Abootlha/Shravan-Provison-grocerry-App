@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import { SOCKET_URL } from '../utils/constants';
+import { LOCATION_UPDATE_INTERVAL, SOCKET_URL } from '../utils/constants';
 import type { RiderLocation } from '../types/rider';
 import type { NewOrderAssignment, OrderStatusUpdate } from '../types/order';
 
@@ -156,7 +156,7 @@ class SocketService {
           timestamp: new Date().toISOString(),
         });
       }
-    }, 3000);
+    }, LOCATION_UPDATE_INTERVAL);
   }
 
   stopLocationUpdates(): void {
