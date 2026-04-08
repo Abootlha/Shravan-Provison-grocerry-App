@@ -70,7 +70,7 @@ export const useOrders = () => {
   const accept = useCallback(
     async (orderId: string) => {
       const result = await dispatch(acceptOrder(orderId));
-      return result.payload as Order | null;
+      return acceptOrder.fulfilled.match(result) ? (result.payload as Order) : null;
     },
     [dispatch]
   );
@@ -90,7 +90,7 @@ export const useOrders = () => {
       location?: { latitude: number; longitude: number }
     ) => {
       const result = await dispatch(updateOrderStatus({ orderId, status, location }));
-      return result.payload as Order | null;
+      return updateOrderStatus.fulfilled.match(result) ? (result.payload as Order) : null;
     },
     [dispatch]
   );

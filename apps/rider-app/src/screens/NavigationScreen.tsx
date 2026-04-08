@@ -64,6 +64,7 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
   const mapRef = useRef<MapView>(null);
 
   const activeOrder = currentOrder?.id === order.id ? currentOrder : order;
+  const activeOrderId = activeOrder.id || order.id;
 
   const pickupCoords = order.pickup.address.coordinates;
   const deliveryCoords = order.delivery.address.coordinates;
@@ -93,21 +94,25 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
 
   const handleMarkPickedUp = useCallback(async () => {
     setLoading(true);
-    const result = await updateStatus(order.id, 'picked_up', currentLocation ?? undefined);
+    const result = await updateStatus(activeOrderId, 'picked_up', currentLocation ?? undefined);
     setLoading(false);
     if (result) {
       Alert.alert('Success', 'Order marked as picked up!');
+    } else {
+      Alert.alert('Unable to update status', 'The pickup status could not be updated. Please try again.');
     }
-  }, [updateStatus, order.id, currentLocation]);
+  }, [updateStatus, activeOrderId, currentLocation]);
 
   const handleStartDelivery = useCallback(async () => {
     setLoading(true);
-    const result = await updateStatus(order.id, 'out_for_delivery', currentLocation ?? undefined);
+    const result = await updateStatus(activeOrderId, 'out_for_delivery', currentLocation ?? undefined);
     setLoading(false);
     if (result) {
       Alert.alert('Success', 'Order marked as out for delivery!');
+    } else {
+      Alert.alert('Unable to update status', 'The delivery status could not be updated. Please try again.');
     }
-  }, [updateStatus, order.id, currentLocation]);
+  }, [updateStatus, activeOrderId, currentLocation]);
 
   const handleMarkDelivered = useCallback(async () => {
     if ((activeOrder.deliveryOtp || '').trim() !== deliveryOtpInput.trim()) {
@@ -116,7 +121,7 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
     }
 
     setLoading(true);
-    const result = await updateStatus(order.id, 'delivered', currentLocation ?? undefined);
+    const result = await updateStatus(activeOrderId, 'delivered', currentLocation ?? undefined);
     setLoading(false);
     if (result) {
       setOtpModalVisible(false);
@@ -125,8 +130,10 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
         order: result,
         tip: result.tip,
       });
+    } else {
+      Alert.alert('Unable to update status', 'The delivery could not be completed. Please try again.');
     }
-  }, [updateStatus, order.id, currentLocation, navigation, activeOrder.deliveryOtp, deliveryOtpInput]);
+  }, [updateStatus, activeOrderId, currentLocation, navigation, activeOrder.deliveryOtp, deliveryOtpInput]);
 
   const mapRegion = {
     latitude: currentLocation?.latitude || pickupCoords.latitude,

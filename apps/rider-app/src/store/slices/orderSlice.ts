@@ -1,4 +1,5 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
+import axios from 'axios';
 import { orderApi } from '../../services/api';
 import type { Order, AvailableOrder, OrderStatus } from '../../types/order';
 
@@ -21,7 +22,10 @@ export const fetchAvailableOrders = createAsyncThunk(
   async (_, { rejectWithValue }) => {
     try {
       return await orderApi.getAvailable() as AvailableOrder[];
-    } catch {
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        return rejectWithValue((error.response?.data as any)?.message || 'Failed to fetch available orders');
+      }
       return rejectWithValue('Failed to fetch available orders');
     }
   }
@@ -33,7 +37,10 @@ export const acceptOrder = createAsyncThunk(
     try {
       const response = await orderApi.accept(orderId);
       return response.order as Order;
-    } catch {
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        return rejectWithValue((error.response?.data as any)?.message || 'Failed to accept order');
+      }
       return rejectWithValue('Failed to accept order');
     }
   }
@@ -45,7 +52,10 @@ export const rejectOrder = createAsyncThunk(
     try {
       await orderApi.reject(orderId);
       return orderId;
-    } catch {
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        return rejectWithValue((error.response?.data as any)?.message || 'Failed to reject order');
+      }
       return rejectWithValue('Failed to reject order');
     }
   }
@@ -60,7 +70,10 @@ export const updateOrderStatus = createAsyncThunk(
     try {
       const response = await orderApi.updateStatus(orderId, status, location);
       return response.order as Order;
-    } catch {
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        return rejectWithValue((error.response?.data as any)?.message || 'Failed to update order status');
+      }
       return rejectWithValue('Failed to update order status');
     }
   }
@@ -121,6 +134,10 @@ const orderSlice = createSlice({
       })
       .addCase(updateOrderStatus.fulfilled, (state, action) => {
         state.currentOrder = action.payload;
+        state.error = null;
+      })
+      .addCase(updateOrderStatus.rejected, (state, action) => {
+        state.error = action.payload as string;
       });
   },
 });
