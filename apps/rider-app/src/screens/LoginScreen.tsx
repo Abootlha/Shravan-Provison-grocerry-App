@@ -29,7 +29,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
 
     const result = await dispatch(login({ username: username.trim(), password }));
     if (login.fulfilled.match(result)) {
-      // Navigation will be handled by the auth state change in App.tsx/Navigator
+      navigation.replace('Home');
     }
   };
 
