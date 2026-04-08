@@ -32,7 +32,7 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
   const { orderId, order: initialOrder } = route.params;
   const [order, setOrder] = useState<Order | undefined>(initialOrder);
   const [loading, setLoading] = useState(false);
-  const { accept, reject, updateStatus, currentOrder } = useOrders();
+  const { accept, reject, updateStatus, currentOrder, error } = useOrders();
   const { currentLocation, isTracking } = useLocation();
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [riderCoords, setRiderCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -132,8 +132,10 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
     if (result) {
       setOrder(result);
       Alert.alert('Success', 'Order accepted successfully!');
+    } else {
+      Alert.alert('Unable to accept order', error || 'Please try again.');
     }
-  }, [accept, orderId, locationEnabled, riderCoords]);
+  }, [accept, orderId, locationEnabled, riderCoords, error]);
 
   const handleReject = useCallback(async () => {
     Alert.alert('Reject Order', 'Are you sure you want to reject this order?', [
@@ -166,8 +168,10 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
     if (result) {
       setOrder(result);
       navigation.navigate('Navigation', { orderId, order: result });
+    } else {
+      Alert.alert('Unable to update status', error || 'Please try again.');
     }
-  }, [updateStatus, orderId, navigation, riderCoords]);
+  }, [updateStatus, orderId, navigation, riderCoords, error]);
 
   const handleNavigate = useCallback(() => {
     navigation.navigate('Navigation', { orderId, order: activeOrder! });
