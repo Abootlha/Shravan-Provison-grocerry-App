@@ -274,6 +274,31 @@ export class OrdersService {
             .exec();
     }
 
+    async findCurrentForRider(riderId: string): Promise<any | null> {
+        const currentOrder = await this.orderModel
+            .findOne({
+                riderId: new Types.ObjectId(riderId),
+                orderStatus: {
+                    $in: [
+                        OrderStatus.ASSIGNED,
+                        OrderStatus.PACKED,
+                        OrderStatus.PICKED_UP,
+                        OrderStatus.OUT_FOR_DELIVERY,
+                    ],
+                },
+            })
+            .sort({ updatedAt: -1 })
+            .select('_id')
+            .lean()
+            .exec();
+
+        if (!currentOrder?._id) {
+            return null;
+        }
+
+        return this.buildRealtimeOrderPayload(currentOrder._id.toString());
+    }
+
     async buildRealtimeOrderPayload(orderId: string): Promise<any> {
         await this.ensureDeliveryOtpById(orderId);
 

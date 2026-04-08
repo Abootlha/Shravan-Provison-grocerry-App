@@ -6,6 +6,7 @@ import { RedisService } from '../../common/utils/redis.service';
 import { TrackingGateway } from '../../sockets/tracking.gateway';
 import { ETAService } from '../orders/eta.service';
 import { Order, OrderDocument, OrderStatus } from '../orders/schemas/order.schema';
+import { OrdersService } from '../orders/orders.service';
 import * as bcrypt from 'bcrypt';
 
 export interface LocationDto {
@@ -24,6 +25,8 @@ export class RidersService {
     private readonly trackingGateway: TrackingGateway,
     @Inject(forwardRef(() => ETAService))
     private readonly etaService: ETAService,
+    @Inject(forwardRef(() => OrdersService))
+    private readonly ordersService: OrdersService,
   ) { }
 
   async findAll(status?: string): Promise<Rider[]> {
@@ -189,7 +192,12 @@ export class RidersService {
       .find({
         riderId: new Types.ObjectId(riderId),
         orderStatus: {
-          $in: [OrderStatus.ASSIGNED, OrderStatus.OUT_FOR_DELIVERY],
+          $in: [
+            OrderStatus.ASSIGNED,
+            OrderStatus.PACKED,
+            OrderStatus.PICKED_UP,
+            OrderStatus.OUT_FOR_DELIVERY,
+          ],
         },
       })
       .select('_id orderStatus')
@@ -197,29 +205,21 @@ export class RidersService {
       .exec();
 
     for (const order of activeOrders) {
-      this.trackingGateway.broadcastRiderLocationUpdate(
-        order._id.toString(),
-        { latitude: location.latitude, longitude: location.longitude },
-        riderId,
-      );
-
       if (order.orderStatus === OrderStatus.OUT_FOR_DELIVERY) {
         try {
-          const eta = await this.etaService.recalculateForOrder(order._id.toString());
-          if (eta) {
-            const trackingOrder = await this.orderModel
-              .findById(order._id)
-              .populate('userId', 'name phone')
-              .populate('riderId', 'name phone vehicleType rating totalDeliveries currentLocation status lastLocationUpdate')
-              .lean()
-              .exec();
-
-            this.trackingGateway.broadcastETAUpdate(order._id.toString(), eta, trackingOrder);
-          }
+          await this.etaService.recalculateForOrder(order._id.toString());
         } catch (error) {
           console.error(`Failed to recalculate ETA for order ${order._id}:`, error);
         }
       }
+
+      const trackingOrder = await this.ordersService.buildRealtimeOrderPayload(order._id.toString());
+      this.trackingGateway.broadcastRiderLocationUpdate(
+        order._id.toString(),
+        { latitude: location.latitude, longitude: location.longitude },
+        riderId,
+        trackingOrder,
+      );
     }
 
     return rider;

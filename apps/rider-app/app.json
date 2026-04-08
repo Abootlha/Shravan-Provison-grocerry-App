@@ -17,7 +17,10 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "We need your location to show your position on the map and track deliveries.",
         "NSLocationAlwaysUsageDescription": "We need your location to track deliveries even when the app is in the background.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "We need your location to track deliveries and show your position on the map."
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "We need your location to track deliveries and show your position on the map.",
+        "UIBackgroundModes": [
+          "location"
+        ]
       }
     },
     "android": {
@@ -31,6 +34,7 @@
         "ACCESS_COARSE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
         "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
         "CALL_PHONE",
         "POST_NOTIFICATIONS"
       ]
@@ -39,7 +43,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow ShravanKirana to use your location for delivery tracking."
+          "locationAlwaysAndWhenInUsePermission": "Allow ShravanKirana to use your location for delivery tracking.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true
         }
       ],
       [

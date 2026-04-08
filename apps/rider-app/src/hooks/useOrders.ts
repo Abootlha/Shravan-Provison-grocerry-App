@@ -2,6 +2,7 @@ import { useCallback, useEffect } from 'react';
 import { useAppDispatch, useAppSelector } from './useAuth';
 import {
   fetchAvailableOrders,
+  hydrateCurrentOrder,
   acceptOrder,
   rejectOrder,
   updateOrderStatus,
@@ -26,14 +27,19 @@ export const useOrders = () => {
 
     const handleStatusUpdate = (data: { orderId: string; status: OrderStatus; order?: Order }) => {
       const normalizedOrder = data.order ? normalizeOrder(data.order) : null;
+      const nextStatus = String(data.status || '').toUpperCase();
 
       if (data.orderId === currentOrder?.id && data.order) {
-        dispatch(setCurrentOrder(normalizedOrder));
+        if (['DELIVERED', 'CANCELLED'].includes(nextStatus)) {
+          dispatch(setCurrentOrder(null));
+        } else {
+          dispatch(setCurrentOrder(normalizedOrder));
+        }
         return;
       }
 
       if (
-        ['CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'].includes(String(data.status).toUpperCase()) &&
+        ['CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'].includes(nextStatus) &&
         normalizedOrder
       ) {
         dispatch(addAvailableOrder(normalizedOrder as AvailableOrder));
@@ -65,6 +71,10 @@ export const useOrders = () => {
 
   const loadAvailableOrders = useCallback(() => {
     dispatch(fetchAvailableOrders());
+  }, [dispatch]);
+
+  const loadCurrentOrder = useCallback(() => {
+    dispatch(hydrateCurrentOrder());
   }, [dispatch]);
 
   const accept = useCallback(
@@ -101,6 +111,7 @@ export const useOrders = () => {
     loading,
     error,
     loadAvailableOrders,
+    loadCurrentOrder,
     accept,
     reject,
     updateStatus,

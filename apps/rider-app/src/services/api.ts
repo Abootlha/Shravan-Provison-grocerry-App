@@ -202,6 +202,11 @@ export const riderApi = {
     return normalizeRider(rider.rider || rider);
   },
 
+  updateLocation: async (location: { latitude: number; longitude: number; accuracy?: number }) => {
+    const rider = await riderClient.put<any>('/riders/me/location', location);
+    return normalizeRider(rider.rider || rider);
+  },
+
   getEarnings: async (_period: 'daily' | 'weekly' | 'monthly') => {
     const user = await storage.getUser<Rider>();
     if (!user?.id) {
@@ -225,6 +230,11 @@ export const orderApi = {
   getAvailable: async () => {
     const response = await orderClient.get<any>('/orders/available');
     return (response.orders || []).map(normalizeOrder);
+  },
+
+  getCurrent: async () => {
+    const response = await orderClient.get<any>('/orders/current');
+    return response.order ? normalizeOrder(response.order) : null;
   },
 
   accept: async (orderId: string) => {

@@ -30,6 +30,17 @@ class CreateRiderDto {
     vehicleType?: string;
 }
 
+class UpdateLocationDto {
+    @IsNotEmpty()
+    latitude!: number;
+
+    @IsNotEmpty()
+    longitude!: number;
+
+    @IsOptional()
+    accuracy?: number;
+}
+
 @Controller('riders')
 @UseGuards(JwtAuthGuard)
 export class RidersController {
@@ -73,6 +84,24 @@ export class RidersController {
 
         const metrics = await this.ridersService.getMetrics(req.user.userId);
         return metrics;
+    }
+
+    @Put('me/location')
+    async updateMyLocation(
+        @Request() req: any,
+        @Body() body: UpdateLocationDto,
+    ) {
+        if (req.user.role !== UserRole.RIDER) {
+            throw new ForbiddenException('Only riders can update rider location');
+        }
+
+        const rider = await this.ridersService.updateLocation(req.user.userId, {
+            latitude: Number(body.latitude),
+            longitude: Number(body.longitude),
+            accuracy: body.accuracy,
+        });
+
+        return { rider };
     }
 
     @Get()

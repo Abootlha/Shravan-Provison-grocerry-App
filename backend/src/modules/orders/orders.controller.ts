@@ -58,6 +58,16 @@ export class OrdersController {
         return { orders };
     }
 
+    @Get('current')
+    async getCurrentRiderOrder(@Request() req: any) {
+        if (req.user.role !== UserRole.RIDER) {
+            throw new ForbiddenException('Only riders can access active rider orders');
+        }
+
+        const order = await this.ordersService.findCurrentForRider(req.user.userId);
+        return { order };
+    }
+
     @Patch(':id/accept')
     async acceptOrder(@Request() req: any, @Param('id') id: string) {
         if (req.user.role !== UserRole.RIDER) {

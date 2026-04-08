@@ -34,8 +34,17 @@ const ZEPTO_GREEN = '#10B981';
 export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const dispatch = useAppDispatch();
   const { user } = useAppSelector((state) => state.auth);
-  const { currentOrder, availableOrders, loadAvailableOrders } = useOrders();
-  const { isTracking, currentLocation, startTracking, stopTracking, startSocketTracking, stopSocketTracking } = useLocation();
+  const { currentOrder, availableOrders, loadAvailableOrders, loadCurrentOrder } = useOrders();
+  const {
+    isTracking,
+    currentLocation,
+    startTracking,
+    stopTracking,
+    startBackgroundTracking,
+    stopBackgroundTracking,
+    startSocketTracking,
+    stopSocketTracking,
+  } = useLocation();
   const [refreshing, setRefreshing] = React.useState(false);
   const [toggling, setToggling] = React.useState(false);
   const [locationEnabled, setLocationEnabled] = React.useState(false);
@@ -53,23 +62,66 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   }, []);
 
   useEffect(() => {
+    const syncTrackingForAppState = async (nextAppState: string) => {
+      if (!user?.isOnline) {
+        return;
+      }
+
+      if (nextAppState === 'active') {
+        await stopBackgroundTracking();
+        const started = await startTracking();
+        if (started) {
+          startSocketTracking(user.id || '');
+        }
+        checkLocationPermission();
+        return;
+      }
+
+      stopSocketTracking();
+      stopTracking();
+      await startBackgroundTracking();
+    };
+
     checkLocationPermission();
     const interval = setInterval(checkLocationPermission, 10000);
     const subscription = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active') {
-        checkLocationPermission();
-      }
+      syncTrackingForAppState(nextAppState).catch(() => undefined);
     });
 
     return () => {
       clearInterval(interval);
       subscription.remove();
     };
-  }, [checkLocationPermission]);
+  }, [
+    checkLocationPermission,
+    startTracking,
+    stopTracking,
+    startBackgroundTracking,
+    stopBackgroundTracking,
+    startSocketTracking,
+    stopSocketTracking,
+    user?.id,
+    user?.isOnline,
+  ]);
 
   useEffect(() => {
     loadAvailableOrders();
-  }, [loadAvailableOrders]);
+    loadCurrentOrder();
+  }, [loadAvailableOrders, loadCurrentOrder]);
+
+  useEffect(() => {
+    if (!user?.isOnline || !locationEnabled || isTracking) {
+      return;
+    }
+
+    startTracking()
+      .then((started) => {
+        if (started) {
+          startSocketTracking(user.id || '');
+        }
+      })
+      .catch(() => undefined);
+  }, [user?.isOnline, user?.id, locationEnabled, isTracking, startTracking, startSocketTracking]);
 
   const handleEnableLocation = useCallback(async () => {
     const granted = await locationService.requestPermissions();
@@ -134,6 +186,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         startSocketTracking(user?.id || '');
       } else {
         stopTracking();
+        stopBackgroundTracking().catch(() => undefined);
         stopSocketTracking();
       }
     } catch {
@@ -141,30 +194,32 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     } finally {
       setToggling(false);
     }
-  }, [dispatch, user, startTracking, stopTracking, startSocketTracking, stopSocketTracking, locationEnabled, handleEnableLocation]);
+  }, [dispatch, user, startTracking, stopTracking, startBackgroundTracking, stopBackgroundTracking, startSocketTracking, stopSocketTracking, locationEnabled, handleEnableLocation]);
 
   const handleLogout = useCallback(() => {
     Alert.alert('Logout', 'Are you sure you want to logout?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Logout',
-        style: 'destructive',
-        onPress: () => {
-          stopTracking();
-          stopSocketTracking();
-          dispatch(logout());
-          navigation.replace('Login');
-        },
-      },
-    ]);
-  }, [dispatch, navigation, stopTracking, stopSocketTracking]);
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Logout',
+            style: 'destructive',
+            onPress: () => {
+              stopTracking();
+              stopBackgroundTracking().catch(() => undefined);
+              stopSocketTracking();
+              dispatch(logout());
+              navigation.replace('Login');
+            },
+          },
+        ]);
+  }, [dispatch, navigation, stopTracking, stopBackgroundTracking, stopSocketTracking]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await checkLocationPermission();
     loadAvailableOrders();
+    loadCurrentOrder();
     setTimeout(() => setRefreshing(false), 1000);
-  }, [checkLocationPermission, loadAvailableOrders]);
+  }, [checkLocationPermission, loadAvailableOrders, loadCurrentOrder]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

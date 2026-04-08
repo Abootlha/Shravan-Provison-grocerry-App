@@ -56,6 +56,14 @@ export const useLocation = () => {
     dispatch(setTracking(false));
   }, [dispatch]);
 
+  const startBackgroundTracking = useCallback(async () => {
+    return locationService.startBackgroundTracking();
+  }, []);
+
+  const stopBackgroundTracking = useCallback(async () => {
+    await locationService.stopBackgroundTracking();
+  }, []);
+
   const startSocketTracking = useCallback(
     (_riderId: string) => {
       socketService.startLocationUpdates(() => {
@@ -80,7 +88,6 @@ export const useLocation = () => {
   useEffect(() => {
     return () => {
       unsubscribeRef.current?.();
-      locationService.stopTracking();
     };
   }, []);
 
@@ -92,6 +99,8 @@ export const useLocation = () => {
     error,
     startTracking,
     stopTracking,
+    startBackgroundTracking,
+    stopBackgroundTracking,
     startSocketTracking,
     stopSocketTracking,
     getCurrentLocation: locationService.getCurrentLocation.bind(locationService),

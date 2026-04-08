@@ -1,6 +1,7 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import axios from 'axios';
 import { orderApi } from '../../services/api';
+import { storage } from '../../services/storage';
 import type { Order, AvailableOrder, OrderStatus } from '../../types/order';
 
 interface OrderState {
@@ -27,6 +28,30 @@ export const fetchAvailableOrders = createAsyncThunk(
         return rejectWithValue((error.response?.data as any)?.message || 'Failed to fetch available orders');
       }
       return rejectWithValue('Failed to fetch available orders');
+    }
+  }
+);
+
+export const hydrateCurrentOrder = createAsyncThunk(
+  'orders/hydrateCurrent',
+  async (_, { rejectWithValue }) => {
+    try {
+      const persisted = await storage.getActiveOrder<Order>();
+      const latest = await orderApi.getCurrent();
+      const order = latest || persisted;
+
+      if (!order) {
+        await storage.clearActiveOrder();
+        return null;
+      }
+
+      await storage.setActiveOrder(order);
+      return order;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        return rejectWithValue((error.response?.data as any)?.message || 'Failed to load current order');
+      }
+      return rejectWithValue('Failed to load current order');
     }
   }
 );
@@ -88,6 +113,11 @@ const orderSlice = createSlice({
     },
     setCurrentOrder: (state, action: PayloadAction<Order | null>) => {
       state.currentOrder = action.payload;
+      if (action.payload) {
+        storage.setActiveOrder(action.payload).catch(() => undefined);
+      } else {
+        storage.clearActiveOrder().catch(() => undefined);
+      }
     },
     addAvailableOrder: (state, action: PayloadAction<AvailableOrder>) => {
       const exists = state.availableOrders.find((o) => o.id === action.payload.id);
@@ -116,6 +146,12 @@ const orderSlice = createSlice({
         state.loading = false;
         state.error = action.payload as string;
       })
+      .addCase(hydrateCurrentOrder.fulfilled, (state, action) => {
+        state.currentOrder = action.payload;
+      })
+      .addCase(hydrateCurrentOrder.rejected, (state, action) => {
+        state.error = action.payload as string;
+      })
       .addCase(acceptOrder.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -124,6 +160,7 @@ const orderSlice = createSlice({
         state.loading = false;
         state.currentOrder = action.payload;
         state.availableOrders = state.availableOrders.filter((o) => o.id !== action.payload.id);
+        storage.setActiveOrder(action.payload).catch(() => undefined);
       })
       .addCase(acceptOrder.rejected, (state, action) => {
         state.loading = false;
@@ -135,6 +172,11 @@ const orderSlice = createSlice({
       .addCase(updateOrderStatus.fulfilled, (state, action) => {
         state.currentOrder = action.payload;
         state.error = null;
+        if (action.payload.status === 'delivered' || action.payload.status === 'cancelled') {
+          storage.clearActiveOrder().catch(() => undefined);
+        } else {
+          storage.setActiveOrder(action.payload).catch(() => undefined);
+        }
       })
       .addCase(updateOrderStatus.rejected, (state, action) => {
         state.error = action.payload as string;

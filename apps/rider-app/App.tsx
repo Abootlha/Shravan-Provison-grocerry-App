@@ -7,6 +7,7 @@ import { AppNavigator } from './src/navigation/AppNavigator';
 import { useAppDispatch } from './src/hooks/useAuth';
 import { loadUser } from './src/store/slices/authSlice';
 import { notificationService } from './src/services/notifications';
+import './src/services/location';
 
 const AppContent: React.FC = () => {
   const dispatch = useAppDispatch();

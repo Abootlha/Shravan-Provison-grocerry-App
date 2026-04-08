@@ -1,5 +1,48 @@
+import { Platform } from 'react-native';
+import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
-import { LOCATION_UPDATE_THROTTLE } from '../utils/constants';
+import { LOCATION_UPDATE_THROTTLE, RIDER_SERVICE_URL } from '../utils/constants';
+import { storage } from './storage';
+
+const BACKGROUND_LOCATION_TASK = 'rider-background-location';
+
+if (!TaskManager.isTaskDefined(BACKGROUND_LOCATION_TASK)) {
+  TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
+    if (error) {
+      console.log('[LocationService] Background task error:', error.message);
+      return;
+    }
+
+    const locations = (data as { locations?: Location.LocationObject[] } | undefined)?.locations;
+    const latest = locations?.[locations.length - 1];
+
+    if (!latest) {
+      return;
+    }
+
+    try {
+      const token = await storage.getToken();
+      if (!token) {
+        return;
+      }
+
+      await fetch(`${RIDER_SERVICE_URL}/riders/me/location`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          latitude: latest.coords.latitude,
+          longitude: latest.coords.longitude,
+          accuracy: latest.coords.accuracy,
+        }),
+      });
+    } catch (taskError) {
+      console.log('[LocationService] Background location upload failed:', taskError);
+    }
+  });
+}
 
 export interface CurrentLocation {
   latitude: number;
@@ -130,10 +173,53 @@ class LocationService {
     return true;
   }
 
+  async startBackgroundTracking(): Promise<boolean> {
+    if (Platform.OS === 'web') {
+      return true;
+    }
+
+    const hasPerms = await this.hasPermissions();
+    if (!hasPerms) {
+      const granted = await this.requestPermissions();
+      if (!granted) return false;
+    }
+
+    const alreadyStarted = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+    if (alreadyStarted) {
+      return true;
+    }
+
+    await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+      accuracy: Location.Accuracy.Balanced,
+      timeInterval: LOCATION_UPDATE_THROTTLE,
+      distanceInterval: 10,
+      pausesUpdatesAutomatically: false,
+      showsBackgroundLocationIndicator: false,
+      foregroundService: {
+        notificationTitle: 'ShravanKirana Delivery Tracking',
+        notificationBody: 'Sharing your live location for active deliveries.',
+        notificationColor: '#1E3A8A',
+      },
+    });
+
+    return true;
+  }
+
   stopTracking(): void {
     if (this.locationSubscription) {
       this.locationSubscription.remove();
       this.locationSubscription = null;
+    }
+  }
+
+  async stopBackgroundTracking(): Promise<void> {
+    if (Platform.OS === 'web') {
+      return;
+    }
+
+    const alreadyStarted = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+    if (alreadyStarted) {
+      await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
     }
   }
 
