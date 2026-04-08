@@ -93,6 +93,21 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     return `order_${orderId}`;
   }
 
+  private extractEntityId(value: any): string | null {
+    if (!value) return null;
+    if (typeof value === 'string') return value;
+    if (typeof value.toString === 'function' && value.constructor?.name === 'ObjectId') {
+      return value.toString();
+    }
+    if (value._id) {
+      return typeof value._id === 'string' ? value._id : value._id?.toString?.() || null;
+    }
+    if (value.id) {
+      return typeof value.id === 'string' ? value.id : value.id?.toString?.() || null;
+    }
+    return value?.toString?.() || null;
+  }
+
   /**
    * Generate room name for user
    */
@@ -130,9 +145,11 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
 
     // Check authorization
-    const isOwner = order.userId.toString() === user.userId;
+    const orderOwnerId = this.extractEntityId(order.userId);
+    const assignedRiderId = this.extractEntityId(order.riderId);
+    const isOwner = orderOwnerId === user.userId;
     const isAdmin = user.role === 'admin';
-    const isAssignedRider = order.riderId && order.riderId.toString() === user.userId;
+    const isAssignedRider = assignedRiderId === user.userId;
 
     if (!isOwner && !isAdmin && !isAssignedRider) {
       this.logger.warn({
@@ -207,7 +224,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
         .find({
           riderId: user.userId,
           orderStatus: {
-            $in: [OrderStatus.ASSIGNED, OrderStatus.OUT_FOR_DELIVERY],
+            $in: [OrderStatus.ASSIGNED, OrderStatus.PACKED, OrderStatus.PICKED_UP, OrderStatus.OUT_FOR_DELIVERY],
           },
         })
         .select('_id')
@@ -304,6 +321,20 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       order,
     });
     this.logger.log(`Notified rider ${riderId} about new order ${order.orderId}`);
+  }
+
+  notifyRiderOrderPacked(riderId: string, order: any): void {
+    const roomName = `rider_${riderId}`;
+    this.server.to(roomName).emit('orderPacked', {
+      orderId: order._id?.toString?.() || order.id,
+      status: order.orderStatus,
+      order,
+      notification: {
+        title: 'Order packed',
+        body: `${order.orderId} is packed and ready for pickup.`,
+      },
+    });
+    this.logger.log(`Notified rider ${riderId} that order ${order.orderId} is packed`);
   }
 
   broadcastRiderLocationUpdate(

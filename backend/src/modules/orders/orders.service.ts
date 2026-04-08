@@ -253,7 +253,7 @@ export class OrdersService {
     async findAvailableForRiders(riderId: string): Promise<OrderDocument[]> {
         return this.orderModel
             .find({
-                orderStatus: OrderStatus.ASSIGNED,
+                orderStatus: OrderStatus.CONFIRMED,
                 riderId: new Types.ObjectId(riderId),
             })
             .sort({ createdAt: -1 })
@@ -345,14 +345,6 @@ export class OrdersService {
         const order = await this.orderModel.findById(orderId);
         if (!order) throw new NotFoundException('Order not found');
 
-        if (newStatus === OrderStatus.ASSIGNED) {
-            const assignedOrder = await this.autoAssignNearestRider(orderId);
-            if (!assignedOrder) {
-                throw new BadRequestException('No available rider could be assigned to this order');
-            }
-            return assignedOrder as OrderDocument;
-        }
-
         // Validate transition
         if (!this.validateStatusTransition(order.orderStatus, newStatus)) {
             throw new BadRequestException(
@@ -403,6 +395,21 @@ export class OrdersService {
         // Broadcast order status update via socket
         this.trackingGateway.broadcastOrderStatusUpdate(order._id.toString(), trackingOrder);
 
+        if (newStatus === OrderStatus.CONFIRMED && !order.riderId) {
+            const assignedOrder = await this.autoAssignNearestRider(order._id.toString());
+            if (!assignedOrder) {
+                throw new BadRequestException('No available rider could be assigned to this confirmed order');
+            }
+            return assignedOrder as OrderDocument;
+        }
+
+        if (newStatus === OrderStatus.PACKED && order.riderId) {
+            this.trackingGateway.notifyRiderOrderPacked(
+                order.riderId.toString(),
+                trackingOrder,
+            );
+        }
+
         // If cancelled, release stock
         if (newStatus === OrderStatus.CANCELLED) {
             const stockItems = order.items.map((item) => ({
@@ -430,14 +437,6 @@ export class OrdersService {
             }
         }
 
-        if (newStatus === OrderStatus.PACKED && !order.riderId) {
-            try {
-                await this.autoAssignNearestRider(order._id.toString());
-            } catch (error) {
-                console.error(`Failed to auto-assign rider for order ${order._id}:`, error);
-            }
-        }
-
         return trackingOrder as OrderDocument;
     }
 
@@ -445,10 +444,10 @@ export class OrdersService {
         const order = await this.orderModel.findById(orderId);
         if (!order) throw new NotFoundException('Order not found');
 
-        // Rider can accept if order is ASSIGNED to them
-        if (order.orderStatus !== OrderStatus.ASSIGNED) {
+        // Rider can accept if order is CONFIRMED and reserved for them.
+        if (order.orderStatus !== OrderStatus.CONFIRMED) {
             throw new BadRequestException(
-                `Order is in ${order.orderStatus} status, only ASSIGNED orders can be accepted by rider`
+                `Order is in ${order.orderStatus} status, only CONFIRMED orders can be accepted by rider`
             );
         }
 
@@ -456,7 +455,28 @@ export class OrdersService {
             throw new ForbiddenException('This order is not assigned to you');
         }
 
-        // Accepting confirms ownership and live tracking, but pickup remains a separate rider step.
+        const previousStatus = order.orderStatus;
+        order.orderStatus = OrderStatus.ASSIGNED;
+        this.addTimelineEntry(order, OrderStatus.ASSIGNED, riderId);
+        await order.save();
+
+        await this.cacheService.deleteOrder(order._id.toString());
+        await this.redisService.del(RedisService.Keys.orderStatus(order.orderId));
+        await this.redisService.set(
+            RedisService.Keys.orderStatus(order.orderId),
+            OrderStatus.ASSIGNED,
+        );
+        await this.logStatusChange(
+            order._id,
+            previousStatus,
+            OrderStatus.ASSIGNED,
+            new Types.ObjectId(riderId),
+        );
+        await this.redisService.publish(
+            'order-updates',
+            JSON.stringify({ orderId: order.orderId, status: OrderStatus.ASSIGNED }),
+        );
+
         const trackingOrder = await this.buildRealtimeOrderPayload(order._id.toString());
 
         // Broadcast current assignment state so customer/admin/rider all receive the real rider details.
@@ -486,10 +506,8 @@ export class OrdersService {
         const order = await this.orderModel.findById(orderId);
         if (!order) throw new NotFoundException('Order not found');
 
-        if (!this.validateStatusTransition(order.orderStatus, OrderStatus.ASSIGNED)) {
-            throw new BadRequestException(
-                `Cannot assign rider while order is ${order.orderStatus}`
-            );
+        if (order.orderStatus !== OrderStatus.CONFIRMED) {
+            throw new BadRequestException(`Cannot assign rider while order is ${order.orderStatus}`);
         }
 
         if (order.riderId && order.riderId.toString() !== riderId) {
@@ -504,7 +522,6 @@ export class OrdersService {
             throw new BadRequestException('Rider is not available');
         }
 
-        const previousStatus = order.orderStatus;
         const assignmentTimestamp = new Date();
         const updatedOrder = await this.orderModel.findOneAndUpdate(
             {
@@ -514,16 +531,15 @@ export class OrdersService {
                     { riderId: null },
                     { riderId: new Types.ObjectId(riderId) },
                 ],
-                orderStatus: { $in: [OrderStatus.CONFIRMED, OrderStatus.PACKED, OrderStatus.ASSIGNED] },
+                orderStatus: OrderStatus.CONFIRMED,
             },
             {
                 $set: {
                     riderId: new Types.ObjectId(riderId),
-                    orderStatus: OrderStatus.ASSIGNED,
                 },
                 $push: {
                     timeline: {
-                        status: OrderStatus.ASSIGNED,
+                        status: OrderStatus.CONFIRMED,
                         timestamp: assignmentTimestamp,
                         changedBy: new Types.ObjectId(riderId),
                     },
@@ -544,19 +560,12 @@ export class OrdersService {
         await this.redisService.del(RedisService.Keys.orderStatus(updatedOrder.orderId));
         await this.redisService.set(
             RedisService.Keys.orderStatus(updatedOrder.orderId),
-            OrderStatus.ASSIGNED,
-        );
-
-        await this.logStatusChange(
-            updatedOrder._id,
-            previousStatus,
-            OrderStatus.ASSIGNED,
-            new Types.ObjectId(riderId),
+            OrderStatus.CONFIRMED,
         );
 
         await this.redisService.publish(
             'order-updates',
-            JSON.stringify({ orderId: updatedOrder.orderId, status: OrderStatus.ASSIGNED }),
+            JSON.stringify({ orderId: updatedOrder.orderId, status: OrderStatus.CONFIRMED }),
         );
 
         const trackingOrder = await this.buildRealtimeOrderPayload(updatedOrder._id.toString());
@@ -592,7 +601,7 @@ export class OrdersService {
 
     async autoAssignNearestRider(orderId: string): Promise<OrderDocument | null> {
         const order = await this.orderModel.findById(orderId).lean().exec();
-        if (!order || order.riderId || ![OrderStatus.PACKED, OrderStatus.CONFIRMED].includes(order.orderStatus)) {
+        if (!order || order.riderId || order.orderStatus !== OrderStatus.CONFIRMED) {
             return null;
         }
 

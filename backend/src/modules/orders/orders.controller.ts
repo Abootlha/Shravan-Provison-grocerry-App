@@ -116,13 +116,26 @@ export class OrdersController {
             if (!order.riderId || order.riderId.toString() !== req.user.userId) {
                 throw new ForbiddenException('You can only update orders assigned to you');
             }
+
+            const riderAllowedStatuses = [
+                OrderStatus.PICKED_UP,
+                OrderStatus.OUT_FOR_DELIVERY,
+                OrderStatus.DELIVERED,
+                OrderStatus.CANCELLED,
+            ];
+            if (!riderAllowedStatuses.includes(updateStatusDto.status)) {
+                throw new ForbiddenException('Riders can only update pickup, delivery, or cancellation statuses');
+            }
         }
         // Customers cannot update order status
         else if (req.user.role === UserRole.CUSTOMER) {
             throw new ForbiddenException('Customers cannot update order status');
         }
-        else if (req.user.role === UserRole.ADMIN && updateStatusDto.status === OrderStatus.OUT_FOR_DELIVERY) {
-            throw new ForbiddenException('Admins cannot mark orders as out for delivery');
+        else if (
+            req.user.role === UserRole.ADMIN &&
+            [OrderStatus.ASSIGNED, OrderStatus.PICKED_UP, OrderStatus.OUT_FOR_DELIVERY, OrderStatus.DELIVERED].includes(updateStatusDto.status)
+        ) {
+            throw new ForbiddenException('Admins cannot update rider-controlled delivery statuses');
         }
 
         const updatedOrder = await this.ordersService.updateStatus(
@@ -174,8 +187,8 @@ export class AdminOrdersController {
         @Param('id') id: string,
         @Body() body: { status: OrderStatus; note?: string },
     ) {
-        if (body.status === OrderStatus.OUT_FOR_DELIVERY) {
-            throw new ForbiddenException('Admins cannot mark orders as out for delivery');
+        if ([OrderStatus.ASSIGNED, OrderStatus.PICKED_UP, OrderStatus.OUT_FOR_DELIVERY, OrderStatus.DELIVERED].includes(body.status)) {
+            throw new ForbiddenException('Admins cannot update rider-controlled delivery statuses');
         }
 
         const order = await this.ordersService.updateStatus(

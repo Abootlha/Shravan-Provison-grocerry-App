@@ -69,25 +69,22 @@ const orderClient = new ApiClient(ORDER_SERVICE_URL);
 
 const normalizeStatus = (status?: string) => {
   switch ((status || '').toUpperCase()) {
+    case 'CONFIRMED':
+      return 'confirmed';
     case 'ASSIGNED':
       return 'assigned';
+    case 'PACKED':
+      return 'packed';
+    case 'PICKED_UP':
+      return 'picked_up';
     case 'OUT_FOR_DELIVERY':
-      return 'in_transit';
+      return 'out_for_delivery';
     case 'DELIVERED':
       return 'delivered';
     case 'CANCELLED':
       return 'cancelled';
-    case 'ACCEPTED':
-      return 'accepted';
-    case 'PICKED_UP':
-      return 'picked_up';
-    case 'IN_TRANSIT':
-      return 'in_transit';
-    case 'PENDING':
-    case 'CONFIRMED':
-    case 'PACKED':
     default:
-      return 'pending';
+      return 'confirmed';
   }
 };
 
@@ -111,7 +108,7 @@ const normalizeRider = (record: any): Rider => ({
 const normalizeOrder = (order: any) => {
   const timeline = order.timeline || [];
   const assignedEntry = timeline.find?.((entry: any) => (entry.status || '').toUpperCase() === 'ASSIGNED');
-  const pickedUpEntry = timeline.find?.((entry: any) => (entry.status || '').toUpperCase() === 'OUT_FOR_DELIVERY');
+  const pickedUpEntry = timeline.find?.((entry: any) => (entry.status || '').toUpperCase() === 'PICKED_UP');
   const deliveredEntry = timeline.find?.((entry: any) => (entry.status || '').toUpperCase() === 'DELIVERED');
   const normalizedStatus = normalizeStatus(order.orderStatus || order.status);
 
@@ -239,13 +236,13 @@ export const orderApi = {
 
   updateStatus: async (orderId: string, status: string, _location?: { latitude: number; longitude: number }) => {
     const statusMap: Record<string, string> = {
-      accepted: 'ASSIGNED',
-      picked_up: 'OUT_FOR_DELIVERY',
-      in_transit: 'OUT_FOR_DELIVERY',
+      confirmed: 'CONFIRMED',
+      assigned: 'ASSIGNED',
+      packed: 'PACKED',
+      picked_up: 'PICKED_UP',
+      out_for_delivery: 'OUT_FOR_DELIVERY',
       delivered: 'DELIVERED',
       cancelled: 'CANCELLED',
-      pending: 'PENDING',
-      assigned: 'ASSIGNED',
     };
 
     const response = await orderClient.patch<any>(`/orders/${orderId}/status`, {

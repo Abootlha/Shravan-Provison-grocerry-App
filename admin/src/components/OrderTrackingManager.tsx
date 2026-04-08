@@ -62,13 +62,14 @@ const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactNode; labe
     PENDING: { color: '#3B82F6', icon: <Clock className="w-4 h-4" />, label: 'Pending' },
     CONFIRMED: { color: '#8B5CF6', icon: <CheckCircle className="w-4 h-4" />, label: 'Confirmed' },
     PACKED: { color: '#F97316', icon: <Package className="w-4 h-4" />, label: 'Packed' },
-    ASSIGNED: { color: '#E6A23C', icon: <User className="w-4 h-4" />, label: 'Assigned' },
+    ASSIGNED: { color: '#E6A23C', icon: <User className="w-4 h-4" />, label: 'Rider Accepted' },
+    PICKED_UP: { color: '#0EA5E9', icon: <Package className="w-4 h-4" />, label: 'Picked Up' },
     OUT_FOR_DELIVERY: { color: '#10B981', icon: <Truck className="w-4 h-4" />, label: 'Out for Delivery' },
     DELIVERED: { color: '#22C55E', icon: <CheckCircle className="w-4 h-4" />, label: 'Delivered' },
     CANCELLED: { color: '#EF4444', icon: <XCircle className="w-4 h-4" />, label: 'Cancelled' },
 };
 
-const ACTIVE_STATUSES = ['PENDING', 'CONFIRMED', 'PACKED', 'ASSIGNED', 'OUT_FOR_DELIVERY'];
+const ACTIVE_STATUSES = ['PENDING', 'CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'];
 
 export default function OrderTrackingManager() {
     const [orders, setOrders] = useState<Order[]>([]);

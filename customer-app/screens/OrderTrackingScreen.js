@@ -95,7 +95,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
     useEffect(() => {
         if (!riderLocation || !currentOrder?.deliveryAddress?.coordinates?.coordinates) return;
 
-        if (currentOrder.orderStatus !== 'OUT_FOR_DELIVERY' && currentOrder.orderStatus !== 'ASSIGNED') return;
+        if (!['ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'].includes(currentOrder.orderStatus)) return;
 
         const customerCoords = {
             latitude: currentOrder.deliveryAddress.coordinates.coordinates[1],
@@ -170,7 +170,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
 
     const shouldShowMap = () => {
         if (!currentOrder) return false;
-        return ['CONFIRMED', 'PACKED', 'ASSIGNED', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(currentOrder.orderStatus);
+        return ['CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(currentOrder.orderStatus);
     };
 
     if (isLoading || !currentOrder) {

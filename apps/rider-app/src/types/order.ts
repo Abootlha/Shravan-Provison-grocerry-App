@@ -18,9 +18,11 @@ export interface OrderItem {
 }
 
 export type OrderStatus =
-  | 'pending'
+  | 'confirmed'
   | 'assigned'
-  | 'in_transit'
+  | 'packed'
+  | 'picked_up'
+  | 'out_for_delivery'
   | 'delivered'
   | 'cancelled';
 

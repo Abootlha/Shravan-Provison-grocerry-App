@@ -71,10 +71,10 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
   const handleOpenMapMyIndia = useCallback(async () => {
     const startLat = currentLocation?.latitude || 0;
     const startLng = currentLocation?.longitude || 0;
-    const endLat = activeOrder.status === 'in_transit'
+    const endLat = ['picked_up', 'out_for_delivery'].includes(activeOrder.status)
       ? deliveryCoords.latitude
       : pickupCoords.latitude;
-    const endLng = activeOrder.status === 'in_transit'
+    const endLng = ['picked_up', 'out_for_delivery'].includes(activeOrder.status)
       ? deliveryCoords.longitude
       : pickupCoords.longitude;
 
@@ -91,12 +91,12 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
     }
   }, [currentLocation, activeOrder.status, pickupCoords, deliveryCoords]);
 
-  const handleMarkPickedUp = useCallback(async () => {
+  const handleMarkOutForDelivery = useCallback(async () => {
     setLoading(true);
-    const result = await updateStatus(order.id, 'in_transit', currentLocation ?? undefined);
+    const result = await updateStatus(order.id, 'out_for_delivery', currentLocation ?? undefined);
     setLoading(false);
     if (result) {
-      Alert.alert('Success', 'Order marked as picked up!');
+      Alert.alert('Success', 'Order marked as out for delivery!');
     }
   }, [updateStatus, order.id, currentLocation]);
 
@@ -158,7 +158,7 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
           </TouchableOpacity>
           <View style={styles.headerContent}>
             <Text style={styles.headerTitle}>
-              {activeOrder.status === 'in_transit' ? 'Delivery Location' : 'Store Pickup'}
+              {['picked_up', 'out_for_delivery'].includes(activeOrder.status) ? 'Delivery Location' : 'Store Pickup'}
             </Text>
             <View style={styles.liveIndicator}>
               <View style={styles.liveDot} />
@@ -175,7 +175,7 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
           <View>
             <Text style={styles.orderNumber}>#{order.orderNumber}</Text>
             <Text style={styles.statusBadge}>
-              {activeOrder.status === 'in_transit' ? 'OUT FOR DELIVERY' : 'HEADING TO STORE'}
+              {['picked_up', 'out_for_delivery'].includes(activeOrder.status) ? 'HEADING TO CUSTOMER' : 'HEADING TO STORE'}
             </Text>
           </View>
           <TouchableOpacity style={styles.callButton}>
@@ -185,9 +185,9 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
 
         <View style={styles.addressSection}>
           <View style={styles.addressRow}>
-            <View style={[styles.addressDot, { backgroundColor: activeOrder.status === 'in_transit' ? ZEPTO_GREEN : '#333' }]} />
+            <View style={[styles.addressDot, { backgroundColor: ['picked_up', 'out_for_delivery'].includes(activeOrder.status) ? ZEPTO_GREEN : '#333' }]} />
             <Text style={styles.addressText} numberOfLines={2}>
-              {activeOrder.status === 'in_transit'
+              {['picked_up', 'out_for_delivery'].includes(activeOrder.status)
                 ? order.delivery.address.full
                 : order.pickup.address.full}
             </Text>
@@ -206,18 +206,32 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
           {activeOrder.status === 'assigned' && (
             <TouchableOpacity
               style={[styles.actionButton, styles.pickupButton]}
-              onPress={handleMarkPickedUp}
+              onPress={() => Alert.alert('Waiting for packing', 'The store has not packed this order yet. You will be notified once it is ready for pickup.')}
               disabled={loading}
             >
               {loading ? (
                 <ActivityIndicator color="white" />
               ) : (
-                <Text style={styles.actionButtonText}>PICKED UP</Text>
+                <Text style={styles.actionButtonText}>WAIT FOR PACKING</Text>
               )}
             </TouchableOpacity>
           )}
 
-          {activeOrder.status === 'in_transit' && (
+          {activeOrder.status === 'packed' && (
+            <TouchableOpacity
+              style={[styles.actionButton, styles.pickupButton]}
+              onPress={handleMarkOutForDelivery}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Text style={styles.actionButtonText}>START DELIVERY</Text>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {(activeOrder.status === 'picked_up' || activeOrder.status === 'out_for_delivery') && (
             <TouchableOpacity
               style={[styles.actionButton, styles.deliverButton]}
               onPress={() => setOtpModalVisible(true)}

@@ -26,12 +26,23 @@ interface Order {
     riderId?: { name: string; phone?: string };
 }
 
-const STATUS_OPTIONS = ['PENDING', 'CONFIRMED', 'PACKED', 'ASSIGNED', 'DELIVERED', 'CANCELLED'];
+const NEXT_STATUS: Record<string, string[]> = {
+    PENDING: ['CONFIRMED'],
+    CONFIRMED: [],
+    ASSIGNED: ['PACKED'],
+    PACKED: [],
+    PICKED_UP: [],
+    OUT_FOR_DELIVERY: [],
+    DELIVERED: [],
+    CANCELLED: [],
+};
 
 const STATUS_CONFIG: Record<string, { color: string; glow: string; icon: React.ReactNode; label: string }> = {
     PENDING: { color: '#3B82F6', glow: 'rgba(59, 130, 246, 0.2)', icon: <Clock className="w-4 h-4" />, label: 'Placed' },
     CONFIRMED: { color: '#8B5CF6', glow: 'rgba(139, 92, 246, 0.2)', icon: <CheckCircle className="w-4 h-4" />, label: 'Confirmed' },
     PACKED: { color: '#F97316', glow: 'rgba(249, 115, 22, 0.2)', icon: <Package className="w-4 h-4" />, label: 'Packed' },
+    ASSIGNED: { color: '#E6A23C', glow: 'rgba(230, 162, 60, 0.2)', icon: <Navigation className="w-4 h-4" />, label: 'Rider Accepted' },
+    PICKED_UP: { color: '#0EA5E9', glow: 'rgba(14, 165, 233, 0.2)', icon: <Package className="w-4 h-4" />, label: 'Picked Up' },
     OUT_FOR_DELIVERY: { color: '#E6A23C', glow: 'rgba(230, 162, 60, 0.2)', icon: <Truck className="w-4 h-4" />, label: 'Out for Delivery' },
     DELIVERED: { color: '#22C55E', glow: 'rgba(34, 197, 94, 0.2)', icon: <CheckCircle className="w-4 h-4" />, label: 'Delivered' },
     CANCELLED: { color: '#EF4444', glow: 'rgba(239, 68, 68, 0.2)', icon: <XCircle className="w-4 h-4" />, label: 'Cancelled' },
@@ -44,7 +55,7 @@ interface OrderDetailProps {
 }
 
 function OrderTimeline({ currentStatus }: { currentStatus: string }) {
-    const steps = ['PENDING', 'CONFIRMED', 'PACKED', 'OUT_FOR_DELIVERY', 'DELIVERED'];
+    const steps = ['PENDING', 'CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'DELIVERED'];
     const currentIndex = steps.indexOf(currentStatus);
     const isCancelled = currentStatus === 'CANCELLED';
 
@@ -165,7 +176,7 @@ export default function OrderDetail({ order, onClose, onStatusChange }: OrderDet
                                 Update Status
                             </h3>
                             <div className="flex flex-wrap gap-2">
-                                {STATUS_OPTIONS.filter(s => s !== order.orderStatus).map((status) => {
+                                {(NEXT_STATUS[order.orderStatus] || []).concat('CANCELLED').map((status) => {
                                     const statusConfig = STATUS_CONFIG[status];
                                     return (
                                         <Button

@@ -53,7 +53,7 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
   }, []);
 
   const activeOrder = currentOrder?.id === orderId ? currentOrder : order;
-  const activeStatusLabel = ORDER_STATUS_LABELS[activeOrder?.status || 'pending'] || 'Pending';
+  const activeStatusLabel = ORDER_STATUS_LABELS[activeOrder?.status || 'confirmed'] || 'Awaiting Acceptance';
 
   useEffect(() => {
     if (!activeOrder || activeOrder.status !== 'assigned') {
@@ -158,7 +158,7 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
     }
 
     setLoading(true);
-    const result = await updateStatus(orderId, 'in_transit', {
+    const result = await updateStatus(orderId, 'picked_up', {
       latitude: riderCoords.lat,
       longitude: riderCoords.lng,
     });
@@ -211,7 +211,7 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
           </View>
         </View>
 
-        {activeOrder.status !== 'pending' && (
+        {activeOrder.status !== 'confirmed' && (
           <View style={styles.stepperContainer}>
             <StatusStepper currentStatus={activeOrder.status} />
           </View>
@@ -351,7 +351,7 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
       </ScrollView>
 
       <View style={styles.footer}>
-        {activeOrder.status === 'pending' && (
+        {activeOrder.status === 'confirmed' && (
           <View style={styles.actionsRow}>
             <TouchableOpacity
               style={[styles.button, styles.rejectButton]}
@@ -393,7 +393,17 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
           </TouchableOpacity>
         )}
 
-        {activeOrder.status === 'in_transit' && (
+        {activeOrder.status === 'packed' && (
+          <TouchableOpacity
+            style={[styles.fullButton, { backgroundColor: ZEPTO_GREEN }]}
+            onPress={handleMarkPickedUp}
+          >
+            <MaterialCommunityIcons name="package-variant-closed" size={20} color="white" />
+            <Text style={styles.fullButtonText}>MARK PICKED UP</Text>
+          </TouchableOpacity>
+        )}
+
+        {(activeOrder.status === 'picked_up' || activeOrder.status === 'out_for_delivery') && (
           <View style={styles.actionsRow}>
             <TouchableOpacity
               style={[styles.button, { backgroundColor: '#333' }]}
@@ -413,7 +423,7 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
               {loading ? (
                 <ActivityIndicator color="white" />
               ) : (
-                <Text style={styles.buttonText}>CONTINUE</Text>
+                <Text style={styles.buttonText}>CONTINUE DELIVERY</Text>
               )}
             </TouchableOpacity>
           </View>

@@ -6,8 +6,9 @@ export type OrderDocument = Order & Document;
 export enum OrderStatus {
     PENDING = 'PENDING',
     CONFIRMED = 'CONFIRMED',
-    PACKED = 'PACKED',
     ASSIGNED = 'ASSIGNED',
+    PACKED = 'PACKED',
+    PICKED_UP = 'PICKED_UP',
     OUT_FOR_DELIVERY = 'OUT_FOR_DELIVERY',
     DELIVERED = 'DELIVERED',
     CANCELLED = 'CANCELLED',
@@ -183,9 +184,10 @@ OrderSchema.pre('save', async function () {
 // Valid status transitions
 export const ORDER_STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
     [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
-    [OrderStatus.CONFIRMED]: [OrderStatus.PACKED, OrderStatus.ASSIGNED, OrderStatus.CANCELLED],
-    [OrderStatus.PACKED]: [OrderStatus.ASSIGNED, OrderStatus.CANCELLED],
-    [OrderStatus.ASSIGNED]: [OrderStatus.OUT_FOR_DELIVERY, OrderStatus.CANCELLED],
+    [OrderStatus.CONFIRMED]: [OrderStatus.ASSIGNED, OrderStatus.CANCELLED],
+    [OrderStatus.ASSIGNED]: [OrderStatus.PACKED, OrderStatus.CANCELLED],
+    [OrderStatus.PACKED]: [OrderStatus.PICKED_UP, OrderStatus.CANCELLED],
+    [OrderStatus.PICKED_UP]: [OrderStatus.OUT_FOR_DELIVERY, OrderStatus.CANCELLED],
     [OrderStatus.OUT_FOR_DELIVERY]: [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
     [OrderStatus.DELIVERED]: [],
     [OrderStatus.CANCELLED]: [],

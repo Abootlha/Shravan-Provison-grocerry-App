@@ -31,10 +31,10 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
   const handleOpenMapMyIndia = useCallback(async () => {
     const startLat = currentLocation?.latitude || 0;
     const startLng = currentLocation?.longitude || 0;
-    const endLat = activeOrder.status === 'in_transit'
+    const endLat = ['picked_up', 'out_for_delivery'].includes(activeOrder.status)
       ? deliveryCoords.latitude
       : pickupCoords.latitude;
-    const endLng = activeOrder.status === 'in_transit'
+    const endLng = ['picked_up', 'out_for_delivery'].includes(activeOrder.status)
       ? deliveryCoords.longitude
       : pickupCoords.longitude;
 
@@ -51,12 +51,12 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
     }
   }, [currentLocation, activeOrder.status, pickupCoords, deliveryCoords]);
 
-  const handleMarkPickedUp = useCallback(async () => {
+  const handleStartDelivery = useCallback(async () => {
     setLoading(true);
-    const result = await updateStatus(order.id, 'in_transit', currentLocation ?? undefined);
+    const result = await updateStatus(order.id, 'out_for_delivery', currentLocation ?? undefined);
     setLoading(false);
     if (result) {
-      Alert.alert('Success', 'Order marked as picked up!');
+      Alert.alert('Success', 'Order marked as out for delivery!');
     }
   }, [updateStatus, order.id, currentLocation]);
 
@@ -84,7 +84,7 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
           </TouchableOpacity>
           <View style={styles.headerContent}>
             <Text style={styles.headerTitle}>
-              {activeOrder.status === 'in_transit' ? 'Navigate to Delivery' : 'Navigate to Pickup'}
+              {['picked_up', 'out_for_delivery'].includes(activeOrder.status) ? 'Navigate to Delivery' : 'Navigate to Pickup'}
             </Text>
             <Text style={styles.headerSubtitle}>
               Web preview shows route details. Native app opens turn-by-turn navigation.
@@ -123,21 +123,21 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
           <Text style={styles.mapButtonText}>Open in MapMyIndia</Text>
         </TouchableOpacity>
 
-        {activeOrder.status === 'assigned' && (
+        {activeOrder.status === 'packed' && (
           <TouchableOpacity
             style={[styles.actionButton, styles.pickupButton]}
-            onPress={handleMarkPickedUp}
+            onPress={handleStartDelivery}
             disabled={loading}
           >
             {loading ? (
               <ActivityIndicator color={COLORS.surface} />
             ) : (
-              <Text style={styles.actionButtonText}>Mark as Picked Up</Text>
+              <Text style={styles.actionButtonText}>Start Delivery</Text>
             )}
           </TouchableOpacity>
         )}
 
-        {activeOrder.status === 'in_transit' && (
+        {(activeOrder.status === 'picked_up' || activeOrder.status === 'out_for_delivery') && (
           <TouchableOpacity
             style={[styles.actionButton, styles.deliverButton]}
             onPress={handleMarkDelivered}

@@ -29,7 +29,7 @@ export const useOrders = () => {
         return;
       }
 
-      if (String(data.status).toUpperCase() === 'ASSIGNED' && data.order) {
+      if (['CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'].includes(String(data.status).toUpperCase()) && data.order) {
         dispatch(addAvailableOrder(data.order as AvailableOrder));
       }
     };

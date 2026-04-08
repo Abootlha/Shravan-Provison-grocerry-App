@@ -22,7 +22,7 @@ class SocketService {
 
     this.socket = io(SOCKET_URL, {
       auth: { token },
-      transports: ['websocket'],
+      transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 10,
       reconnectionDelay: 2000,
@@ -98,26 +98,26 @@ class SocketService {
   }
 
   onNewOrderAssignment(handler: (data: NewOrderAssignment) => void): void {
-    this.socket?.on('newOrderAssignment', handler);
+    this.on('newOrderAssignment', handler as SocketEventHandler);
   }
 
   offNewOrderAssignment(handler?: (data: NewOrderAssignment) => void): void {
     if (handler) {
-      this.socket?.off('newOrderAssignment', handler);
+      this.off('newOrderAssignment', handler as SocketEventHandler);
     } else {
-      this.socket?.off('newOrderAssignment');
+      this.off('newOrderAssignment');
     }
   }
 
   onOrderStatusUpdate(handler: (data: OrderStatusUpdate) => void): void {
-    this.socket?.on('orderStatusUpdate', handler);
+    this.on('orderStatusUpdate', handler as SocketEventHandler);
   }
 
   offOrderStatusUpdate(handler?: (data: OrderStatusUpdate) => void): void {
     if (handler) {
-      this.socket?.off('orderStatusUpdate', handler);
+      this.off('orderStatusUpdate', handler as SocketEventHandler);
     } else {
-      this.socket?.off('orderStatusUpdate');
+      this.off('orderStatusUpdate');
     }
   }
 
