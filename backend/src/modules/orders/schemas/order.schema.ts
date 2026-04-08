@@ -132,7 +132,7 @@ export class Order {
     @Prop({ type: [TimelineEntry], default: [] })
     timeline!: TimelineEntry[];
 
-    @Prop({ type: Types.ObjectId, ref: 'User', index: true })
+    @Prop({ type: Types.ObjectId, ref: 'Rider', index: true })
     riderId?: Types.ObjectId;
 
     @Prop()
