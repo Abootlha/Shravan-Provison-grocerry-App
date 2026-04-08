@@ -329,11 +329,11 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
               <Text style={styles.earningLabel}>Delivery Fee</Text>
               <Text style={styles.earningValue}>₹{activeOrder.deliveryFee.toFixed(2)}</Text>
             </View>
-            {activeOrder.tip && activeOrder.tip > 0 && (
+            {Number(activeOrder.tip || 0) > 0 && (
               <View style={styles.earningRow}>
                 <Text style={styles.earningLabel}>Customer Tip</Text>
                 <Text style={[styles.earningValue, { color: ZEPTO_GREEN }]}>
-                  +₹{activeOrder.tip.toFixed(2)}
+                  +₹{Number(activeOrder.tip || 0).toFixed(2)}
                 </Text>
               </View>
             )}
@@ -341,7 +341,7 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
             <View style={styles.earningRow}>
               <Text style={styles.totalEarningLabel}>Estimated Earning</Text>
               <Text style={styles.totalEarningValue}>
-                ₹{(activeOrder.deliveryFee + (activeOrder.tip || 0)).toFixed(2)}
+                ₹{(Number(activeOrder.deliveryFee || 0) + Number(activeOrder.tip || 0)).toFixed(2)}
               </Text>
             </View>
           </View>

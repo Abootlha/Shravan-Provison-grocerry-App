@@ -86,6 +86,7 @@ export default function OrderTrackingManager() {
     const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected' | 'reconnecting'>('disconnected');
     const [error, setError] = useState<string | null>(null);
     const socketRef = useRef<Socket | null>(null);
+    const selectedOrderRef = useRef<Order | null>(null);
     const reconnectAttempts = useRef(0);
     const maxReconnectAttempts = 5;
 
@@ -105,6 +106,22 @@ export default function OrderTrackingManager() {
         fetchOrders();
     }, [page, statusFilter]);
 
+    useEffect(() => {
+        selectedOrderRef.current = selectedOrder;
+    }, [selectedOrder]);
+
+    useEffect(() => {
+        if (!socketRef.current?.connected) {
+            return;
+        }
+
+        orders.forEach((order) => {
+            if (ACTIVE_STATUSES.includes(order.orderStatus)) {
+                socketRef.current?.emit('joinOrderRoom', { orderId: order._id });
+            }
+        });
+    }, [orders, connectionStatus]);
+
     const initializeSocket = () => {
         const token = localStorage.getItem('adminToken');
         if (!token) return;
@@ -113,7 +130,7 @@ export default function OrderTrackingManager() {
 
         const socket = io(import.meta.env.PUBLIC_TRACKING_SERVICE_URL || 'http://localhost:3000', {
             auth: { token },
-            transports: ['websocket'],
+            transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
@@ -178,7 +195,7 @@ export default function OrderTrackingManager() {
                     }
                     : order
             ));
-            if (selectedOrder?._id === data.orderId) {
+            if (selectedOrderRef.current?._id === data.orderId) {
                 setSelectedOrder(prev => prev ? {
                     ...prev,
                     ...(data.order || {}),
@@ -245,13 +262,6 @@ export default function OrderTrackingManager() {
             setTotalPages(data.pagination?.pages || 1);
 
             // Join socket rooms for active orders
-            if (socketRef.current?.connected) {
-                data.orders?.forEach((order: Order) => {
-                    if (ACTIVE_STATUSES.includes(order.orderStatus)) {
-                        socketRef.current?.emit('joinOrderRoom', { orderId: order._id });
-                    }
-                });
-            }
         } catch (error) {
             console.error('Error fetching orders:', error);
             setError('Failed to fetch orders. Please try again.');
