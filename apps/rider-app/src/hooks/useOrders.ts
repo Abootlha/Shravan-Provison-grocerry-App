@@ -10,6 +10,7 @@ import {
   removeAvailableOrder,
 } from '../store/slices/orderSlice';
 import { socketService } from '../services/socket';
+import { normalizeOrder } from '../services/api';
 import type { Order, AvailableOrder, OrderStatus } from '../types/order';
 
 export const useOrders = () => {
@@ -20,27 +21,34 @@ export const useOrders = () => {
 
   useEffect(() => {
     const handleNewOrder = (data: { order: AvailableOrder }) => {
-      dispatch(addAvailableOrder(data.order));
+      dispatch(addAvailableOrder(normalizeOrder(data.order) as AvailableOrder));
     };
 
     const handleStatusUpdate = (data: { orderId: string; status: OrderStatus; order?: Order }) => {
+      const normalizedOrder = data.order ? normalizeOrder(data.order) : null;
+
       if (data.orderId === currentOrder?.id && data.order) {
-        dispatch(setCurrentOrder(data.order));
+        dispatch(setCurrentOrder(normalizedOrder));
         return;
       }
 
-      if (['CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'].includes(String(data.status).toUpperCase()) && data.order) {
-        dispatch(addAvailableOrder(data.order as AvailableOrder));
+      if (
+        ['CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'].includes(String(data.status).toUpperCase()) &&
+        normalizedOrder
+      ) {
+        dispatch(addAvailableOrder(normalizedOrder as AvailableOrder));
       }
     };
 
     const handlePackedUpdate = (data: { orderId: string; status: string; order?: Order }) => {
+      const normalizedOrder = data.order ? normalizeOrder(data.order) : null;
+
       if (data.orderId === currentOrder?.id && data.order) {
-        dispatch(setCurrentOrder(data.order));
+        dispatch(setCurrentOrder(normalizedOrder));
       }
 
-      if (data.order) {
-        dispatch(addAvailableOrder(data.order as AvailableOrder));
+      if (normalizedOrder) {
+        dispatch(addAvailableOrder(normalizedOrder as AvailableOrder));
       }
     };
 

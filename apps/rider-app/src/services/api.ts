@@ -2,6 +2,7 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import { AUTH_SERVICE_URL, ORDER_SERVICE_URL, RIDER_SERVICE_URL } from '../utils/constants';
 import { storage } from './storage';
 import type { Rider } from '../types/rider';
+import type { Order, OrderStatus } from '../types/order';
 
 class ApiClient {
   private client: AxiosInstance;
@@ -67,7 +68,7 @@ const authClient = new ApiClient(AUTH_SERVICE_URL);
 const riderClient = new ApiClient(RIDER_SERVICE_URL);
 const orderClient = new ApiClient(ORDER_SERVICE_URL);
 
-const normalizeStatus = (status?: string) => {
+const normalizeStatus = (status?: string): OrderStatus => {
   switch ((status || '').toUpperCase()) {
     case 'CONFIRMED':
       return 'confirmed';
@@ -105,7 +106,7 @@ const normalizeRider = (record: any): Rider => ({
   createdAt: record.createdAt || new Date().toISOString(),
 });
 
-const normalizeOrder = (order: any) => {
+export const normalizeOrder = (order: any): Order => {
   const timeline = order.timeline || [];
   const assignedEntry = timeline.find?.((entry: any) => (entry.status || '').toUpperCase() === 'ASSIGNED');
   const pickedUpEntry = timeline.find?.((entry: any) => (entry.status || '').toUpperCase() === 'PICKED_UP');
@@ -117,24 +118,24 @@ const normalizeOrder = (order: any) => {
     orderNumber: order.orderId || order.id || order._id,
     status: normalizedStatus || 'pending',
     pickup: {
-      name: order.storeName || 'Store',
+      name: order.pickup?.name || order.storeName || 'Store',
       phone: order.storePhone || '',
       address: {
-        full: order.storeAddress || '',
+        full: order.pickup?.address?.full || order.storeAddress || '',
         coordinates: {
-          latitude: order.storeLocation?.latitude || 26.7606,
-          longitude: order.storeLocation?.longitude || 83.3732,
+          latitude: order.pickup?.address?.coordinates?.latitude || order.storeLocation?.latitude || 26.7606,
+          longitude: order.pickup?.address?.coordinates?.longitude || order.storeLocation?.longitude || 83.3732,
         },
       },
     },
     delivery: {
-      name: order.customerName || 'Customer',
-      phone: order.customerPhone || '',
+      name: order.delivery?.name || order.customerName || 'Customer',
+      phone: order.delivery?.phone || order.customerPhone || '',
       address: {
-        full: order.deliveryAddress?.address || '',
+        full: order.delivery?.address?.full || order.deliveryAddress?.address || '',
         coordinates: {
-          latitude: order.deliveryAddress?.coordinates?.coordinates?.[1] || 0,
-          longitude: order.deliveryAddress?.coordinates?.coordinates?.[0] || 0,
+          latitude: order.delivery?.address?.coordinates?.latitude || order.deliveryAddress?.coordinates?.coordinates?.[1] || 0,
+          longitude: order.delivery?.address?.coordinates?.longitude || order.deliveryAddress?.coordinates?.coordinates?.[0] || 0,
         },
       },
     },

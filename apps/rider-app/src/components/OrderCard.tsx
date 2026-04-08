@@ -23,6 +23,10 @@ export const OrderCard: React.FC<OrderCardProps> = ({
   onReject,
 }) => {
   const statusLabel = ORDER_STATUS_LABELS[order.status || 'pending'] || 'Pending';
+  const pickupName = order.pickup?.name || 'Store';
+  const deliveryAddress = order.delivery?.address?.full || order.delivery?.name || 'Customer address pending';
+  const itemCount = Array.isArray(order.items) ? order.items.length : 0;
+  const deliveryFee = Number(order.deliveryFee || 0);
 
   return (
     <TouchableOpacity
@@ -50,11 +54,11 @@ export const OrderCard: React.FC<OrderCardProps> = ({
           <View style={styles.addressDetails}>
             <View style={styles.point}>
               <Text style={styles.pointLabel}>PICKUP FROM</Text>
-              <Text style={styles.pointText} numberOfLines={1}>{order.pickup.name}</Text>
+              <Text style={styles.pointText} numberOfLines={1}>{pickupName}</Text>
             </View>
             <View style={styles.point}>
               <Text style={styles.pointLabel}>DELIVER TO</Text>
-              <Text style={styles.pointText} numberOfLines={1}>{order.delivery.address.full}</Text>
+              <Text style={styles.pointText} numberOfLines={1}>{deliveryAddress}</Text>
             </View>
           </View>
         </View>
@@ -63,13 +67,13 @@ export const OrderCard: React.FC<OrderCardProps> = ({
       <View style={styles.statsRow}>
         <View style={styles.stat}>
           <MaterialCommunityIcons name="package-variant" size={14} color="#888" />
-          <Text style={styles.statText}>{order.items.length} Items</Text>
+          <Text style={styles.statText}>{itemCount} Items</Text>
         </View>
         <View style={styles.statDot} />
         <View style={styles.stat}>
           <MaterialCommunityIcons name="wallet-outline" size={14} color={ZEPTO_GREEN} />
           <Text style={[styles.statText, { color: ZEPTO_GREEN, fontWeight: '800' }]}>
-            Earn ₹{order.deliveryFee.toFixed(0)}
+            Earn ₹{deliveryFee.toFixed(0)}
           </Text>
         </View>
       </View>
