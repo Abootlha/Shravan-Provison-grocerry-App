@@ -121,6 +121,18 @@ class SocketService {
     }
   }
 
+  onOrderPacked(handler: (data: { orderId: string; status: string; order?: unknown }) => void): void {
+    this.on('orderPacked', handler as SocketEventHandler);
+  }
+
+  offOrderPacked(handler?: (data: { orderId: string; status: string; order?: unknown }) => void): void {
+    if (handler) {
+      this.off('orderPacked', handler as SocketEventHandler);
+    } else {
+      this.off('orderPacked');
+    }
+  }
+
   sendLocationUpdate(location: RiderLocation): void {
     this.emit('riderLocationUpdate', location);
   }

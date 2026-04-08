@@ -1,4 +1,5 @@
 import * as Linking from 'expo-linking';
+import { Platform } from 'react-native';
 import { MAPMYINDIA_APP_ID, MAPMYINDIA_APP_CODE } from './constants';
 
 interface MapMyIndiaRouteParams {
@@ -30,8 +31,14 @@ export const openMapMyIndiaNavigation = async ({
   if (canOpen) {
     await Linking.openURL(url);
   } else {
-    const webUrl = `https://www.mapmyindia.com/secure-web/Route/${startLat},${startLng}/${endLat},${endLng}/${vehicleType}`;
-    await Linking.openURL(webUrl);
+    const googleMapsUrl = Platform.OS === 'ios'
+      ? `http://maps.apple.com/?saddr=${startLat},${startLng}&daddr=${endLat},${endLng}&dirflg=d`
+      : `https://www.google.com/maps/dir/?api=1&origin=${startLat},${startLng}&destination=${endLat},${endLng}&travelmode=driving`;
+
+    const fallbackUrl = `https://www.mapmyindia.com/secure-web/Route/${startLat},${startLng}/${endLat},${endLng}/${vehicleType}`;
+
+    const canOpenGoogle = await Linking.canOpenURL(googleMapsUrl);
+    await Linking.openURL(canOpenGoogle ? googleMapsUrl : fallbackUrl);
   }
 };
 

@@ -91,7 +91,16 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
     }
   }, [currentLocation, activeOrder.status, pickupCoords, deliveryCoords]);
 
-  const handleMarkOutForDelivery = useCallback(async () => {
+  const handleMarkPickedUp = useCallback(async () => {
+    setLoading(true);
+    const result = await updateStatus(order.id, 'picked_up', currentLocation ?? undefined);
+    setLoading(false);
+    if (result) {
+      Alert.alert('Success', 'Order marked as picked up!');
+    }
+  }, [updateStatus, order.id, currentLocation]);
+
+  const handleStartDelivery = useCallback(async () => {
     setLoading(true);
     const result = await updateStatus(order.id, 'out_for_delivery', currentLocation ?? undefined);
     setLoading(false);
@@ -220,7 +229,21 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
           {activeOrder.status === 'packed' && (
             <TouchableOpacity
               style={[styles.actionButton, styles.pickupButton]}
-              onPress={handleMarkOutForDelivery}
+              onPress={handleMarkPickedUp}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Text style={styles.actionButtonText}>MARK PICKED UP</Text>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {activeOrder.status === 'picked_up' && (
+            <TouchableOpacity
+              style={[styles.actionButton, styles.pickupButton]}
+              onPress={handleStartDelivery}
               disabled={loading}
             >
               {loading ? (
@@ -231,7 +254,7 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
             </TouchableOpacity>
           )}
 
-          {(activeOrder.status === 'picked_up' || activeOrder.status === 'out_for_delivery') && (
+          {activeOrder.status === 'out_for_delivery' && (
             <TouchableOpacity
               style={[styles.actionButton, styles.deliverButton]}
               onPress={() => setOtpModalVisible(true)}

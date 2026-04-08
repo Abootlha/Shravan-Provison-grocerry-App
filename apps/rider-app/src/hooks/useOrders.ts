@@ -34,12 +34,24 @@ export const useOrders = () => {
       }
     };
 
+    const handlePackedUpdate = (data: { orderId: string; status: string; order?: Order }) => {
+      if (data.orderId === currentOrder?.id && data.order) {
+        dispatch(setCurrentOrder(data.order));
+      }
+
+      if (data.order) {
+        dispatch(addAvailableOrder(data.order as AvailableOrder));
+      }
+    };
+
     socketService.onNewOrderAssignment(handleNewOrder as never);
     socketService.onOrderStatusUpdate(handleStatusUpdate as never);
+    socketService.onOrderPacked(handlePackedUpdate as never);
 
     return () => {
       socketService.offNewOrderAssignment(handleNewOrder as never);
       socketService.offOrderStatusUpdate(handleStatusUpdate as never);
+      socketService.offOrderPacked(handlePackedUpdate as never);
     };
   }, [dispatch, currentOrder?.id]);
 
