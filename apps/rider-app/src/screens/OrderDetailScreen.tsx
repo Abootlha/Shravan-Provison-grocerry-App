@@ -300,7 +300,7 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({
           <View style={styles.itemsCard}>
             {activeOrder.items.map((item, index) => (
               <View
-                key={item.id}
+                key={item.id ?? index}
                 style={[
                   styles.itemRow,
                   index < activeOrder.items.length - 1 && styles.itemBorder,
