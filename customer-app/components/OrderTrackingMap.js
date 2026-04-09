@@ -46,47 +46,6 @@ const CustomerMarkerView = () => (
     </View>
 );
 
-const createParabolicCurve = (start, end, curvature = 0.3) => {
-    if (!start || !end) return [];
-
-    const lat1 = start.latitude;
-    const lon1 = start.longitude;
-    const lat2 = end.latitude;
-    const lon2 = end.longitude;
-
-    const midLat = (lat1 + lat2) / 2;
-    const midLon = (lon1 + lon2) / 2;
-
-    const dLat = lat2 - lat1;
-    const dLon = lon2 - lon1;
-
-    let nLat = -dLon * curvature;
-    let nLon = dLat * curvature;
-
-    if (nLat < 0) {
-        nLat = -nLat;
-        nLon = -nLon;
-    } else if (nLat === 0 && nLon < 0) {
-        nLon = -nLon;
-    }
-
-    const cLat = midLat + nLat;
-    const cLon = midLon + nLon;
-
-    const points = [];
-    for (let i = 0; i <= 50; i++) {
-        const t = i / 50;
-        const mt = 1 - t;
-
-        const lat = mt * mt * lat1 + 2 * mt * t * cLat + t * t * lat2;
-        const lon = mt * mt * lon1 + 2 * mt * t * cLon + t * t * lon2;
-
-        points.push({ latitude: lat, longitude: lon });
-    }
-
-    return points;
-};
-
 const OrderTrackingMap = ({
     riderLocation,
     customerLocation,
@@ -204,19 +163,6 @@ const OrderTrackingMap = ({
                         strokeWidth={4}
                         lineDashPattern={[0]}
                         lineCap="round"
-                    />
-                )}
-
-                {(!routeCoordinates || routeCoordinates.length === 0) && storeLocation && customerLocation && (
-                    <Polyline
-                        coordinates={createParabolicCurve(
-                            activeLeg === 'to_customer' && riderLocation ? riderLocation : storeLocation,
-                            customerLocation,
-                            0.25
-                        )}
-                        strokeColor="#616161"
-                        strokeWidth={2}
-                        lineDashPattern={[5, 5]}
                     />
                 )}
 

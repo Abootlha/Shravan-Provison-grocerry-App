@@ -22,7 +22,6 @@ import OrderTrackingMap from '../components/OrderTrackingMap';
 import TrackingBottomSheet from '../components/TrackingBottomSheet';
 import {
     fetchRoute,
-    generateFallbackRoute,
     calculateBearing,
 } from '../services/directionsService';
 import {
@@ -175,11 +174,11 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
                     durationValue: result.durationValue,
                 }));
             } else {
-                const fallback = generateFallbackRoute(origin, destination);
-                dispatch(setRouteCoordinates(fallback));
+                dispatch(setRouteCoordinates([]));
             }
         } catch (err) {
             console.warn('Failed to fetch route:', err);
+            dispatch(setRouteCoordinates([]));
         }
     };
 
