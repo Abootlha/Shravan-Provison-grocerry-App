@@ -26,6 +26,7 @@ const SNAP_POINTS = {
 };
 
 const STATUS_STEPS = [
+    { key: 'PENDING', label: 'Placed', icon: 'clipboard-check-outline' },
     { key: 'CONFIRMED', label: 'Confirmed', icon: 'store-check' },
     { key: 'ASSIGNED', label: 'Rider accepted', icon: 'account-check' },
     { key: 'PACKED', label: 'Packed', icon: 'package-variant' },
@@ -214,12 +215,13 @@ const TrackingBottomSheet = ({
     };
 
     const getStepIndex = (status) => {
-        if (['PENDING', 'CONFIRMED'].includes(status)) return 0;
-        if (status === 'ASSIGNED') return 1;
-        if (status === 'PACKED') return 2;
-        if (status === 'PICKED_UP') return 3;
-        if (status === 'OUT_FOR_DELIVERY') return 4;
-        if (['ARRIVED', 'DELIVERED'].includes(status)) return 5;
+        if (status === 'PENDING') return 0;
+        if (status === 'CONFIRMED') return 1;
+        if (status === 'ASSIGNED') return 2;
+        if (status === 'PACKED') return 3;
+        if (status === 'PICKED_UP') return 4;
+        if (status === 'OUT_FOR_DELIVERY') return 5;
+        if (['ARRIVED', 'DELIVERED'].includes(status)) return 6;
         return -1;
     };
 

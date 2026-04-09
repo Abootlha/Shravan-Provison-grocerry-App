@@ -80,6 +80,11 @@ const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactNode; labe
     DELIVERED: { color: '#22C55E', icon: <CheckCircle className="w-4 h-4" />, label: 'Delivered' },
     CANCELLED: { color: '#EF4444', icon: <XCircle className="w-4 h-4" />, label: 'Cancelled' },
 };
+const STATUS_ACTION_LABELS: Record<string, string> = {
+    CONFIRMED: 'Confirm',
+    PACKED: 'Pack',
+    CANCELLED: 'Cancel',
+};
 
 const ACTIVE_STATUSES = ['PENDING', 'CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'];
 const TRACKING_SOCKET_URL = import.meta.env.PUBLIC_TRACKING_SERVICE_URL || 'http://localhost:3000/tracking';
@@ -702,6 +707,7 @@ export default function OrderTrackingManager() {
                                                 .filter(s => s !== selectedOrder.orderStatus)
                                                 .map((status) => {
                                                     const config = STATUS_CONFIG[status];
+                                                    const actionLabel = STATUS_ACTION_LABELS[status] || config?.label || status;
                                                     return (
                                                         <Button
                                                             key={status}
@@ -712,10 +718,10 @@ export default function OrderTrackingManager() {
                                                                 borderColor: status === 'CANCELLED' ? 'var(--danger)' : 'var(--border)',
                                                                 color: status === 'CANCELLED' ? 'var(--danger)' : 'var(--text-secondary)'
                                                             }}
-                                                            aria-label={`Update status to ${config?.label || status}`}
+                                                            aria-label={`Update status to ${actionLabel}`}
                                                         >
                                                             {config?.icon}
-                                                            <span className="ml-1.5">{config?.label || status}</span>
+                                                            <span className="ml-1.5">{actionLabel}</span>
                                                         </Button>
                                                     );
                                                 })}

@@ -43,6 +43,11 @@ const STATUS_CONFIG: Record<string, { color: string; glow: string; icon: React.R
     DELIVERED: { color: '#22C55E', glow: 'rgba(34, 197, 94, 0.2)', icon: <CheckCircle className="w-4 h-4" />, label: 'Delivered' },
     CANCELLED: { color: '#EF4444', glow: 'rgba(239, 68, 68, 0.2)', icon: <XCircle className="w-4 h-4" />, label: 'Cancelled' },
 };
+const STATUS_ACTION_LABELS: Record<string, string> = {
+    CONFIRMED: 'Confirm',
+    PACKED: 'Pack',
+    CANCELLED: 'Cancel',
+};
 const ACTIVE_STATUSES = ['PENDING', 'CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'];
 const TRACKING_SOCKET_URL = import.meta.env.PUBLIC_TRACKING_SERVICE_URL || 'http://localhost:3000/tracking';
 
@@ -599,6 +604,7 @@ export default function OrdersManager() {
                                         <div className="flex flex-wrap gap-2">
                                             {[...(NEXT_STATUS[selectedOrder.orderStatus] || []), 'CANCELLED'].map((status) => {
                                                 const config = STATUS_CONFIG[status];
+                                                const actionLabel = STATUS_ACTION_LABELS[status] || config?.label || status;
                                                 return (
                                                     <Button
                                                         key={status}
@@ -611,7 +617,7 @@ export default function OrdersManager() {
                                                         }}
                                                     >
                                                         {config?.icon}
-                                                        <span className="ml-1.5">{config?.label || status}</span>
+                                                        <span className="ml-1.5">{actionLabel}</span>
                                                     </Button>
                                                 );
                                             })}

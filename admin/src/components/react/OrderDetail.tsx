@@ -47,6 +47,11 @@ const STATUS_CONFIG: Record<string, { color: string; glow: string; icon: React.R
     DELIVERED: { color: '#22C55E', glow: 'rgba(34, 197, 94, 0.2)', icon: <CheckCircle className="w-4 h-4" />, label: 'Delivered' },
     CANCELLED: { color: '#EF4444', glow: 'rgba(239, 68, 68, 0.2)', icon: <XCircle className="w-4 h-4" />, label: 'Cancelled' },
 };
+const STATUS_ACTION_LABELS: Record<string, string> = {
+    CONFIRMED: 'Confirm',
+    PACKED: 'Pack',
+    CANCELLED: 'Cancel',
+};
 
 interface OrderDetailProps {
     order: Order;
@@ -178,6 +183,7 @@ export default function OrderDetail({ order, onClose, onStatusChange }: OrderDet
                             <div className="flex flex-wrap gap-2">
                                 {(NEXT_STATUS[order.orderStatus] || []).concat('CANCELLED').map((status) => {
                                     const statusConfig = STATUS_CONFIG[status];
+                                    const actionLabel = STATUS_ACTION_LABELS[status] || statusConfig?.label || status;
                                     return (
                                         <Button
                                             key={status}
@@ -191,7 +197,7 @@ export default function OrderDetail({ order, onClose, onStatusChange }: OrderDet
                                             }}
                                         >
                                             {statusConfig?.icon}
-                                            <span className="ml-1.5">{statusConfig?.label || status}</span>
+                                            <span className="ml-1.5">{actionLabel}</span>
                                         </Button>
                                     );
                                 })}
