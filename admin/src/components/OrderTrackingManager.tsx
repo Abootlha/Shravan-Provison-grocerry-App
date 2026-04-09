@@ -468,6 +468,7 @@ export default function OrderTrackingManager() {
                             routeCoordinates={selectedOrder?.tracking?.routeCoordinates}
                             storeLocation={selectedOrder?.storeLocation ? [selectedOrder.storeLocation.latitude, selectedOrder.storeLocation.longitude] : undefined}
                             customerLocation={selectedOrder?.deliveryAddress?.coordinates?.coordinates ? [selectedOrder.deliveryAddress.coordinates.coordinates[1], selectedOrder.deliveryAddress.coordinates.coordinates[0]] : undefined}
+                            lastLocationUpdateAt={selectedOrder?.tracking?.lastLocationUpdateAt}
                         />
                     </div>
                 )}

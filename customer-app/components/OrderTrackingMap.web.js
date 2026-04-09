@@ -6,6 +6,11 @@ import { snapPointToRoute } from '../services/directionsService';
 
 const DEFAULT_CENTER = [26.7606, 83.3732];
 const DEFAULT_ZOOM = 14;
+const normalizeHeadingDelta = (delta) => {
+  if (delta > 180) return delta - 360;
+  if (delta < -180) return delta + 360;
+  return delta;
+};
 
 const OrderTrackingMap = ({
   riderLocation,
@@ -20,6 +25,12 @@ const OrderTrackingMap = ({
   const mapInstanceRef = useRef(null);
   const riderMarkerRef = useRef(null);
   const routeLineRef = useRef(null);
+  const customerMarkerRef = useRef(null);
+  const storeMarkerRef = useRef(null);
+  const riderAnimationFrameRef = useRef(null);
+  const headingAnimationFrameRef = useRef(null);
+  const displayRiderPositionRef = useRef(null);
+  const displayHeadingRef = useRef(riderHeading || 0);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const [mapLoaded, setMapLoaded] = useState(false);
 
@@ -222,7 +233,7 @@ const OrderTrackingMap = ({
               display: flex;
               align-items: center;
               justify-content: center;
-              transform: rotate(${riderHeading || 0}deg);
+              transform: rotate(${displayHeadingRef.current || 0}deg);
             ">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
                 <path d="M19 6.5C19 4.57 17.43 3 15.5 3S12 4.57 12 6.5c0 1.81 3.95 5 7.5 8.5L21 16l-1.5-1.5C19 11.5 19 6.5 19 6.5zM15.5 8C14.67 8 14 7.33 14 6.5S14.67 5 15.5 5 17 5.67 17 6.5 16.33 8 15.5 8z"/>
@@ -239,19 +250,49 @@ const OrderTrackingMap = ({
           ? snapPointToRoute(riderLocation, routeCoordinates, 90).point
           : riderLocation;
 
-        if (riderMarkerRef.current) {
-          riderMarkerRef.current.setLatLng([snappedLocation.latitude, snappedLocation.longitude]);
-          riderMarkerRef.current.setIcon(riderIcon);
-        } else {
+        if (!displayRiderPositionRef.current) {
+          displayRiderPositionRef.current = snappedLocation;
+        }
+
+        if (!riderMarkerRef.current) {
           riderMarkerRef.current = L.marker(
-            [snappedLocation.latitude, snappedLocation.longitude],
+            [displayRiderPositionRef.current.latitude, displayRiderPositionRef.current.longitude],
             { icon: riderIcon, zIndexOffset: 1000 }
           )
             .addTo(map)
             .bindPopup('Rider Location');
+        } else {
+          riderMarkerRef.current.setIcon(riderIcon);
         }
 
-        map.panTo([snappedLocation.latitude, snappedLocation.longitude], { animate: true });
+        const startPosition = displayRiderPositionRef.current;
+        const endPosition = snappedLocation;
+        const duration = 900;
+        const startedAt = Date.now();
+
+        if (riderAnimationFrameRef.current) {
+          cancelAnimationFrame(riderAnimationFrameRef.current);
+        }
+
+        const animatePosition = () => {
+          const elapsed = Date.now() - startedAt;
+          const progress = Math.min(1, elapsed / duration);
+          const eased = 1 - Math.pow(1 - progress, 3);
+          const nextPosition = {
+            latitude: startPosition.latitude + (endPosition.latitude - startPosition.latitude) * eased,
+            longitude: startPosition.longitude + (endPosition.longitude - startPosition.longitude) * eased,
+          };
+          displayRiderPositionRef.current = nextPosition;
+          riderMarkerRef.current?.setLatLng([nextPosition.latitude, nextPosition.longitude]);
+
+          if (progress < 1) {
+            riderAnimationFrameRef.current = requestAnimationFrame(animatePosition);
+          } else {
+            map.panTo([endPosition.latitude, endPosition.longitude], { animate: true });
+          }
+        };
+
+        riderAnimationFrameRef.current = requestAnimationFrame(animatePosition);
       } catch (error) {
         console.warn('Failed to update rider position:', error);
       }
@@ -259,6 +300,44 @@ const OrderTrackingMap = ({
 
     updateRiderPosition();
   }, [mapLoaded, riderLocation?.latitude, riderLocation?.longitude, riderHeading, routeCoordinates]);
+
+  useEffect(() => {
+    const nextHeading = Number.isFinite(riderHeading) ? riderHeading : 0;
+    const startHeading = displayHeadingRef.current || 0;
+    const delta = normalizeHeadingDelta(nextHeading - startHeading);
+    const duration = 450;
+    const startedAt = Date.now();
+
+    if (headingAnimationFrameRef.current) {
+      cancelAnimationFrame(headingAnimationFrameRef.current);
+    }
+
+    const animateHeading = () => {
+      const elapsed = Date.now() - startedAt;
+      const progress = Math.min(1, elapsed / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      displayHeadingRef.current = ((startHeading + delta * eased) % 360 + 360) % 360;
+
+      if (riderMarkerRef.current) {
+        riderMarkerRef.current.setIcon(riderMarkerRef.current.options.icon);
+      }
+
+      if (progress < 1) {
+        headingAnimationFrameRef.current = requestAnimationFrame(animateHeading);
+      }
+    };
+
+    headingAnimationFrameRef.current = requestAnimationFrame(animateHeading);
+
+    return () => {
+      if (headingAnimationFrameRef.current) {
+        cancelAnimationFrame(headingAnimationFrameRef.current);
+      }
+      if (riderAnimationFrameRef.current) {
+        cancelAnimationFrame(riderAnimationFrameRef.current);
+      }
+    };
+  }, [riderHeading]);
 
   const getStatusText = () => {
     switch (orderStatus) {

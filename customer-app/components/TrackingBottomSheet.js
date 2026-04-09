@@ -110,6 +110,10 @@ const TrackingBottomSheet = ({
     const riderRoleLabel = order?.rider?.vehicleType || order?.riderId?.vehicleType || 'Delivery Rider';
     const orderCode = order?.deliveryOtp || order?.otp || order?.orderCode || '----';
     const addressText = order?.deliveryAddress?.address || order?.deliveryAddress?.addressLine || '';
+    const hasLiveTracking = Boolean(activeLeg && ['ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED'].includes(order?.orderStatus));
+    const lastLocationUpdateAt = order?.tracking?.lastLocationUpdateAt || riderLocation?.timestamp || null;
+    const staleMs = lastLocationUpdateAt ? Date.now() - new Date(lastLocationUpdateAt).getTime() : null;
+    const isLocationStale = hasLiveTracking && staleMs != null && staleMs > 30000;
 
     const bottomSheetHeight = translateY.interpolate({
         inputRange: [SNAP_POINTS.collapsed, SNAP_POINTS.expanded],
@@ -117,7 +121,6 @@ const TrackingBottomSheet = ({
         extrapolate: 'clamp',
     });
 
-    const hasLiveTracking = Boolean(activeLeg && ['ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED'].includes(order?.orderStatus));
     const hasDistanceValue = typeof routeInfo?.distanceValue === 'number' && Number.isFinite(routeInfo.distanceValue);
     const isArrived = order?.orderStatus === 'ARRIVED' || (hasDistanceValue && routeInfo.distanceValue < 100);
 
@@ -259,6 +262,15 @@ const TrackingBottomSheet = ({
                     {hasLiveTracking
                         ? (isArrived ? renderArrivedBanner() : renderEnRouteBanner())
                         : renderPreTrackingBanner()}
+
+                    {isLocationStale ? (
+                        <View style={styles.staleWarningBanner}>
+                            <MaterialCommunityIcons name="clock-alert-outline" size={18} color="#B45309" />
+                            <Text style={styles.staleWarningText}>
+                                Live rider location is delayed. We&apos;re refreshing the route.
+                            </Text>
+                        </View>
+                    ) : null}
 
                     {/* Order Code Section */}
                     {order?.orderStatus !== 'DELIVERED' && (
@@ -554,6 +566,26 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#4B5563',
         fontWeight: '500',
+    },
+    staleWarningBanner: {
+        marginTop: 14,
+        marginBottom: -4,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        borderRadius: 14,
+        backgroundColor: '#FFFBEB',
+        borderWidth: 1,
+        borderColor: '#FDE68A',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    staleWarningText: {
+        flex: 1,
+        color: '#92400E',
+        fontSize: 12,
+        lineHeight: 17,
+        fontWeight: '700',
     },
 
     // Code Section

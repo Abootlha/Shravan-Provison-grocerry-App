@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -26,6 +26,7 @@ interface RiderTrackingMapProps {
     routeCoordinates?: { latitude: number; longitude: number }[];
     storeLocation?: [number, number];
     customerLocation?: [number, number];
+    lastLocationUpdateAt?: string | null;
 }
 
 // Custom marker icon for riders
@@ -38,15 +39,51 @@ const riderIcon = new L.Icon({
     shadowSize: [41, 41]
 });
 
-function MapUpdater({ riders }: { riders: RiderLocation[] }) {
+function getNearestRoutePoint(
+    point: { latitude: number; longitude: number },
+    routeCoordinates: { latitude: number; longitude: number }[],
+) {
+    let nearest = routeCoordinates[0];
+    let minDistance = Number.POSITIVE_INFINITY;
+
+    routeCoordinates.forEach((coordinate) => {
+        const distance = Math.hypot(
+            point.latitude - coordinate.latitude,
+            point.longitude - coordinate.longitude,
+        );
+
+        if (distance < minDistance) {
+            minDistance = distance;
+            nearest = coordinate;
+        }
+    });
+
+    return nearest;
+}
+
+function MapUpdater({
+    riders,
+    storeLocation,
+    customerLocation,
+}: {
+    riders: RiderLocation[];
+    storeLocation?: [number, number];
+    customerLocation?: [number, number];
+}) {
     const map = useMap();
 
     useEffect(() => {
-        if (riders.length > 0) {
-            const bounds = L.latLngBounds(riders.map(r => [r.latitude, r.longitude]));
+        const boundsPoints = [
+            ...riders.map(r => [r.latitude, r.longitude] as [number, number]),
+            ...(storeLocation ? [storeLocation] : []),
+            ...(customerLocation ? [customerLocation] : []),
+        ];
+
+        if (boundsPoints.length > 0) {
+            const bounds = L.latLngBounds(boundsPoints);
             map.fitBounds(bounds, { padding: [50, 50] });
         }
-    }, [riders, map]);
+    }, [riders, storeLocation, customerLocation, map]);
 
     return null;
 }
@@ -58,12 +95,63 @@ export default function RiderTrackingMap({
     routeCoordinates = [],
     storeLocation,
     customerLocation,
+    lastLocationUpdateAt,
 }: RiderTrackingMapProps) {
     const [isClient, setIsClient] = useState(false);
+    const markerRefs = useRef<Record<string, L.Marker>>({});
+    const animationRefs = useRef<Record<string, number>>({});
+    const displayPositionsRef = useRef<Record<string, { latitude: number; longitude: number }>>({});
+    const snappedRiders = useMemo(() => riders.map((rider) => {
+        if (routeCoordinates.length < 2) return rider;
+        const nearest = getNearestRoutePoint({ latitude: rider.latitude, longitude: rider.longitude }, routeCoordinates);
+        const rawDistance = Math.hypot(rider.latitude - nearest.latitude, rider.longitude - nearest.longitude);
+        const approxMeters = rawDistance * 111000;
+        if (approxMeters > 90) return rider;
+        return { ...rider, latitude: nearest.latitude, longitude: nearest.longitude };
+    }), [riders, routeCoordinates]);
+    const staleMs = lastLocationUpdateAt ? Date.now() - new Date(lastLocationUpdateAt).getTime() : null;
+    const isStale = staleMs != null && staleMs > 30000;
 
     useEffect(() => {
         setIsClient(true);
+        return () => {
+            Object.values(animationRefs.current).forEach((id) => cancelAnimationFrame(id));
+        };
     }, []);
+
+    useEffect(() => {
+        snappedRiders.forEach((rider) => {
+            const marker = markerRefs.current[rider.riderId];
+            if (!marker) return;
+
+            const start = displayPositionsRef.current[rider.riderId] || { latitude: rider.latitude, longitude: rider.longitude };
+            const end = { latitude: rider.latitude, longitude: rider.longitude };
+            const startedAt = Date.now();
+            const duration = 900;
+
+            if (animationRefs.current[rider.riderId]) {
+                cancelAnimationFrame(animationRefs.current[rider.riderId]);
+            }
+
+            const animate = () => {
+                const elapsed = Date.now() - startedAt;
+                const progress = Math.min(1, elapsed / duration);
+                const eased = 1 - Math.pow(1 - progress, 3);
+                const next = {
+                    latitude: start.latitude + (end.latitude - start.latitude) * eased,
+                    longitude: start.longitude + (end.longitude - start.longitude) * eased,
+                };
+                displayPositionsRef.current[rider.riderId] = next;
+                marker.setLatLng([next.latitude, next.longitude]);
+
+                if (progress < 1) {
+                    animationRefs.current[rider.riderId] = requestAnimationFrame(animate);
+                }
+            };
+
+            animationRefs.current[rider.riderId] = requestAnimationFrame(animate);
+        });
+    }, [snappedRiders]);
 
     if (!isClient) {
         return (
@@ -77,7 +165,12 @@ export default function RiderTrackingMap({
     }
 
     return (
-        <div className="w-full h-96 rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+        <div className="relative w-full h-96 rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+            {isStale ? (
+                <div className="absolute top-3 left-3 z-[1000] px-3 py-2 rounded-lg text-xs font-semibold" style={{ background: '#FEF3C7', color: '#92400E', border: '1px solid #FCD34D' }}>
+                    Rider location may be delayed
+                </div>
+            ) : null}
             <MapContainer
                 center={center}
                 zoom={zoom}
@@ -88,7 +181,7 @@ export default function RiderTrackingMap({
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
-                <MapUpdater riders={riders} />
+                <MapUpdater riders={snappedRiders} storeLocation={storeLocation} customerLocation={customerLocation} />
                 {routeCoordinates.length > 1 && (
                     <Polyline
                         positions={routeCoordinates.map((point) => [point.latitude, point.longitude] as [number, number])}
@@ -97,11 +190,20 @@ export default function RiderTrackingMap({
                 )}
                 {storeLocation && <Marker position={storeLocation}><Popup>Store</Popup></Marker>}
                 {customerLocation && <Marker position={customerLocation}><Popup>Customer</Popup></Marker>}
-                {riders.map((rider) => (
+                {snappedRiders.map((rider) => (
                     <Marker
                         key={rider.riderId}
                         position={[rider.latitude, rider.longitude]}
                         icon={riderIcon}
+                        ref={(instance) => {
+                            if (instance) {
+                                markerRefs.current[rider.riderId] = instance;
+                                displayPositionsRef.current[rider.riderId] = {
+                                    latitude: rider.latitude,
+                                    longitude: rider.longitude,
+                                };
+                            }
+                        }}
                     >
                         <Popup>
                             <div className="p-2">

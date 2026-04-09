@@ -19,6 +19,11 @@ try {
 
 const ZEPTO_PURPLE = '#7C3AED';
 const ZEPTO_GREEN = '#10B981';
+const normalizeHeadingDelta = (delta) => {
+    if (delta > 180) return delta - 360;
+    if (delta < -180) return delta + 360;
+    return delta;
+};
 
 const RiderMarkerView = () => (
     <View style={styles.riderMarkerContainer}>
@@ -75,7 +80,9 @@ const OrderTrackingMap = ({
     const mapRef = useRef(null);
     const [isMapReady, setIsMapReady] = useState(false);
     const [displayRiderLocation, setDisplayRiderLocation] = useState(riderLocation || null);
+    const [displayHeading, setDisplayHeading] = useState(riderHeading || 0);
     const animationFrameRef = useRef(null);
+    const headingAnimationFrameRef = useRef(null);
 
     useEffect(() => {
         if (!riderLocation) {
@@ -124,6 +131,46 @@ const OrderTrackingMap = ({
             }
         };
     }, [riderLocation?.latitude, riderLocation?.longitude, routeCoordinates]);
+
+    useEffect(() => {
+        const nextHeading = Number.isFinite(riderHeading) ? riderHeading : 0;
+
+        if (!Number.isFinite(displayHeading)) {
+            setDisplayHeading(nextHeading);
+            return;
+        }
+
+        const startHeading = displayHeading;
+        const delta = normalizeHeadingDelta(nextHeading - startHeading);
+        const duration = 500;
+        const startedAt = Date.now();
+
+        if (headingAnimationFrameRef.current) {
+            cancelAnimationFrame(headingAnimationFrameRef.current);
+        }
+
+        const animateHeading = () => {
+            const elapsed = Date.now() - startedAt;
+            const progress = Math.min(1, elapsed / duration);
+            const eased = 1 - Math.pow(1 - progress, 3);
+            const interpolated = startHeading + delta * eased;
+            const normalized = ((interpolated % 360) + 360) % 360;
+
+            setDisplayHeading(normalized);
+
+            if (progress < 1) {
+                headingAnimationFrameRef.current = requestAnimationFrame(animateHeading);
+            }
+        };
+
+        headingAnimationFrameRef.current = requestAnimationFrame(animateHeading);
+
+        return () => {
+            if (headingAnimationFrameRef.current) {
+                cancelAnimationFrame(headingAnimationFrameRef.current);
+            }
+        };
+    }, [riderHeading]);
 
     useEffect(() => {
         if (!isMapReady || !mapRef.current) return;
@@ -257,7 +304,7 @@ const OrderTrackingMap = ({
                     <Marker
                         coordinate={displayRiderLocation}
                         anchor={{ x: 0.5, y: 0.5 }}
-                        rotation={riderHeading}
+                        rotation={displayHeading}
                         flat={true}
                     >
                         <RiderMarkerView />
