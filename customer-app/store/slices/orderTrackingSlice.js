@@ -24,6 +24,31 @@ const orderTrackingSlice = createSlice({
         setCurrentOrder: (state, action) => {
             state.currentOrder = action.payload;
             state.error = null;
+
+            const tracking = action.payload?.tracking;
+            state.activeLeg = tracking?.activeLeg || null;
+            state.lastLocationUpdateAt = tracking?.lastLocationUpdateAt || null;
+            state.routeCoordinates = tracking?.routeCoordinates || [];
+            state.distanceRemaining = tracking?.distanceRemaining ?? null;
+            state.durationRemaining = tracking?.durationMinutes ?? null;
+
+            if (tracking?.riderLocation) {
+                state.riderLocation = {
+                    latitude: tracking.riderLocation.latitude,
+                    longitude: tracking.riderLocation.longitude,
+                    timestamp: tracking.lastLocationUpdateAt || new Date().toISOString(),
+                    heading: tracking.riderLocation.heading || null,
+                    speed: tracking.riderLocation.speed || null,
+                };
+            } else {
+                state.riderLocation = null;
+                state.previousRiderLocation = null;
+                state.riderHeading = 0;
+            }
+
+            if (!tracking?.routeCoordinates?.length) {
+                state.routeInfo = null;
+            }
         },
         clearCurrentOrder: (state) => {
             state.currentOrder = null;

@@ -118,7 +118,8 @@ const TrackingBottomSheet = ({
     });
 
     const hasLiveTracking = Boolean(activeLeg && ['ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED'].includes(order?.orderStatus));
-    const isArrived = order?.orderStatus === 'ARRIVED' || (routeInfo?.distanceValue < 100);
+    const hasDistanceValue = typeof routeInfo?.distanceValue === 'number' && Number.isFinite(routeInfo.distanceValue);
+    const isArrived = order?.orderStatus === 'ARRIVED' || (hasDistanceValue && routeInfo.distanceValue < 100);
 
     const getPreTrackingMessage = useCallback(() => {
         switch (order?.orderStatus) {
