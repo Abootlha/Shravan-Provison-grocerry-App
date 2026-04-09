@@ -193,7 +193,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
 
     const shouldShowMap = () => {
         if (!currentOrder) return false;
-        return ['CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(currentOrder.orderStatus);
+        return ['ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(currentOrder.orderStatus);
     };
 
     if (isLoading || !currentOrder) {

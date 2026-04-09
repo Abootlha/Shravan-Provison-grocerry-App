@@ -579,7 +579,7 @@ export default function OrderTrackingManager() {
                                                 )}
                                             </td>
                                             <td>
-                                                {order.estimatedDeliveryTime ? (
+                                                {order.tracking?.activeLeg && order.estimatedDeliveryTime ? (
                                                     <div className="text-sm">
                                                         {new Date(order.estimatedDeliveryTime).toLocaleTimeString('en-IN', {
                                                             hour: '2-digit',
@@ -587,7 +587,9 @@ export default function OrderTrackingManager() {
                                                         })}
                                                     </div>
                                                 ) : (
-                                                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>-</span>
+                                                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                                                        {order.orderStatus === 'CONFIRMED' ? 'Waiting for rider' : '-'}
+                                                    </span>
                                                 )}
                                             </td>
                                             <td>

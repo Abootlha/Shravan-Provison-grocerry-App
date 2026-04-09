@@ -116,7 +116,31 @@ const TrackingBottomSheet = ({
         extrapolate: 'clamp',
     });
 
+    const hasLiveTracking = Boolean(activeLeg && ['ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED'].includes(order?.orderStatus));
     const isArrived = order?.orderStatus === 'ARRIVED' || (routeInfo?.distanceValue < 100);
+
+    const getPreTrackingMessage = useCallback(() => {
+        switch (order?.orderStatus) {
+            case 'PENDING':
+                return {
+                    title: 'Order placed successfully',
+                    subtitle: 'The store will confirm your order shortly.',
+                    icon: 'clipboard-check-outline',
+                };
+            case 'CONFIRMED':
+                return {
+                    title: 'Store is preparing your order',
+                    subtitle: 'Live tracking will begin after a rider accepts the delivery.',
+                    icon: 'store-check-outline',
+                };
+            default:
+                return {
+                    title: 'Preparing live tracking',
+                    subtitle: 'We will show the rider route here as soon as delivery starts.',
+                    icon: 'map-marker-path',
+                };
+        }
+    }, [order?.orderStatus]);
 
     const renderArrivedBanner = () => (
         <View style={styles.arrivedBanner}>
@@ -173,6 +197,22 @@ const TrackingBottomSheet = ({
         </View>
     );
 
+    const renderPreTrackingBanner = () => {
+        const message = getPreTrackingMessage();
+
+        return (
+            <View style={styles.preTrackingBanner}>
+                <View style={styles.preTrackingIconBox}>
+                    <MaterialCommunityIcons name={message.icon} size={24} color={ZEPTO_PURPLE} />
+                </View>
+                <View style={styles.preTrackingText}>
+                    <Text style={styles.preTrackingTitle}>{message.title}</Text>
+                    <Text style={styles.preTrackingSubtitle}>{message.subtitle}</Text>
+                </View>
+            </View>
+        );
+    };
+
     const getStepIndex = (status) => {
         if (['PENDING', 'CONFIRMED'].includes(status)) return 0;
         if (status === 'ASSIGNED') return 1;
@@ -213,7 +253,9 @@ const TrackingBottomSheet = ({
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
                 <View style={styles.content}>
                     {/* Arrived or En Route Banner */}
-                    {isArrived ? renderArrivedBanner() : renderEnRouteBanner()}
+                    {hasLiveTracking
+                        ? (isArrived ? renderArrivedBanner() : renderEnRouteBanner())
+                        : renderPreTrackingBanner()}
 
                     {/* Order Code Section */}
                     {order?.orderStatus !== 'DELIVERED' && (
@@ -347,6 +389,40 @@ const styles = StyleSheet.create({
     },
     arrivedHeaderText: {
         flex: 1,
+    },
+    preTrackingBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 18,
+        borderRadius: 20,
+        backgroundColor: '#F8F5FF',
+        marginBottom: 18,
+        borderWidth: 1,
+        borderColor: '#E9DDFC',
+    },
+    preTrackingIconBox: {
+        width: 52,
+        height: 52,
+        borderRadius: 18,
+        backgroundColor: 'white',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 14,
+    },
+    preTrackingText: {
+        flex: 1,
+    },
+    preTrackingTitle: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: '#171717',
+        marginBottom: 4,
+    },
+    preTrackingSubtitle: {
+        fontSize: 13,
+        lineHeight: 18,
+        color: '#6B7280',
+        fontWeight: '500',
     },
     arrivedTitle: {
         fontSize: 18,
