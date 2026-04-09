@@ -13,6 +13,7 @@ class SocketService {
     constructor() {
         this.socket = null;
         this.currentOrderId = null;
+        this.joinedOrderId = null;
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 10;
         this.reconnectionDelay = 1000;
@@ -65,6 +66,7 @@ class SocketService {
             console.log('Socket connected:', this.socket.id);
             store.dispatch(setConnectionStatus('connected'));
             this.reconnectAttempts = 0;
+            this.joinedOrderId = null;
 
             if (this.currentOrderId) {
                 this.joinOrderRoom(this.currentOrderId);
@@ -107,6 +109,9 @@ class SocketService {
 
         this.socket.on('orderStatusUpdate', (data) => {
             console.log('Order status update received:', data);
+            if (this.currentOrderId && data.orderId && data.orderId !== this.currentOrderId) {
+                return;
+            }
             store.dispatch(updateOrderStatus({
                 status: data.status,
                 timeline: data.timeline,
@@ -119,6 +124,9 @@ class SocketService {
 
         this.socket.on('riderLocationUpdate', (data) => {
             console.log('Rider location update received:', data);
+            if (this.currentOrderId && data.orderId && data.orderId !== this.currentOrderId) {
+                return;
+            }
             store.dispatch(updateRiderLocation({
                 location: {
                     latitude: data.location?.latitude ?? data.lat,
@@ -133,6 +141,9 @@ class SocketService {
 
         this.socket.on('etaUpdate', (data) => {
             console.log('ETA update received:', data);
+            if (this.currentOrderId && data.orderId && data.orderId !== this.currentOrderId) {
+                return;
+            }
             store.dispatch(updateETA({
                 estimatedDeliveryTime: data.estimatedDeliveryTime || data.eta,
                 durationMinutes: data.durationMinutes,
@@ -143,6 +154,9 @@ class SocketService {
 
         this.socket.on('orderAssigned', (data) => {
             console.log('Order assigned to rider:', data);
+            if (this.currentOrderId && data.orderId && data.orderId !== this.currentOrderId) {
+                return;
+            }
             store.dispatch(updateOrderStatus({
                 status: 'ASSIGNED',
                 rider: data.rider,
@@ -155,6 +169,17 @@ class SocketService {
             console.warn('Socket error:', error);
             store.dispatch(setError(error.message || 'Socket error occurred'));
         });
+
+        this.socket.on('joinedOrderRoom', (data) => {
+            console.log('Joined order room:', data);
+            this.joinedOrderId = data.orderId;
+        });
+
+        this.socket.on('exception', (error) => {
+            console.warn('Socket exception:', error);
+            const message = typeof error === 'string' ? error : error?.message || 'Realtime connection error';
+            store.dispatch(setError(message));
+        });
     }
 
     joinOrderRoom(orderId) {
@@ -163,6 +188,10 @@ class SocketService {
 
         if (!this.socket?.connected) {
             console.warn('Cannot join order room: socket not connected (will join upon connection)');
+            return;
+        }
+
+        if (this.joinedOrderId === orderId) {
             return;
         }
 
@@ -183,6 +212,9 @@ class SocketService {
         if (this.currentOrderId === targetOrderId) {
             this.currentOrderId = null;
         }
+        if (this.joinedOrderId === targetOrderId) {
+            this.joinedOrderId = null;
+        }
     }
 
     disconnect() {
@@ -196,6 +228,7 @@ class SocketService {
             this.socket.disconnect();
             this.socket = null;
             this.currentOrderId = null;
+            this.joinedOrderId = null;
             this.reconnectAttempts = 0;
 
             store.dispatch(setConnectionStatus('disconnected'));

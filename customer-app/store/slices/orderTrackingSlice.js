@@ -94,6 +94,10 @@ const orderTrackingSlice = createSlice({
 
                 const tracking = order?.tracking || action.payload.tracking;
                 if (tracking) {
+                    state.currentOrder.tracking = {
+                        ...(state.currentOrder.tracking || {}),
+                        ...tracking,
+                    };
                     state.activeLeg = tracking.activeLeg || state.activeLeg;
                     state.lastLocationUpdateAt = tracking.lastLocationUpdateAt || state.lastLocationUpdateAt;
                     state.routeCoordinates = tracking.routeCoordinates || state.routeCoordinates;
@@ -122,6 +126,8 @@ const orderTrackingSlice = createSlice({
         },
 
         updateRiderLocation: (state, action) => {
+            const tracking = action.payload.tracking;
+
             if (state.riderLocation) {
                 state.previousRiderLocation = {
                     latitude: state.riderLocation.latitude,
@@ -136,7 +142,21 @@ const orderTrackingSlice = createSlice({
                 speed: action.payload.location.speed || null,
             };
             state.lastLocationUpdateAt = action.payload.timestamp;
-            const tracking = action.payload.tracking;
+
+            if (state.currentOrder) {
+                state.currentOrder.tracking = {
+                    ...(state.currentOrder.tracking || {}),
+                    ...(tracking || {}),
+                    riderLocation: {
+                        latitude: action.payload.location.latitude,
+                        longitude: action.payload.location.longitude,
+                        heading: action.payload.location.heading || null,
+                        speed: action.payload.location.speed || null,
+                    },
+                    lastLocationUpdateAt: action.payload.timestamp,
+                };
+            }
+
             if (tracking?.routeCoordinates) {
                 state.routeCoordinates = tracking.routeCoordinates;
             }
@@ -193,6 +213,7 @@ const orderTrackingSlice = createSlice({
 
         updateETA: (state, action) => {
             const { estimatedDeliveryTime, durationMinutes, distanceRemaining } = action.payload;
+            const tracking = action.payload.tracking;
 
             if (state.currentOrder && estimatedDeliveryTime) {
                 state.currentOrder.estimatedDeliveryTime = estimatedDeliveryTime;
@@ -209,11 +230,17 @@ const orderTrackingSlice = createSlice({
                     state.currentOrder.distanceRemaining = distanceRemaining;
                 }
             }
-            if (action.payload.tracking?.routeCoordinates) {
-                state.routeCoordinates = action.payload.tracking.routeCoordinates;
+            if (state.currentOrder && tracking) {
+                state.currentOrder.tracking = {
+                    ...(state.currentOrder.tracking || {}),
+                    ...tracking,
+                };
             }
-            if (action.payload.tracking?.activeLeg) {
-                state.activeLeg = action.payload.tracking.activeLeg;
+            if (tracking?.routeCoordinates) {
+                state.routeCoordinates = tracking.routeCoordinates;
+            }
+            if (tracking?.activeLeg) {
+                state.activeLeg = tracking.activeLeg;
             }
         },
 

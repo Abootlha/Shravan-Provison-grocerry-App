@@ -63,6 +63,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
     const { token } = useSelector((state) => state.auth);
     const [mapReady, setMapReady] = useState(false);
     const [showFullMap, setShowFullMap] = useState(false);
+    const [socketOrderId, setSocketOrderId] = useState(orderId || null);
     const headerOpacity = useRef(new Animated.Value(0)).current;
     const lastRouteRefreshRef = useRef(0);
     const latestRiderLocationRef = useRef(null);
@@ -82,19 +83,26 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
 
         if (token) {
             socketService.connect(token);
-            socketService.joinOrderRoom(orderId);
         }
 
         fetchOrderDetails();
 
         return () => {
-            if (orderId) {
-                socketService.leaveOrderRoom(orderId);
+            if (socketOrderId) {
+                socketService.leaveOrderRoom(socketOrderId);
             }
             dispatch(clearCurrentOrder());
             dispatch(clearRiderLocation());
         };
     }, [orderId, token]);
+
+    useEffect(() => {
+        if (!token || !socketOrderId) {
+            return;
+        }
+
+        socketService.joinOrderRoom(socketOrderId);
+    }, [token, socketOrderId]);
 
     const getActiveDestination = () => {
         if (activeLeg === 'to_store' && storeLocation) {
@@ -222,6 +230,11 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
             const data = await OrderService.getOrderById(orderId);
             const order = data.order || data;
             dispatch(setCurrentOrder(order));
+            const canonicalOrderId = order?._id || order?.id || orderId;
+            setSocketOrderId(canonicalOrderId);
+            if (token && canonicalOrderId) {
+                socketService.joinOrderRoom(canonicalOrderId);
+            }
             if (order?.tracking?.routeCoordinates?.length) {
                 dispatch(setRouteCoordinates(order.tracking.routeCoordinates));
             }
