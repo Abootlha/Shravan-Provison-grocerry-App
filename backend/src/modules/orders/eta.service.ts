@@ -43,7 +43,7 @@ export class ETAService {
   private readonly logger = new Logger(ETAService.name);
   private readonly ETA_CACHE_TTL = 120; // 2 minutes
   private readonly mapplsApiKey: string;
-  private readonly directionsUrl = 'https://apis.mappls.com/advancedmaps/v1/route_adv/driving';
+  private readonly directionsUrl = 'https://route.mappls.com/route/direction/route_adv/driving';
 
   constructor(
     private readonly configService: ConfigService,
@@ -170,15 +170,10 @@ export class ETAService {
       throw new Error('MAPMYINDIA_API_KEY is not configured');
     }
 
-    const response = await axios.get(this.directionsUrl, {
-      headers: {
-        Authorization: this.mapplsApiKey,
-      },
+    const coordinates = `${riderLocation.longitude},${riderLocation.latitude};${deliveryAddress.longitude},${deliveryAddress.latitude}`;
+    const response = await axios.get(`${this.directionsUrl}/${coordinates}`, {
       params: {
-        lex_lat: riderLocation.latitude,
-        lex_lng: riderLocation.longitude,
-        dest_lat: deliveryAddress.latitude,
-        dest_lng: deliveryAddress.longitude,
+        access_token: this.mapplsApiKey,
         alternatives: false,
         geometries: 'polyline',
         overview: 'full',
@@ -187,14 +182,14 @@ export class ETAService {
       timeout: 10000,
     });
 
-    const route = response.data?.route?.[0];
+    const route = response.data?.routes?.[0];
     const leg = route?.legs?.[0];
 
     if (!route || !leg) {
       throw new Error('Mappls directions response did not contain a route');
     }
 
-    const encodedPolyline = route.polyline || leg.points || '';
+    const encodedPolyline = route.geometry || leg.geometry || '';
 
     return {
       durationSeconds: leg.duration || route.duration || 0,

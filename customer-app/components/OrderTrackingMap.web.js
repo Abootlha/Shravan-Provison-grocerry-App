@@ -161,6 +161,22 @@ const OrderTrackingMap = ({
               opacity: 0.8,
             }
           ).addTo(map);
+        } else if (['PENDING', 'CONFIRMED'].includes(orderStatus) && storeLocation?.latitude && storeLocation?.longitude && customerLocation?.latitude && customerLocation?.longitude) {
+          if (routeLineRef.current) {
+            map.removeLayer(routeLineRef.current);
+          }
+          routeLineRef.current = L.polyline(
+            [
+              [storeLocation.latitude, storeLocation.longitude],
+              [customerLocation.latitude, customerLocation.longitude],
+            ],
+            {
+              color: '#9CA3AF',
+              weight: 3,
+              opacity: 0.8,
+              dashArray: '8, 6',
+            }
+          ).addTo(map);
         }
       } catch (error) {
         console.warn('Failed to update markers:', error);

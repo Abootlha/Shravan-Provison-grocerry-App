@@ -46,6 +46,20 @@ const CustomerMarkerView = () => (
     </View>
 );
 
+const createStaticOrderPath = (start, end, points = 24) => {
+    if (!start || !end) return [];
+
+    const coordinates = [];
+    for (let i = 0; i <= points; i++) {
+        const fraction = i / points;
+        coordinates.push({
+            latitude: start.latitude + (end.latitude - start.latitude) * fraction,
+            longitude: start.longitude + (end.longitude - start.longitude) * fraction,
+        });
+    }
+    return coordinates;
+};
+
 const OrderTrackingMap = ({
     riderLocation,
     customerLocation,
@@ -156,6 +170,16 @@ const OrderTrackingMap = ({
                 mapPadding={{ top: 0, right: 0, bottom: 300, left: 0 }}
                 onMapReady={handleMapReady}
             >
+                {routeCoordinates.length === 0 && ['PENDING', 'CONFIRMED'].includes(orderStatus) && storeLocation && customerLocation && (
+                    <Polyline
+                        coordinates={createStaticOrderPath(storeLocation, customerLocation)}
+                        strokeColor="#9CA3AF"
+                        strokeWidth={3}
+                        lineDashPattern={[8, 6]}
+                        lineCap="round"
+                    />
+                )}
+
                 {routeCoordinates.length > 1 && (
                     <Polyline
                         coordinates={routeCoordinates}

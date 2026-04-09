@@ -60,6 +60,11 @@ export async function fetchRoute(origin, destination) {
         return null;
     }
 
+    if (!MAPMYINDIA_API_KEY) {
+        console.warn('Mappls directions disabled: missing API key');
+        return null;
+    }
+
     const cacheKey = getCacheKey(origin, destination);
     const cached = routeCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
@@ -67,13 +72,10 @@ export async function fetchRoute(origin, destination) {
     }
 
     try {
-        const url = `${MAPMYINDIA_CONFIG.directionsUrl}?lex_lat=${origin.latitude}&lex_lng=${origin.longitude}&dest_lat=${destination.latitude}&dest_lng=${destination.longitude}&waypoints_lat=0&waypoints_lng=0`;
+        const routePath = `${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}`;
+        const url = `${MAPMYINDIA_CONFIG.directionsUrl}/${routePath}?steps=false&geometries=polyline&access_token=${encodeURIComponent(MAPMYINDIA_API_KEY)}`;
 
-        const response = await fetch(url, {
-            headers: {
-                'Authorization': MAPMYINDIA_API_KEY,
-            },
-        });
+        const response = await fetch(url);
 
         if (!response.ok) {
             console.warn('MapMyIndia Directions API error:', response.status);
@@ -82,29 +84,29 @@ export async function fetchRoute(origin, destination) {
 
         const data = await response.json();
 
-        if (data.responseCode !== 200 || !data.route || !data.route.length) {
+        if (!data.routes || !data.routes.length) {
             console.warn('MapMyIndia Directions API returned no routes');
             return null;
         }
 
-        const route = data.route[0];
-        const leg = route.legs[0];
+        const route = data.routes[0];
+        const leg = route.legs?.[0] || null;
 
         let coordinates = [];
-        if (route.polyline) {
-            coordinates = decodePolyline(route.polyline);
+        if (route.geometry) {
+            coordinates = decodePolyline(route.geometry);
         }
 
-        if (coordinates.length === 0 && leg.points) {
-            coordinates = decodePolyline(leg.points);
+        if (coordinates.length === 0 && leg?.geometry) {
+            coordinates = decodePolyline(leg.geometry);
         }
 
         if (coordinates.length === 0) {
-            coordinates = generateFallbackRoute(origin, destination);
+            return null;
         }
 
-        const distanceMeters = leg.distance || 0;
-        const durationSeconds = leg.duration || 0;
+        const distanceMeters = leg?.distance || route.distance || 0;
+        const durationSeconds = leg?.duration || route.duration || 0;
 
         const result = {
             coordinates,

@@ -37,7 +37,7 @@ export const API_CONFIG = {
 export const MAPMYINDIA_CONFIG = {
     apiKey: Constants.expoConfig?.extra?.MAPMYINDIA_API_KEY || process.env.MAPMYINDIA_API_KEY || '',
     baseUrl: 'https://apis.mappls.com/advancedmaps/v1',
-    directionsUrl: 'https://apis.mappls.com/advancedmaps/v1/route_adv/driving',
+    directionsUrl: 'https://route.mappls.com/route/direction/route_adv/driving',
     geocodeUrl: 'https://atlas.mappls.com/api/places/geocode',
 };
 
