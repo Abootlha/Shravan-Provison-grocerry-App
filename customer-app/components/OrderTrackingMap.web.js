@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants';
+import { snapPointToRoute } from '../services/directionsService';
 
 const DEFAULT_CENTER = [26.7606, 83.3732];
 const DEFAULT_ZOOM = 14;
@@ -234,26 +235,30 @@ const OrderTrackingMap = ({
           iconAnchor: [22, 22],
         });
 
+        const snappedLocation = routeCoordinates?.length > 1
+          ? snapPointToRoute(riderLocation, routeCoordinates, 90).point
+          : riderLocation;
+
         if (riderMarkerRef.current) {
-          riderMarkerRef.current.setLatLng([riderLocation.latitude, riderLocation.longitude]);
+          riderMarkerRef.current.setLatLng([snappedLocation.latitude, snappedLocation.longitude]);
           riderMarkerRef.current.setIcon(riderIcon);
         } else {
           riderMarkerRef.current = L.marker(
-            [riderLocation.latitude, riderLocation.longitude],
+            [snappedLocation.latitude, snappedLocation.longitude],
             { icon: riderIcon, zIndexOffset: 1000 }
           )
             .addTo(map)
             .bindPopup('Rider Location');
         }
 
-        map.panTo([riderLocation.latitude, riderLocation.longitude], { animate: true });
+        map.panTo([snappedLocation.latitude, snappedLocation.longitude], { animate: true });
       } catch (error) {
         console.warn('Failed to update rider position:', error);
       }
     };
 
     updateRiderPosition();
-  }, [mapLoaded, riderLocation?.latitude, riderLocation?.longitude, riderHeading]);
+  }, [mapLoaded, riderLocation?.latitude, riderLocation?.longitude, riderHeading, routeCoordinates]);
 
   const getStatusText = () => {
     switch (orderStatus) {

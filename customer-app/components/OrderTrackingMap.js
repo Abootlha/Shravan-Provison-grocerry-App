@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Platform, Animated as RNAnimated, TouchableOpacity } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants';
+import { snapPointToRoute } from '../services/directionsService';
 
 let MapView, Marker, Polyline;
 let mapsAvailable = false;
@@ -73,12 +74,62 @@ const OrderTrackingMap = ({
 }) => {
     const mapRef = useRef(null);
     const [isMapReady, setIsMapReady] = useState(false);
+    const [displayRiderLocation, setDisplayRiderLocation] = useState(riderLocation || null);
+    const animationFrameRef = useRef(null);
+
+    useEffect(() => {
+        if (!riderLocation) {
+            setDisplayRiderLocation(null);
+            return;
+        }
+
+        const snapped = routeCoordinates.length > 1
+            ? snapPointToRoute(riderLocation, routeCoordinates, 90).point
+            : riderLocation;
+
+        if (!displayRiderLocation) {
+            setDisplayRiderLocation(snapped);
+            return;
+        }
+
+        const start = displayRiderLocation;
+        const end = snapped;
+        const duration = 900;
+        const startedAt = Date.now();
+
+        if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
+        }
+
+        const animate = () => {
+            const elapsed = Date.now() - startedAt;
+            const progress = Math.min(1, elapsed / duration);
+            const eased = 1 - Math.pow(1 - progress, 3);
+
+            setDisplayRiderLocation({
+                latitude: start.latitude + (end.latitude - start.latitude) * eased,
+                longitude: start.longitude + (end.longitude - start.longitude) * eased,
+            });
+
+            if (progress < 1) {
+                animationFrameRef.current = requestAnimationFrame(animate);
+            }
+        };
+
+        animationFrameRef.current = requestAnimationFrame(animate);
+
+        return () => {
+            if (animationFrameRef.current) {
+                cancelAnimationFrame(animationFrameRef.current);
+            }
+        };
+    }, [riderLocation?.latitude, riderLocation?.longitude, routeCoordinates]);
 
     useEffect(() => {
         if (!isMapReady || !mapRef.current) return;
 
         const coordinates = [];
-        if (riderLocation && riderLocation.latitude !== 0 && riderLocation.longitude !== 0) coordinates.push(riderLocation);
+        if (displayRiderLocation && displayRiderLocation.latitude !== 0 && displayRiderLocation.longitude !== 0) coordinates.push(displayRiderLocation);
         if (customerLocation && customerLocation.latitude !== 0 && customerLocation.longitude !== 0) coordinates.push(customerLocation);
         if (storeLocation && storeLocation.latitude !== 0 && storeLocation.longitude !== 0) coordinates.push(storeLocation);
 
@@ -87,9 +138,9 @@ const OrderTrackingMap = ({
                 edgePadding: { top: 56, right: 32, bottom: 160, left: 32 },
                 animated: true,
             });
-        } else if (riderLocation) {
+        } else if (displayRiderLocation) {
             mapRef.current.animateToRegion({
-                ...riderLocation,
+                ...displayRiderLocation,
                 latitudeDelta: 0.0035,
                 longitudeDelta: 0.0035,
             }, 1000);
@@ -103,8 +154,8 @@ const OrderTrackingMap = ({
         isMapReady,
         showFullMap,
         orderStatus,
-        riderLocation?.latitude,
-        riderLocation?.longitude,
+        displayRiderLocation?.latitude,
+        displayRiderLocation?.longitude,
         customerLocation?.latitude,
         customerLocation?.longitude,
         storeLocation?.latitude,
@@ -202,9 +253,9 @@ const OrderTrackingMap = ({
                     </Marker>
                 )}
 
-                {riderLocation && (
+                {displayRiderLocation && (
                     <Marker
-                        coordinate={riderLocation}
+                        coordinate={displayRiderLocation}
                         anchor={{ x: 0.5, y: 0.5 }}
                         rotation={riderHeading}
                         flat={true}
@@ -218,7 +269,7 @@ const OrderTrackingMap = ({
                 style={styles.fitButton}
                 onPress={() => {
                     const coords = [];
-                    if (riderLocation) coords.push(riderLocation);
+                    if (displayRiderLocation) coords.push(displayRiderLocation);
                     if (customerLocation) coords.push(customerLocation);
                     if (storeLocation) coords.push(storeLocation);
                     mapRef.current?.fitToCoordinates(coords, {

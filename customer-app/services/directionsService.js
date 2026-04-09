@@ -197,4 +197,69 @@ export function calculateDistance(coord1, coord2) {
     return R * c;
 }
 
+function projectPointOnSegment(point, start, end) {
+    const x = point.longitude;
+    const y = point.latitude;
+    const x1 = start.longitude;
+    const y1 = start.latitude;
+    const x2 = end.longitude;
+    const y2 = end.latitude;
+
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+
+    if (dx === 0 && dy === 0) {
+        return { latitude: y1, longitude: x1 };
+    }
+
+    const t = Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy)));
+
+    return {
+        latitude: y1 + dy * t,
+        longitude: x1 + dx * t,
+    };
+}
+
+export function getNearestRoutePoint(point, routeCoordinates = []) {
+    if (!point || !routeCoordinates || routeCoordinates.length < 2) {
+        return { point: null, distance: Infinity };
+    }
+
+    let nearestPoint = null;
+    let nearestDistance = Infinity;
+
+    for (let i = 0; i < routeCoordinates.length - 1; i += 1) {
+        const projected = projectPointOnSegment(point, routeCoordinates[i], routeCoordinates[i + 1]);
+        const distance = calculateDistance(point, projected);
+
+        if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearestPoint = projected;
+        }
+    }
+
+    return {
+        point: nearestPoint,
+        distance: nearestDistance,
+    };
+}
+
+export function snapPointToRoute(point, routeCoordinates = [], maxSnapDistance = 80) {
+    const nearest = getNearestRoutePoint(point, routeCoordinates);
+
+    if (!nearest.point || nearest.distance > maxSnapDistance) {
+        return {
+            point,
+            distance: nearest.distance,
+            snapped: false,
+        };
+    }
+
+    return {
+        point: nearest.point,
+        distance: nearest.distance,
+        snapped: true,
+    };
+}
+
 export { decodePolyline, MAPMYINDIA_API_KEY };

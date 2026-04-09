@@ -23,6 +23,7 @@ import TrackingBottomSheet from '../components/TrackingBottomSheet';
 import {
     fetchRoute,
     calculateBearing,
+    getNearestRoutePoint,
 } from '../services/directionsService';
 import {
     setCurrentOrder,
@@ -63,6 +64,9 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
     const [mapReady, setMapReady] = useState(false);
     const [showFullMap, setShowFullMap] = useState(false);
     const headerOpacity = useRef(new Animated.Value(0)).current;
+    const lastRouteRefreshRef = useRef(0);
+    const latestRiderLocationRef = useRef(null);
+    const latestDestinationRef = useRef(null);
 
     useEffect(() => {
         if (!orderId) {
@@ -92,25 +96,101 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
         };
     }, [orderId, token]);
 
+    const getActiveDestination = () => {
+        if (activeLeg === 'to_store' && storeLocation) {
+            return storeLocation;
+        }
+
+        if (currentOrder?.deliveryAddress?.coordinates?.coordinates) {
+            return {
+                latitude: currentOrder.deliveryAddress.coordinates.coordinates[1],
+                longitude: currentOrder.deliveryAddress.coordinates.coordinates[0],
+            };
+        }
+
+        return null;
+    };
+
+    useEffect(() => {
+        latestRiderLocationRef.current = riderLocation;
+        latestDestinationRef.current = getActiveDestination();
+    }, [
+        riderLocation?.latitude,
+        riderLocation?.longitude,
+        activeLeg,
+        storeLocation?.latitude,
+        storeLocation?.longitude,
+        currentOrder?.deliveryAddress?.coordinates?.coordinates?.[0],
+        currentOrder?.deliveryAddress?.coordinates?.coordinates?.[1],
+    ]);
+
+    const fetchRouteData = async (origin, destination) => {
+        try {
+            const result = await fetchRoute(origin, destination);
+            if (result) {
+                dispatch(setRouteCoordinates(result.coordinates));
+                dispatch(setRouteInfo({
+                    distance: result.distance,
+                    duration: result.duration,
+                    distanceValue: result.distanceValue,
+                    durationValue: result.durationValue,
+                }));
+                lastRouteRefreshRef.current = Date.now();
+            }
+        } catch (err) {
+            console.warn('Failed to fetch route:', err);
+        }
+    };
+
     useEffect(() => {
         if (!riderLocation || !currentOrder?.deliveryAddress?.coordinates?.coordinates) return;
 
         if (!['ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'].includes(currentOrder.orderStatus)) return;
-        if (currentOrder?.tracking?.routeCoordinates?.length > 1) return;
+        if (currentOrder?.tracking?.routeCoordinates?.length > 1 || routeCoordinates.length > 1) return;
 
-        const destination = activeLeg === 'to_store' && storeLocation
-            ? storeLocation
-            : currentOrder?.deliveryAddress?.coordinates?.coordinates
-                ? {
-                    latitude: currentOrder.deliveryAddress.coordinates.coordinates[1],
-                    longitude: currentOrder.deliveryAddress.coordinates.coordinates[0],
-                }
-                : null;
+        const destination = getActiveDestination();
 
         if (!destination) return;
 
         fetchRouteData(riderLocation, destination);
-    }, [riderLocation?.latitude, riderLocation?.longitude, currentOrder?.orderStatus, activeLeg, storeLocation?.latitude, storeLocation?.longitude, currentOrder?.tracking?.routeCoordinates?.length]);
+    }, [riderLocation?.latitude, riderLocation?.longitude, currentOrder?.orderStatus, activeLeg, storeLocation?.latitude, storeLocation?.longitude, currentOrder?.tracking?.routeCoordinates?.length, routeCoordinates.length]);
+
+    useEffect(() => {
+        if (!riderLocation || !['ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'].includes(currentOrder?.orderStatus)) {
+            return;
+        }
+
+        const interval = setInterval(() => {
+            const currentRiderLocation = latestRiderLocationRef.current;
+            const destination = latestDestinationRef.current;
+
+            if (currentRiderLocation && destination) {
+                fetchRouteData(currentRiderLocation, destination);
+            }
+        }, 25000);
+
+        return () => clearInterval(interval);
+    }, [currentOrder?.orderStatus]);
+
+    useEffect(() => {
+        if (!riderLocation || routeCoordinates.length < 2) {
+            return;
+        }
+
+        if (!['ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'].includes(currentOrder?.orderStatus)) {
+            return;
+        }
+
+        const nearest = getNearestRoutePoint(riderLocation, routeCoordinates);
+        const now = Date.now();
+
+        if (nearest.distance > 120 && now - lastRouteRefreshRef.current > 10000) {
+            const destination = getActiveDestination();
+            if (destination) {
+                fetchRouteData(riderLocation, destination);
+            }
+        }
+    }, [riderLocation?.latitude, riderLocation?.longitude, routeCoordinates, currentOrder?.orderStatus, activeLeg, storeLocation?.latitude, storeLocation?.longitude, currentOrder?.deliveryAddress?.coordinates?.coordinates?.[0], currentOrder?.deliveryAddress?.coordinates?.coordinates?.[1]]);
 
     useEffect(() => {
         if (riderLocation && previousRiderLocation) {
@@ -159,26 +239,6 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
             }
         } catch (err) {
             dispatch(setError(err.message || 'Failed to load order details'));
-        }
-    };
-
-    const fetchRouteData = async (origin, destination) => {
-        try {
-            const result = await fetchRoute(origin, destination);
-            if (result) {
-                dispatch(setRouteCoordinates(result.coordinates));
-                dispatch(setRouteInfo({
-                    distance: result.distance,
-                    duration: result.duration,
-                    distanceValue: result.distanceValue,
-                    durationValue: result.durationValue,
-                }));
-            } else {
-                dispatch(setRouteCoordinates([]));
-            }
-        } catch (err) {
-            console.warn('Failed to fetch route:', err);
-            dispatch(setRouteCoordinates([]));
         }
     };
 
@@ -306,7 +366,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
                             riderLocation={riderLocation}
                             customerLocation={getCustomerLocation()}
                             storeLocation={storeLocation}
-                            routeCoordinates={currentOrder?.tracking?.routeCoordinates?.length ? currentOrder.tracking.routeCoordinates : routeCoordinates}
+                            routeCoordinates={routeCoordinates?.length ? routeCoordinates : (currentOrder?.tracking?.routeCoordinates || [])}
                             riderHeading={riderHeading}
                             orderStatus={currentOrder.orderStatus}
                             activeLeg={currentOrder?.tracking?.activeLeg || activeLeg}

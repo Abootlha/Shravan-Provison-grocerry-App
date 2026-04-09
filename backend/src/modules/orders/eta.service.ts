@@ -41,7 +41,7 @@ export interface TrackingRouteSnapshot {
 @Injectable()
 export class ETAService {
   private readonly logger = new Logger(ETAService.name);
-  private readonly ETA_CACHE_TTL = 120; // 2 minutes
+  private readonly ETA_CACHE_TTL = 30; // 30 seconds
   private readonly mapplsApiKey: string;
   private readonly directionsUrl = 'https://route.mappls.com/route/direction/route_adv/driving';
 

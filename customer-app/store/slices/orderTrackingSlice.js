@@ -136,11 +136,34 @@ const orderTrackingSlice = createSlice({
                 speed: action.payload.location.speed || null,
             };
             state.lastLocationUpdateAt = action.payload.timestamp;
-            if (action.payload.tracking?.routeCoordinates) {
-                state.routeCoordinates = action.payload.tracking.routeCoordinates;
+            const tracking = action.payload.tracking;
+            if (tracking?.routeCoordinates) {
+                state.routeCoordinates = tracking.routeCoordinates;
             }
-            if (action.payload.tracking?.activeLeg) {
-                state.activeLeg = action.payload.tracking.activeLeg;
+            if (tracking?.activeLeg) {
+                state.activeLeg = tracking.activeLeg;
+            }
+            if (tracking?.distanceRemaining !== undefined) {
+                state.distanceRemaining = tracking.distanceRemaining;
+            }
+            if (tracking?.durationMinutes !== undefined) {
+                state.durationRemaining = tracking.durationMinutes;
+            }
+            if (tracking?.estimatedDeliveryTime && state.currentOrder) {
+                state.currentOrder.estimatedDeliveryTime = tracking.estimatedDeliveryTime;
+            }
+            if (tracking && (tracking.distanceRemaining !== undefined || tracking.durationMinutes !== undefined)) {
+                state.routeInfo = {
+                    ...(state.routeInfo || {}),
+                    distanceValue: tracking.distanceRemaining ?? state.routeInfo?.distanceValue ?? null,
+                    durationValue: tracking.durationMinutes != null ? tracking.durationMinutes * 60 : state.routeInfo?.durationValue ?? null,
+                    distance: tracking.distanceRemaining != null
+                        ? `${(tracking.distanceRemaining / 1000).toFixed(1)} km`
+                        : state.routeInfo?.distance ?? null,
+                    duration: tracking.durationMinutes != null
+                        ? `${tracking.durationMinutes} min`
+                        : state.routeInfo?.duration ?? null,
+                };
             }
         },
         clearRiderLocation: (state) => {
