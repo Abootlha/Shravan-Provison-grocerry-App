@@ -92,7 +92,7 @@ import "../styles/global.css";
             </div>
         </div>
 
-        <script>
+        <script define:vars={{ apiBase: import.meta.env.PUBLIC_API_BASE_URL || 'https://api.lumioui.com/api/v1' }}>
             const token = localStorage.getItem('adminToken');
             if (token) {
                 window.location.replace('/');
@@ -103,7 +103,7 @@ import "../styles/global.css";
             const errorBox = document.getElementById('login-error');
             const usernameInput = document.getElementById('username');
             const passwordInput = document.getElementById('password');
-            const API_BASE = 'http://localhost:3000/api/v1';
+            const API_BASE = apiBase;
 
             form?.addEventListener('submit', async (event) => {
                 event.preventDefault();

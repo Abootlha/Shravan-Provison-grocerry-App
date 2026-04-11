@@ -49,7 +49,7 @@ const STATUS_ACTION_LABELS: Record<string, string> = {
     CANCELLED: 'Cancel',
 };
 const ACTIVE_STATUSES = ['PENDING', 'CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'];
-const TRACKING_SOCKET_URL = import.meta.env.PUBLIC_TRACKING_SERVICE_URL || 'http://localhost:3000/tracking';
+const TRACKING_SOCKET_URL = import.meta.env.PUBLIC_TRACKING_SERVICE_URL || 'https://api.lumioui.com/tracking';
 
 export default function OrdersManager() {
     const [orders, setOrders] = useState<Order[]>([]);

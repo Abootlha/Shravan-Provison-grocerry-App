@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.PUBLIC_API_BASE_URL || 'http://localhost:3000/api/v1';
+const API_BASE = import.meta.env.PUBLIC_API_BASE_URL || 'https://api.lumioui.com/api/v1';
 
 const AUTH_SERVICE = import.meta.env.PUBLIC_AUTH_SERVICE_URL || API_BASE;
 const PRODUCT_SERVICE = import.meta.env.PUBLIC_PRODUCT_SERVICE_URL || API_BASE;

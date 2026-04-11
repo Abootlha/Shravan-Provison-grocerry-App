@@ -4,6 +4,8 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Store, MapPin, Clock, Truck, Phone, Save, Check, Navigation, Edit3, Loader2, Search } from 'lucide-react';
 
+const API_BASE = import.meta.env.PUBLIC_API_BASE_URL || 'https://api.lumioui.com/api/v1';
+
 export default function DeliveryManager() {
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
@@ -36,8 +38,8 @@ export default function DeliveryManager() {
 
     const fetchSettings = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch('http://localhost:3000/api/v1/settings/store', {
+            const token = localStorage.getItem('adminToken');
+            const res = await fetch(`${API_BASE}/settings/store`, {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
@@ -72,7 +74,7 @@ export default function DeliveryManager() {
             const { latitude, longitude } = position.coords;
             try {
                 const token = localStorage.getItem('adminToken');
-                const res = await fetch(`http://localhost:3000/api/v1/maps/reverse-geocode?latitude=${latitude}&longitude=${longitude}`, {
+                const res = await fetch(`${API_BASE}/maps/reverse-geocode?latitude=${latitude}&longitude=${longitude}`, {
                     headers: {
                         Authorization: `Bearer ${token}`
                     }
@@ -120,7 +122,7 @@ export default function DeliveryManager() {
         setSearching(true);
         try {
             const token = localStorage.getItem('adminToken');
-            const res = await fetch(`http://localhost:3000/api/v1/maps/geocode?address=${encodeURIComponent(searchQuery)}`, {
+            const res = await fetch(`${API_BASE}/maps/geocode?address=${encodeURIComponent(searchQuery)}`, {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
@@ -152,7 +154,7 @@ export default function DeliveryManager() {
         setSaving(true);
         try {
             const token = localStorage.getItem('adminToken');
-            const res = await fetch('http://localhost:3000/api/v1/settings/store', {
+            const res = await fetch(`${API_BASE}/settings/store`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
