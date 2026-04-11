@@ -26,7 +26,9 @@ const ProductDetailScreen = ({ route, navigation }) => {
     const { currentLanguage } = useTranslation();
     const dispatch = useDispatch();
     const cartItems = useSelector((state) => state.cart.items);
-    const cartItem = cartItems.find((item) => item.id === product.id);
+    const productId = product.id || product._id || product.productId;
+    const normalizedProduct = { ...product, id: productId };
+    const cartItem = cartItems.find((item) => item.id === productId);
     const quantity = cartItem ? cartItem.quantity : 0;
 
     const [translatedProduct, setTranslatedProduct] = useState(product);
@@ -66,15 +68,15 @@ const ProductDetailScreen = ({ route, navigation }) => {
     ).slice(0, 4);
 
     const handleAddToCart = () => {
-        dispatch(addToCart(product));
+        dispatch(addToCart(normalizedProduct));
     };
 
     const handleIncrement = () => {
-        dispatch(incrementQuantity(product.id));
+        dispatch(incrementQuantity(productId));
     };
 
     const handleDecrement = () => {
-        dispatch(decrementQuantity(product.id));
+        dispatch(decrementQuantity(productId));
     };
 
     const handleBackPress = () => {

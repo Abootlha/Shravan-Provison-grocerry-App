@@ -80,6 +80,7 @@ const CheckoutScreen = ({ navigation }) => {
     };
 
     const PAYMENT_MAP = { cod: 'COD', upi: 'UPI', card: 'CARD' };
+    const mongoIdPattern = /^[a-f\d]{24}$/i;
 
     const handlePlaceOrder = async () => {
         if (!selectedAddress) {
@@ -93,9 +94,22 @@ const CheckoutScreen = ({ navigation }) => {
 
         setIsPlacing(true);
         try {
+            const invalidCartItem = cartItems.find((item) => {
+                const productId = item.productId || item._id || item.id;
+                return !productId || !mongoIdPattern.test(String(productId));
+            });
+
+            if (invalidCartItem) {
+                Alert.alert(
+                    'Cart needs refresh',
+                    'Please remove and add this item again before placing your order.'
+                );
+                return;
+            }
+
             const orderData = {
                 items: cartItems.map(item => ({
-                    productId: item.id,
+                    productId: item.productId || item._id || item.id,
                     name: item.name,
                     quantity: item.quantity,
                     price: item.price,
