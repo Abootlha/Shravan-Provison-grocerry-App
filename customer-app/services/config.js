@@ -1,7 +1,5 @@
-import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
-const LOCAL_IP = Constants.expoConfig?.extra?.LOCAL_IP || '192.168.31.166';
 const PUBLIC_NODE_ENV = Constants.expoConfig?.extra?.PUBLIC_NODE_ENV || 'development';
 const IS_PRODUCTION = PUBLIC_NODE_ENV === 'production';
 
@@ -10,11 +8,7 @@ const getMonolithBaseUrl = () => {
         return 'https://api.lumioui.com/api/v1';
     }
 
-    if (Platform.OS === 'web') {
-        return 'http://localhost:3000/api/v1';
-    }
-
-    return `http://${LOCAL_IP}:3000/api/v1`;
+    return 'http://localhost:3000/api/v1';
 };
 
 export const API_BASE_URL = Constants.expoConfig?.extra?.API_BASE_URL || getMonolithBaseUrl();
@@ -29,7 +23,7 @@ export const LOCATION_URL = Constants.expoConfig?.extra?.LOCATION_SERVICE_URL ||
 export const TRACKING_URL = Constants.expoConfig?.extra?.TRACKING_URL || (
     IS_PRODUCTION
         ? 'https://api.lumioui.com/tracking'
-        : (Platform.OS === 'web' ? 'http://localhost:3000/tracking' : `http://${LOCAL_IP}:3000/tracking`)
+        : 'http://localhost:3000/tracking'
 );
 
 export const API_URL = ORDER_URL;

@@ -1,7 +1,5 @@
-import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
-const LOCAL_IP = Constants.expoConfig?.extra?.LOCAL_IP || '192.168.31.166';
 const PUBLIC_NODE_ENV = Constants.expoConfig?.extra?.PUBLIC_NODE_ENV || 'development';
 const IS_PRODUCTION = PUBLIC_NODE_ENV === 'production';
 
@@ -10,11 +8,7 @@ const getBaseUrl = () => {
     return 'https://api.lumioui.com/api/v1';
   }
 
-  if (Platform.OS === 'web') {
-    return 'http://localhost:3000/api/v1';
-  }
-
-  return `http://${LOCAL_IP}:3000/api/v1`;
+  return 'http://localhost:3000/api/v1';
 };
 
 const getSocketUrl = () => {
@@ -22,11 +16,7 @@ const getSocketUrl = () => {
     return 'https://api.lumioui.com/tracking';
   }
 
-  if (Platform.OS === 'web') {
-    return 'http://localhost:3000/tracking';
-  }
-
-  return `http://${LOCAL_IP}:3000/tracking`;
+  return 'http://localhost:3000/tracking';
 };
 
 export const AUTH_SERVICE_URL = Constants.expoConfig?.extra?.AUTH_SERVICE_URL || getBaseUrl();

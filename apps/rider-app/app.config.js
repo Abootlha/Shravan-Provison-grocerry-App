@@ -92,7 +92,6 @@ module.exports = () => ({
     ],
     extra: {
       PUBLIC_NODE_ENV: getNodeEnv(),
-      LOCAL_IP: loadEnvValue('LOCAL_IP', '192.168.1.7'),
       AUTH_SERVICE_URL: getNodeEnv() === 'production' ? getEnvDefault('API_BASE_URL') : loadEnvValue('AUTH_SERVICE_URL', getEnvDefault('API_BASE_URL')),
       RIDER_SERVICE_URL: getNodeEnv() === 'production' ? getEnvDefault('API_BASE_URL') : loadEnvValue('RIDER_SERVICE_URL', getEnvDefault('API_BASE_URL')),
       ORDER_SERVICE_URL: getNodeEnv() === 'production' ? getEnvDefault('API_BASE_URL') : loadEnvValue('ORDER_SERVICE_URL', getEnvDefault('API_BASE_URL')),

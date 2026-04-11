@@ -73,7 +73,6 @@ module.exports = () => ({
     scheme: 'shravankirana',
     extra: {
       PUBLIC_NODE_ENV: getNodeEnv(),
-      LOCAL_IP: loadEnvValue('LOCAL_IP', '192.168.31.166'),
       API_BASE_URL: getNodeEnv() === 'production' ? getEnvDefault('API_BASE_URL') : loadEnvValue('API_BASE_URL', getEnvDefault('API_BASE_URL')),
       AUTH_SERVICE_URL: getNodeEnv() === 'production' ? getEnvDefault('API_BASE_URL') : loadEnvValue('AUTH_SERVICE_URL', loadEnvValue('API_BASE_URL', getEnvDefault('API_BASE_URL'))),
       USER_SERVICE_URL: getNodeEnv() === 'production' ? getEnvDefault('API_BASE_URL') : loadEnvValue('USER_SERVICE_URL', loadEnvValue('API_BASE_URL', getEnvDefault('API_BASE_URL'))),

@@ -26,9 +26,6 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "scheme": "shravankirana",
-    "extra": {
-      "LOCAL_IP": "192.168.31.166"
-    }
+    "scheme": "shravankirana"
   }
 }
