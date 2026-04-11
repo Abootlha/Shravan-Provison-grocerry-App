@@ -2,6 +2,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
   SubscribeMessage,
+  OnGatewayInit,
   OnGatewayConnection,
   OnGatewayDisconnect,
   ConnectedSocket,
@@ -10,6 +11,9 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Logger, UseGuards, Inject, forwardRef } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { createAdapter } from '@socket.io/redis-adapter';
+import Redis from 'ioredis';
 import { WsJwtGuard } from '../modules/auth/guards/ws-jwt.guard';
 import { Order, OrderStatus } from '../modules/orders/schemas/order.schema';
 import { OrdersService } from '../modules/orders/orders.service';
@@ -33,11 +37,19 @@ interface JoinOrderRoomPayload {
   cors: { origin: '*' },
   namespace: '/tracking',
 })
-export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class TrackingGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server!: Server;
 
   private readonly logger = new Logger(TrackingGateway.name);
+  private readonly locationBroadcastTimers = new Map<string, NodeJS.Timeout>();
+  private readonly pendingLocationBroadcasts = new Map<string, {
+    orderId: string;
+    location: { latitude: number; longitude: number; heading?: number; speed?: number };
+    riderId: string;
+    order?: any;
+  }>();
+  private readonly LOCATION_BROADCAST_THROTTLE_MS = 2000;
 
   constructor(
     @Inject(forwardRef(() => OrdersService))
@@ -45,7 +57,22 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     @Inject(forwardRef(() => RidersService))
     private ridersService: RidersService,
     @InjectModel(Order.name) private orderModel: Model<Order>,
+    private configService: ConfigService,
   ) { }
+
+  async afterInit(server: Server): Promise<void> {
+    const redisHost = this.configService.get<string>('redis.host') || 'localhost';
+    const redisPort = this.configService.get<number>('redis.port') || 6379;
+
+    try {
+      const pubClient = new Redis({ host: redisHost, port: redisPort, maxRetriesPerRequest: 3 });
+      const subClient = pubClient.duplicate();
+      server.adapter(createAdapter(pubClient, subClient));
+      this.logger.log(`Socket.IO Redis adapter enabled for tracking gateway at ${redisHost}:${redisPort}`);
+    } catch (error) {
+      this.logger.warn(`Socket.IO Redis adapter disabled: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
   /**
    * Handle client connection
@@ -69,7 +96,9 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     const roomName = this.getRiderRoomName(user.userId);
     client.join(roomName);
     this.logger.log(`Rider ${user.userId} joined room ${roomName}`);
-    client.emit('joinedRiderRoom', { riderId: user.userId, roomName });
+    const ack = { riderId: user.userId, roomName };
+    client.emit('joinedRiderRoom', ack);
+    client.emit('room.joined', { ...ack, type: 'rider' });
   }
 
   /**
@@ -169,7 +198,9 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.logger.log(`Client ${client.id} (user ${user.userId}) joined room ${roomName}`);
 
     // Send acknowledgment
-    client.emit('joinedOrderRoom', { orderId, roomName });
+    const ack = { orderId, roomName };
+    client.emit('joinedOrderRoom', ack);
+    client.emit('room.joined', { ...ack, type: 'order' });
   }
 
   /**
@@ -188,7 +219,9 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.logger.log(`Client ${client.id} left room ${roomName}`);
 
     // Send acknowledgment
-    client.emit('leftOrderRoom', { orderId, roomName });
+    const ack = { orderId, roomName };
+    client.emit('leftOrderRoom', ack);
+    client.emit('room.left', { ...ack, type: 'order' });
   }
 
   /**
@@ -267,7 +300,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
    */
   broadcastOrderStatusUpdate(orderId: string, order: any): void {
     const roomName = `order_${orderId}`;
-    this.server.to(roomName).emit('orderStatusUpdate', {
+    const payload = {
       orderId,
       status: order.orderStatus,
       timeline: order.timeline,
@@ -275,7 +308,9 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       order,
       rider: order.rider || null,
       tracking: order.tracking || null,
-    });
+    };
+    this.server.to(roomName).emit('orderStatusUpdate', payload);
+    this.server.to(roomName).emit('order.status', payload);
     this.logger.log(`Broadcasted status update for order ${orderId}: ${order.orderStatus}`);
   }
 
@@ -284,7 +319,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
    */
   notifyRiderOfAssignment(riderId: string, order: any): void {
     const roomName = `rider_${riderId}`;
-    this.server.to(roomName).emit('newOrderAssignment', {
+    const payload = {
       order: {
         id: order._id?.toString?.() || order.id?.toString?.(),
         orderId: order.orderId,
@@ -317,18 +352,23 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
         deliveryFee: order.deliveryFee || 0,
         tip: 0,
       },
-    });
-    this.server.to(this.getOrderRoomName(order._id?.toString?.() || order.id)).emit('orderAssigned', {
+    };
+    this.server.to(roomName).emit('newOrderAssignment', payload);
+    this.server.to(roomName).emit('rider.assignment', payload);
+
+    const orderAssignedPayload = {
       orderId: order._id?.toString?.() || order.id,
       rider: order.rider || null,
       order,
-    });
+    };
+    this.server.to(this.getOrderRoomName(order._id?.toString?.() || order.id)).emit('orderAssigned', orderAssignedPayload);
+    this.server.to(this.getOrderRoomName(order._id?.toString?.() || order.id)).emit('order.assigned', orderAssignedPayload);
     this.logger.log(`Notified rider ${riderId} about new order ${order.orderId}`);
   }
 
   notifyRiderOrderPacked(riderId: string, order: any): void {
     const roomName = `rider_${riderId}`;
-    this.server.to(roomName).emit('orderPacked', {
+    const payload = {
       orderId: order._id?.toString?.() || order.id,
       status: order.orderStatus,
       order,
@@ -336,7 +376,9 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
         title: 'Order packed',
         body: `${order.orderId} is packed and ready for pickup.`,
       },
-    });
+    };
+    this.server.to(roomName).emit('orderPacked', payload);
+    this.server.to(roomName).emit('order.packed', payload);
     this.logger.log(`Notified rider ${riderId} that order ${order.orderId} is packed`);
   }
 
@@ -346,14 +388,40 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     riderId: string,
     order?: any,
   ): void {
+    const broadcastKey = `${orderId}:${riderId}`;
+    this.pendingLocationBroadcasts.set(broadcastKey, { orderId, location, riderId, order });
+
+    if (this.locationBroadcastTimers.has(broadcastKey)) {
+      return;
+    }
+
+    this.locationBroadcastTimers.set(broadcastKey, setTimeout(() => {
+      const pending = this.pendingLocationBroadcasts.get(broadcastKey);
+      this.pendingLocationBroadcasts.delete(broadcastKey);
+      this.locationBroadcastTimers.delete(broadcastKey);
+
+      if (!pending) return;
+      this.emitRiderLocationUpdate(pending.orderId, pending.location, pending.riderId, pending.order);
+    }, this.LOCATION_BROADCAST_THROTTLE_MS));
+  }
+
+  private emitRiderLocationUpdate(
+    orderId: string,
+    location: { latitude: number; longitude: number; heading?: number; speed?: number },
+    riderId: string,
+    order?: any,
+  ): void {
     const roomName = `order_${orderId}`;
-    this.server.to(roomName).emit('riderLocationUpdate', {
+    const payload = {
+      orderId,
       riderId,
       location,
       timestamp: new Date(),
       tracking: order?.tracking || null,
       order: order || null,
-    });
+    };
+    this.server.to(roomName).emit('riderLocationUpdate', payload);
+    this.server.to(roomName).emit('rider.location', payload);
     this.logger.log(`Broadcasted location update for rider ${riderId} to order ${orderId}`);
   }
 
@@ -365,14 +433,16 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     const now = new Date();
     const durationMinutes = Math.round((eta.getTime() - now.getTime()) / 60000);
 
-    this.server.to(roomName).emit('etaUpdate', {
+    const payload = {
       orderId,
       estimatedDeliveryTime: eta,
       durationMinutes,
       distanceRemaining: order?.tracking?.distanceRemaining ?? null,
       tracking: order?.tracking || null,
       order: order || null,
-    });
+    };
+    this.server.to(roomName).emit('etaUpdate', payload);
+    this.server.to(roomName).emit('eta.updated', payload);
     this.logger.log(`Broadcasted ETA update for order ${orderId}: ${durationMinutes} minutes`);
   }
 }

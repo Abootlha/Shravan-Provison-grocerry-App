@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
 import * as fc from 'fast-check';
 import { TrackingGateway } from './tracking.gateway';
@@ -33,6 +34,16 @@ describe('TrackingGateway', () => {
     verifyAsync: jest.fn(),
   };
 
+  const mockConfigService = {
+    get: jest.fn((key: string) => {
+      const values: Record<string, string | number> = {
+        'redis.host': 'localhost',
+        'redis.port': 6379,
+      };
+      return values[key];
+    }),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -52,6 +63,10 @@ describe('TrackingGateway', () => {
         {
           provide: JwtService,
           useValue: mockJwtService,
+        },
+        {
+          provide: ConfigService,
+          useValue: mockConfigService,
         },
       ],
     }).compile();
