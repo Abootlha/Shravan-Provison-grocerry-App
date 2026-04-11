@@ -68,6 +68,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
     const lastRouteRefreshRef = useRef(0);
     const latestRiderLocationRef = useRef(null);
     const latestDestinationRef = useRef(null);
+    const socketOrderIdRef = useRef(orderId || null);
 
     useEffect(() => {
         if (!orderId) {
@@ -88,8 +89,8 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
         fetchOrderDetails();
 
         return () => {
-            if (socketOrderId) {
-                socketService.leaveOrderRoom(socketOrderId);
+            if (socketOrderIdRef.current) {
+                socketService.leaveOrderRoom(socketOrderIdRef.current);
             }
             dispatch(clearCurrentOrder());
             dispatch(clearRiderLocation());
@@ -101,6 +102,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
             return;
         }
 
+        socketOrderIdRef.current = socketOrderId;
         socketService.joinOrderRoom(socketOrderId);
     }, [token, socketOrderId]);
 
@@ -231,6 +233,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
             const order = data.order || data;
             dispatch(setCurrentOrder(order));
             const canonicalOrderId = order?._id || order?.id || orderId;
+            socketOrderIdRef.current = canonicalOrderId;
             setSocketOrderId(canonicalOrderId);
             if (token && canonicalOrderId) {
                 socketService.joinOrderRoom(canonicalOrderId);

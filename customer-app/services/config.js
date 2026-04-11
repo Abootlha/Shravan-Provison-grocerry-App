@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
-const LOCAL_IP = Constants.expoConfig?.extra?.LOCAL_IP || '192.168.1.7';
+const LOCAL_IP = Constants.expoConfig?.extra?.LOCAL_IP || '192.168.31.166';
 
 const getMonolithBaseUrl = () => {
     if (!__DEV__) {

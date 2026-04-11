@@ -42,6 +42,7 @@ export interface TrackingRouteSnapshot {
 export class ETAService {
   private readonly logger = new Logger(ETAService.name);
   private readonly ETA_CACHE_TTL = 30; // 30 seconds
+  private readonly TRACKING_ROUTE_CACHE_TTL = 15; // 15 seconds
   private readonly mapplsApiKey: string;
   private readonly directionsUrl = 'https://route.mappls.com/route/direction/route_adv/driving';
 
@@ -309,18 +310,50 @@ export class ETAService {
     riderLocation: LocationDto,
     destination: AddressDto,
   ): Promise<TrackingRouteSnapshot | null> {
+    const cacheKey = this.getTrackingRouteCacheKey(
+      riderLocation.latitude,
+      riderLocation.longitude,
+      destination.latitude,
+      destination.longitude,
+    );
+
     try {
+      const cached = await this.redisService.getJSON<{
+        routeCoordinates: RouteCoordinate[];
+        durationSeconds: number;
+        distanceRemaining: number;
+        cachedAt: string;
+      }>(cacheKey);
+
+      if (cached) {
+        return {
+          routeCoordinates: cached.routeCoordinates,
+          estimatedDeliveryTime: new Date(Date.now() + cached.durationSeconds * 1000),
+          durationMinutes: Math.ceil(cached.durationSeconds / 60),
+          distanceRemaining: cached.distanceRemaining,
+        };
+      }
+
       const { durationSeconds, distanceMeters, routeCoordinates } = await this.callMapplsDirectionsAPI(
         riderLocation,
         destination,
       );
 
-      return {
+      const snapshot = {
         routeCoordinates,
         estimatedDeliveryTime: new Date(Date.now() + durationSeconds * 1000),
         durationMinutes: Math.ceil(durationSeconds / 60),
         distanceRemaining: distanceMeters,
       };
+
+      await this.redisService.setJSON(cacheKey, {
+        routeCoordinates,
+        durationSeconds,
+        distanceRemaining: distanceMeters,
+        cachedAt: new Date().toISOString(),
+      }, this.TRACKING_ROUTE_CACHE_TTL);
+
+      return snapshot;
     } catch (error) {
       this.logger.warn(
         `Failed to build tracking route snapshot: ${error instanceof Error ? error.message : String(error)}`,
@@ -345,5 +378,19 @@ export class ETAService {
     const roundedDestLng = destLng.toFixed(4);
     
     return `eta:${roundedRiderLat}:${roundedRiderLng}:${roundedDestLat}:${roundedDestLng}`;
+  }
+
+  private getTrackingRouteCacheKey(
+    riderLat: number,
+    riderLng: number,
+    destLat: number,
+    destLng: number,
+  ): string {
+    const roundedRiderLat = riderLat.toFixed(4);
+    const roundedRiderLng = riderLng.toFixed(4);
+    const roundedDestLat = destLat.toFixed(4);
+    const roundedDestLng = destLng.toFixed(4);
+
+    return `tracking-route:${roundedRiderLat}:${roundedRiderLng}:${roundedDestLat}:${roundedDestLng}`;
   }
 }

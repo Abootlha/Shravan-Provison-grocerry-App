@@ -131,8 +131,8 @@ class SocketService {
                 location: {
                     latitude: data.location?.latitude ?? data.lat,
                     longitude: data.location?.longitude ?? data.lng,
-                    heading: data.heading,
-                    speed: data.speed,
+                    heading: data.location?.heading ?? data.heading,
+                    speed: data.location?.speed ?? data.speed,
                 },
                 timestamp: data.timestamp,
                 tracking: data.tracking || data.order?.tracking || null,
@@ -184,11 +184,17 @@ class SocketService {
 
     joinOrderRoom(orderId) {
         console.log('Joining order room:', orderId);
+        const previousOrderId = this.currentOrderId;
         this.currentOrderId = orderId;
 
         if (!this.socket?.connected) {
             console.warn('Cannot join order room: socket not connected (will join upon connection)');
             return;
+        }
+
+        if (previousOrderId && previousOrderId !== orderId && this.joinedOrderId === previousOrderId) {
+            this.socket.emit('leaveOrderRoom', { orderId: previousOrderId });
+            this.joinedOrderId = null;
         }
 
         if (this.joinedOrderId === orderId) {

@@ -150,13 +150,19 @@ const OrderTrackingMap = ({
         });
 
         if (customerLocation?.latitude && customerLocation?.longitude) {
-          L.marker([customerLocation.latitude, customerLocation.longitude], { icon: customerIcon })
+          if (customerMarkerRef.current) {
+            map.removeLayer(customerMarkerRef.current);
+          }
+          customerMarkerRef.current = L.marker([customerLocation.latitude, customerLocation.longitude], { icon: customerIcon })
             .addTo(map)
             .bindPopup('Delivery Location');
         }
 
         if (storeLocation?.latitude && storeLocation?.longitude) {
-          L.marker([storeLocation.latitude, storeLocation.longitude], { icon: storeIcon })
+          if (storeMarkerRef.current) {
+            map.removeLayer(storeMarkerRef.current);
+          }
+          storeMarkerRef.current = L.marker([storeLocation.latitude, storeLocation.longitude], { icon: storeIcon })
             .addTo(map)
             .bindPopup('Store Location');
         }
