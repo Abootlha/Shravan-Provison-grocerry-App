@@ -11,11 +11,12 @@ const SETTINGS_SERVICE = appConfig.settingsServiceUrl;
 const SUBCATEGORY_SERVICE = appConfig.subcategoryServiceUrl || PRODUCT_SERVICE;
 const ITEM_GROUP_SERVICE = appConfig.itemGroupServiceUrl || PRODUCT_SERVICE;
 
-const IS_MICROSERVICES_MODE = Boolean(
-    import.meta.env.PUBLIC_PRODUCT_SERVICE_URL ||
-    import.meta.env.PUBLIC_ORDER_SERVICE_URL ||
-    import.meta.env.PUBLIC_RIDER_SERVICE_URL ||
-    import.meta.env.PUBLIC_AUTH_SERVICE_URL
+const IS_MICROSERVICES_MODE = [
+    PRODUCT_SERVICE,
+    ORDER_SERVICE,
+    RIDER_SERVICE,
+    AUTH_SERVICE,
+].some((serviceUrl) => serviceUrl !== API_BASE
 );
 
 function isTokenExpired(): boolean {
