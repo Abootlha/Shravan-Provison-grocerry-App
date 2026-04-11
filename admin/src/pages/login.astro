@@ -1,5 +1,8 @@
 ---
 import "../styles/global.css";
+import { getApiBaseUrl } from "../lib/config";
+
+const apiBase = getApiBaseUrl();
 ---
 
 <!doctype html>
@@ -92,7 +95,7 @@ import "../styles/global.css";
             </div>
         </div>
 
-        <script define:vars={{ apiBase: import.meta.env.PUBLIC_API_BASE_URL || 'https://api.lumioui.com/api/v1' }}>
+        <script define:vars={{ apiBase }}>
             const token = localStorage.getItem('adminToken');
             if (token) {
                 window.location.replace('/');

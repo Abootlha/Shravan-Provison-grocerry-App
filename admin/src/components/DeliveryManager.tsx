@@ -3,8 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Store, MapPin, Clock, Truck, Phone, Save, Check, Navigation, Edit3, Loader2, Search } from 'lucide-react';
+import { getApiBaseUrl } from '../lib/config';
 
-const API_BASE = import.meta.env.PUBLIC_API_BASE_URL || 'https://api.lumioui.com/api/v1';
+const API_BASE = getApiBaseUrl();
 
 export default function DeliveryManager() {
     const [saving, setSaving] = useState(false);

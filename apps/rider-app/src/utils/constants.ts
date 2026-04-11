@@ -2,10 +2,12 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 const LOCAL_IP = Constants.expoConfig?.extra?.LOCAL_IP || '192.168.31.166';
+const PUBLIC_NODE_ENV = Constants.expoConfig?.extra?.PUBLIC_NODE_ENV || 'development';
+const IS_PRODUCTION = PUBLIC_NODE_ENV === 'production';
 
 const getBaseUrl = () => {
-  if (!__DEV__) {
-    return 'https://api.shravankirana.com/api/v1';
+  if (IS_PRODUCTION) {
+    return 'https://api.lumioui.com/api/v1';
   }
 
   if (Platform.OS === 'web') {
@@ -16,8 +18,8 @@ const getBaseUrl = () => {
 };
 
 const getSocketUrl = () => {
-  if (!__DEV__) {
-    return 'https://api.shravankirana.com/tracking';
+  if (IS_PRODUCTION) {
+    return 'https://api.lumioui.com/tracking';
   }
 
   if (Platform.OS === 'web') {
@@ -27,13 +29,13 @@ const getSocketUrl = () => {
   return `http://${LOCAL_IP}:3000/tracking`;
 };
 
-export const AUTH_SERVICE_URL = getBaseUrl();
+export const AUTH_SERVICE_URL = Constants.expoConfig?.extra?.AUTH_SERVICE_URL || getBaseUrl();
 
-export const RIDER_SERVICE_URL = getBaseUrl();
+export const RIDER_SERVICE_URL = Constants.expoConfig?.extra?.RIDER_SERVICE_URL || getBaseUrl();
 
-export const ORDER_SERVICE_URL = getBaseUrl();
+export const ORDER_SERVICE_URL = Constants.expoConfig?.extra?.ORDER_SERVICE_URL || getBaseUrl();
 
-export const SOCKET_URL = getSocketUrl();
+export const SOCKET_URL = Constants.expoConfig?.extra?.TRACKING_URL || getSocketUrl();
 
 export const LOCATION_UPDATE_INTERVAL = 5000;
 export const LOCATION_UPDATE_THROTTLE = 5000;

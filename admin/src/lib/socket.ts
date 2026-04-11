@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
+import { getSocketUrl } from './config';
 
-const SOCKET_URL = import.meta.env.PUBLIC_TRACKING_SERVICE_URL || 'https://api.lumioui.com/tracking';
+const SOCKET_URL = getSocketUrl();
 
 class SocketClient {
     private socket: Socket | null = null;

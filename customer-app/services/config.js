@@ -2,10 +2,12 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 const LOCAL_IP = Constants.expoConfig?.extra?.LOCAL_IP || '192.168.31.166';
+const PUBLIC_NODE_ENV = Constants.expoConfig?.extra?.PUBLIC_NODE_ENV || 'development';
+const IS_PRODUCTION = PUBLIC_NODE_ENV === 'production';
 
 const getMonolithBaseUrl = () => {
-    if (!__DEV__) {
-        return 'https://api.shravankirana.com/api/v1';
+    if (IS_PRODUCTION) {
+        return 'https://api.lumioui.com/api/v1';
     }
 
     if (Platform.OS === 'web') {
@@ -24,9 +26,11 @@ export const PRODUCT_URL = Constants.expoConfig?.extra?.PRODUCT_SERVICE_URL || A
 export const CART_URL = Constants.expoConfig?.extra?.CART_SERVICE_URL || API_BASE_URL;
 export const LOCATION_URL = Constants.expoConfig?.extra?.LOCATION_SERVICE_URL || API_BASE_URL;
 
-export const TRACKING_URL = __DEV__
-    ? (Platform.OS === 'web' ? 'http://localhost:3000/tracking' : `http://${LOCAL_IP}:3000/tracking`)
-    : 'https://api.shravankirana.com/tracking';
+export const TRACKING_URL = Constants.expoConfig?.extra?.TRACKING_URL || (
+    IS_PRODUCTION
+        ? 'https://api.lumioui.com/tracking'
+        : (Platform.OS === 'web' ? 'http://localhost:3000/tracking' : `http://${LOCAL_IP}:3000/tracking`)
+);
 
 export const API_URL = ORDER_URL;
 

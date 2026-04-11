@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { api } from '../lib/api';
+import { getTrackingServiceUrl } from '../lib/config';
 import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
 import { Badge } from './ui/badge';
@@ -49,7 +50,7 @@ const STATUS_ACTION_LABELS: Record<string, string> = {
     CANCELLED: 'Cancel',
 };
 const ACTIVE_STATUSES = ['PENDING', 'CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'];
-const TRACKING_SOCKET_URL = import.meta.env.PUBLIC_TRACKING_SERVICE_URL || 'https://api.lumioui.com/tracking';
+const TRACKING_SOCKET_URL = getTrackingServiceUrl();
 
 export default function OrdersManager() {
     const [orders, setOrders] = useState<Order[]>([]);

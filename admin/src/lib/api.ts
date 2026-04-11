@@ -1,13 +1,15 @@
-const API_BASE = import.meta.env.PUBLIC_API_BASE_URL || 'https://api.lumioui.com/api/v1';
+import { appConfig } from './config';
 
-const AUTH_SERVICE = import.meta.env.PUBLIC_AUTH_SERVICE_URL || API_BASE;
-const PRODUCT_SERVICE = import.meta.env.PUBLIC_PRODUCT_SERVICE_URL || API_BASE;
-const ORDER_SERVICE = import.meta.env.PUBLIC_ORDER_SERVICE_URL || API_BASE;
-const RIDER_SERVICE = import.meta.env.PUBLIC_RIDER_SERVICE_URL || API_BASE;
-const ANALYTICS_SERVICE = import.meta.env.PUBLIC_ANALYTICS_SERVICE_URL || API_BASE;
-const SETTINGS_SERVICE = import.meta.env.PUBLIC_SETTINGS_SERVICE_URL || API_BASE;
-const SUBCATEGORY_SERVICE = import.meta.env.PUBLIC_SUBCATEGORY_SERVICE_URL || PRODUCT_SERVICE;
-const ITEM_GROUP_SERVICE = import.meta.env.PUBLIC_ITEM_GROUP_SERVICE_URL || PRODUCT_SERVICE;
+const API_BASE = appConfig.apiBaseUrl;
+
+const AUTH_SERVICE = appConfig.authServiceUrl;
+const PRODUCT_SERVICE = appConfig.productServiceUrl;
+const ORDER_SERVICE = appConfig.orderServiceUrl;
+const RIDER_SERVICE = appConfig.riderServiceUrl;
+const ANALYTICS_SERVICE = appConfig.analyticsServiceUrl;
+const SETTINGS_SERVICE = appConfig.settingsServiceUrl;
+const SUBCATEGORY_SERVICE = appConfig.subcategoryServiceUrl || PRODUCT_SERVICE;
+const ITEM_GROUP_SERVICE = appConfig.itemGroupServiceUrl || PRODUCT_SERVICE;
 
 const IS_MICROSERVICES_MODE = Boolean(
     import.meta.env.PUBLIC_PRODUCT_SERVICE_URL ||
