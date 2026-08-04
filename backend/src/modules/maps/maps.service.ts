@@ -11,6 +11,24 @@ export class MapsService {
   private readonly atlasBaseUrl = 'https://atlas.mappls.com/api/places';
   private readonly legacyBaseUrl = 'https://apis.mapmyindia.com/advancedmaps/v1';
   private readonly oauthUrl = 'https://outpost.mappls.com/api/security/oauth/token';
+
+  // Store (delivery) centre — Gorakhpur by default. Used to bound searches so
+  // cross-state/irrelevant results are never returned (like Zepto/Blinkit).
+  private get storeLocation(): { latitude: number; longitude: number } {
+    const lat = parseFloat(
+      this.configService.get<string>('STORE_LATITUDE') || '26.7588',
+    );
+    const lng = parseFloat(
+      this.configService.get<string>('STORE_LONGITUDE') || '83.3700',
+    );
+    return { latitude: lat, longitude: lng };
+  }
+
+  private get deliveryRadiusKm(): number {
+    return parseFloat(
+      this.configService.get<string>('STORE_MAX_DELIVERY_KM') || '10',
+    );
+  }
   private accessToken: string | null = null;
   private accessTokenExpiresAt = 0;
 
@@ -64,7 +82,10 @@ export class MapsService {
     };
   }
 
-  private async geocodeWithFallback(address: string) {
+  private async geocodeWithFallback(
+    address: string,
+    near?: { latitude: number; longitude: number },
+  ) {
     const query = address.trim();
     const headers = await this.getBearerHeaders();
     const response = await axios.get(`${this.atlasBaseUrl}/geocode`, {
@@ -72,8 +93,9 @@ export class MapsService {
       params: {
         address: query,
         itemCount: 1,
+        bounds: this.buildBoundingBox(near ?? this.storeLocation, this.deliveryRadiusKm + 5),
       },
-      timeout: 10000,
+      timeout: 8000,
     });
 
     const result = response.data?.copResults;
@@ -81,7 +103,7 @@ export class MapsService {
       return null;
     }
 
-    const fallback = await this.lookupCoordinatesFallback(query);
+    const fallback = await this.lookupCoordinatesFallback(query, near);
 
     return {
       placeId: result.eLoc || query,
@@ -99,19 +121,25 @@ export class MapsService {
     };
   }
 
-  private async lookupCoordinatesFallback(query: string) {
+  private async lookupCoordinatesFallback(
+    query: string,
+    near?: { latitude: number; longitude: number },
+  ) {
     try {
+      const centre = near ?? this.storeLocation;
       const response = await axios.get('https://nominatim.openstreetmap.org/search', {
         params: {
           q: query,
           format: 'jsonv2',
           countrycodes: 'in',
           limit: 1,
+          viewbox: this.buildBoundingBox(centre, this.deliveryRadiusKm + 5),
+          bounded: 1,
         },
         headers: {
           'User-Agent': 'ShravanKirana/1.0 (maps proxy)',
         },
-        timeout: 10000,
+        timeout: 6000,
       });
 
       const top = response.data?.[0];
@@ -119,17 +147,21 @@ export class MapsService {
         return null;
       }
 
-      return {
+      const coords = {
         latitude: parseFloat(top.lat),
         longitude: parseFloat(top.lon),
       };
+      if (!this.withinDeliveryRadius(coords)) {
+        return null;
+      }
+      return coords;
     } catch (error) {
       this.logger.warn(`Coordinate fallback failed for "${query}"`);
       return null;
     }
   }
 
-  async searchPlaces(query: string) {
+  async searchPlaces(query: string, near?: { latitude: number; longitude: number }) {
     if (!query?.trim()) {
       throw new BadRequestException('Query is required');
     }
@@ -140,7 +172,7 @@ export class MapsService {
 
     // 1 & 2. Fetch from both providers in parallel to cut latency.
     const [nominatimResults, mapplsResults] = await Promise.all([
-      this.searchNominatim(trimmedQuery),
+      this.searchNominatim(trimmedQuery, near),
       this.searchMappls(trimmedQuery),
     ]);
 
@@ -152,11 +184,11 @@ export class MapsService {
       }
     }
 
-    // 3. Fallback: If no results found yet, use direct geocode fallback
+    // 3. Fallback: If no results found yet, use bounded direct geocode fallback
     if (results.length === 0) {
       try {
-        const directGeocode = await this.geocodeWithFallback(trimmedQuery);
-        if (directGeocode?.latitude && directGeocode?.longitude) {
+        const directGeocode = await this.geocodeWithFallback(trimmedQuery, near);
+        if (directGeocode && this.withinDeliveryRadius(this.coordsOf(directGeocode)!)) {
           const parts = (directGeocode.formattedAddress || trimmedQuery).split(',').map((s: string) => s.trim());
           results.push({
             ...directGeocode,
@@ -168,14 +200,75 @@ export class MapsService {
       }
     }
 
+    // 4. Keep only results inside the store's delivery radius, closest first.
+    const bounded = results
+      .map((item) => ({ item, coords: this.coordsOf(item) }))
+      .filter(({ coords }) => coords && this.withinDeliveryRadius(coords))
+      .sort(
+        (a, b) =>
+          this.distanceKm(this.storeLocation, a.coords!) -
+          this.distanceKm(this.storeLocation, b.coords!),
+      )
+      .map(({ item }) => item);
+
     return {
       responseCode: 200,
-      results,
+      results: bounded,
     };
   }
 
-  private async searchNominatim(query: string): Promise<any[]> {
+  private coordsOf(item: any): { latitude: number; longitude: number } | null {
+    const lat = parseFloat(item?.latitude);
+    const lng = parseFloat(item?.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return null;
+    }
+    return { latitude: lat, longitude: lng };
+  }
+
+  private withinDeliveryRadius(coords: { latitude: number; longitude: number }) {
+    return (
+      this.distanceKm(this.storeLocation, coords) <= this.deliveryRadiusKm
+    );
+  }
+
+  private distanceKm(
+    a: { latitude: number; longitude: number },
+    b: { latitude: number; longitude: number },
+  ) {
+    const R = 6371;
+    const dLat = ((b.latitude - a.latitude) * Math.PI) / 180;
+    const dLon = ((b.longitude - a.longitude) * Math.PI) / 180;
+    const sLatA = (a.latitude * Math.PI) / 180;
+    const sLatB = (b.latitude * Math.PI) / 180;
+    const h =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(sLatA) * Math.cos(sLatB) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+
+  private buildBoundingBox(
+    centre: { latitude: number; longitude: number },
+    radiusKm: number,
+  ) {
+    const kmPerDeg = 111;
+    const offset = Math.max(radiusKm, 1) / kmPerDeg;
+    const minLat = centre.latitude - offset;
+    const maxLat = centre.latitude + offset;
+    const offsetLon = offset / Math.cos((centre.latitude * Math.PI) / 180);
+    const minLon = centre.longitude - offsetLon;
+    const maxLon = centre.longitude + offsetLon;
+    return `${minLon},${minLat},${maxLon},${maxLat}`;
+  }
+
+  private async searchNominatim(
+    query: string,
+    near?: { latitude: number; longitude: number },
+  ): Promise<any[]> {
     try {
+      // Geographic bias: restrict results to a box around the user (or store).
+      const centre = near ?? this.storeLocation;
+      const viewbox = this.buildBoundingBox(centre, this.deliveryRadiusKm + 5);
       const nomRes = await axios.get('https://nominatim.openstreetmap.org/search', {
         params: {
           q: query,
@@ -183,11 +276,13 @@ export class MapsService {
           countrycodes: 'in',
           limit: 10,
           addressdetails: 1,
+          viewbox,
+          bounded: 1,
         },
         headers: {
           'User-Agent': 'ShravanKirana/1.0 (maps proxy)',
         },
-        timeout: 8000,
+        timeout: 6000,
       });
 
       if (!Array.isArray(nomRes.data)) {

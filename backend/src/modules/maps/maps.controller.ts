@@ -6,8 +6,16 @@ export class MapsController {
   constructor(private readonly mapsService: MapsService) {}
 
   @Get('search')
-  async search(@Query('query') query: string) {
-    return this.mapsService.searchPlaces(query);
+  async search(
+    @Query('query') query: string,
+    @Query('near_lat') nearLat?: string,
+    @Query('near_lng') nearLng?: string,
+  ) {
+    const near =
+      nearLat && nearLng
+        ? { latitude: parseFloat(nearLat), longitude: parseFloat(nearLng) }
+        : undefined;
+    return this.mapsService.searchPlaces(query, near);
   }
 
   @Get('geocode')
