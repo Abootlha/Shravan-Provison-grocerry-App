@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     View,
     Text,
@@ -141,14 +141,6 @@ const LocationScreen = ({ navigation }) => {
         setIsSearching(false);
     };
 
-    // Fetch saved addresses from backend on every focus (so newly added
-    // addresses appear when returning from AddAddress without remounting)
-    useFocusEffect(
-        useCallback(() => {
-            fetchSavedAddresses();
-        }, [])
-    );
-
     const fetchSavedAddresses = async () => {
         setIsFetchingAddresses(true);
         try {
@@ -216,49 +208,62 @@ const LocationScreen = ({ navigation }) => {
         }
     };
 
+    // Detect the user's current (GPS) location. Returns the formatted address
+    // object, or null if permission was denied / location unavailable.
+    const detectCurrentLocation = useCallback(async () => {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+            return null;
+        }
+
+        const location = await Location.getCurrentPositionAsync({});
+        const { latitude, longitude } = location.coords;
+
+        let addressText = 'Medical Road, Gorakhpur';
+        let city = 'Gorakhpur';
+        let pincode = '273001';
+        try {
+            const [address] = await Location.reverseGeocodeAsync({ latitude, longitude });
+            if (address) {
+                addressText = `${address.name || ''} ${address.street || ''}`.trim() || addressText;
+                city = address.city || address.subregion || city;
+                pincode = address.postalCode || pincode;
+            }
+        } catch (err) {
+            console.log('Reverse geocode error during location detect:', err);
+        }
+
+        return {
+            id: `current-${Date.now()}`,
+            type: isHi ? 'वर्तमान स्थान' : 'Current Location',
+            address: addressText,
+            city,
+            pincode,
+            isDefault: false,
+            latitude,
+            longitude,
+            coords: { latitude, longitude },
+        };
+    }, [isHi]);
+
     const handleEnableLocation = async () => {
         dispatch(setLoading(true));
         try {
-            const { status } = await Location.requestForegroundPermissionsAsync();
-            if (status !== 'granted') {
+            const loc = await detectCurrentLocation();
+            if (!loc) {
+                dispatch(setLoading(false));
                 Alert.alert(
                     isHi ? 'अनुमति अस्वीकृत' : 'Permission Denied',
                     isHi
                         ? 'स्थान सेवा का उपयोग करने के लिए स्थान अनुमति आवश्यक है।'
                         : 'Location permission is required to use this feature. Please enable it in settings.'
                 );
-                dispatch(setLoading(false));
                 return;
             }
 
-            const location = await Location.getCurrentPositionAsync({});
-            const { latitude, longitude } = location.coords;
-
-            // Reverse geocode to get address
-            const [address] = await Location.reverseGeocodeAsync({ latitude, longitude });
-
-            if (address) {
-                const addressText =
-                    `${address.name || ''} ${address.street || ''}`.trim() || 'Medical Road, Gorakhpur';
-                const city = address.city || address.subregion || 'Gorakhpur';
-                const pincode = address.postalCode || '273001';
-
-                const formattedAddress = {
-                    id: 'current',
-                    type: isHi ? 'वर्तमान स्थान' : 'Current Location',
-                    address: addressText,
-                    city,
-                    pincode,
-                    isDefault: false,
-                    latitude,
-                    longitude,
-                    coords: { latitude, longitude },
-                };
-
-                dispatch(setCurrentLocation(formattedAddress));
-                dispatch(setSelectedAddress(formattedAddress));
-                dispatch(setLocationEnabled(true));
-            }
+            dispatch(setCurrentLocation(loc));
+            dispatch(setSelectedAddress(loc));
+            dispatch(setLocationEnabled(true));
         } catch (error) {
             Alert.alert(
                 isHi ? 'त्रुटि' : 'Error',
@@ -269,6 +274,40 @@ const LocationScreen = ({ navigation }) => {
             dispatch(setLoading(false));
         }
     };
+
+    // Auto-detect the current location when the map opens with nothing selected,
+    // so the map centres on the user instead of a hardcoded fallback.
+    const autoLocatedRef = useRef(false);
+    const autoDetectCurrentLocation = useCallback(async () => {
+        if (autoLocatedRef.current) return;
+        if (selectedAddress) return;
+
+        try {
+            const loc = await detectCurrentLocation();
+            if (loc) {
+                dispatch(setCurrentLocation(loc));
+                dispatch(setSelectedAddress(loc));
+                dispatch(setLocationEnabled(true));
+                autoLocatedRef.current = true;
+            }
+        } catch (err) {
+            console.log('Auto location detect failed:', err);
+        }
+    }, [detectCurrentLocation, selectedAddress, dispatch]);
+
+    // Fetch saved addresses + auto-detect current location on every focus.
+    // Refs keep the effect callback stable so it doesn't re-run in a loop.
+    const fetchSavedAddressesRef = useRef(fetchSavedAddresses);
+    fetchSavedAddressesRef.current = fetchSavedAddresses;
+    const autoDetectRef = useRef(autoDetectCurrentLocation);
+    autoDetectRef.current = autoDetectCurrentLocation;
+
+    useFocusEffect(
+        useCallback(() => {
+            fetchSavedAddressesRef.current();
+            autoDetectRef.current();
+        }, [])
+    );
 
     const handleSelectAddress = (address) => {
         dispatch(setSelectedAddress(address));
@@ -303,7 +342,49 @@ const LocationScreen = ({ navigation }) => {
         }
     };
 
-    const handleConfirmLocation = () => {
+    const handleConfirmLocation = async () => {
+        // Ensure there is a selected address (auto-detect current location if needed)
+        if (!selectedAddress) {
+            try {
+                const loc = await detectCurrentLocation();
+                if (loc) {
+                    dispatch(setCurrentLocation(loc));
+                    dispatch(setSelectedAddress(loc));
+                }
+            } catch (err) {
+                console.log('Confirm location detect failed:', err);
+            }
+        }
+
+        const current = selectedAddress;
+        if (current && current.latitude && current.longitude) {
+            const alreadySaved = savedAddresses.some(
+                (a) =>
+                    (a.address || '').toLowerCase() === (current.address || '').toLowerCase() &&
+                    (a.city || '').toLowerCase() === (current.city || '').toLowerCase()
+            );
+
+            if (!alreadySaved) {
+                try {
+                    const type =
+                        current.type === 'Current Location' || current.type === 'Selected Location'
+                            ? 'Home'
+                            : current.type;
+                    await UserService.addAddress({
+                        type,
+                        address: current.address,
+                        city: current.city || 'Gorakhpur',
+                        pincode: current.pincode || '273001',
+                        isDefault: savedAddresses.length === 0,
+                        latitude: current.latitude,
+                        longitude: current.longitude,
+                    });
+                } catch (err) {
+                    console.log('Failed to save confirmed location:', err);
+                }
+            }
+        }
+
         if (navigation.canGoBack()) {
             navigation.goBack();
         } else {
