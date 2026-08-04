@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     View,
     Text,
@@ -13,6 +13,7 @@ import {
     Modal,
     Platform,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useDispatch, useSelector } from 'react-redux';
@@ -140,10 +141,13 @@ const LocationScreen = ({ navigation }) => {
         setIsSearching(false);
     };
 
-    // Fetch saved addresses from backend on mount
-    useEffect(() => {
-        fetchSavedAddresses();
-    }, []);
+    // Fetch saved addresses from backend on every focus (so newly added
+    // addresses appear when returning from AddAddress without remounting)
+    useFocusEffect(
+        useCallback(() => {
+            fetchSavedAddresses();
+        }, [])
+    );
 
     const fetchSavedAddresses = async () => {
         setIsFetchingAddresses(true);
@@ -424,30 +428,10 @@ const LocationScreen = ({ navigation }) => {
         }
     };
 
-    // Address list to display
-    const displayAddresses =
-        savedAddresses && savedAddresses.length > 0
-            ? savedAddresses
-            : [
-                {
-                    id: 'dummy-1',
-                    type: 'Home',
-                    address: 'Medical Road, Gorakhpur, Uttar Pradesh',
-                    city: 'Gorakhpur',
-                    pincode: '273001',
-                    isDefault: true,
-                },
-                {
-                    id: 'dummy-2',
-                    type: 'Office',
-                    address: 'Taramandal Road, Gorakhpur, Uttar Pradesh',
-                    city: 'Gorakhpur',
-                    pincode: '273001',
-                    isDefault: false,
-                },
-            ];
+    // Address list to display (no hardcoded fallbacks — show empty state instead)
+    const displayAddresses = savedAddresses || [];
 
-    const currentDisplayAddr = selectedAddress || displayAddresses[0];
+    const currentDisplayAddr = selectedAddress || displayAddresses[0] || null;
 
     return (
         <SafeAreaView style={styles.container}>
@@ -661,6 +645,15 @@ const LocationScreen = ({ navigation }) => {
                             {isFetchingAddresses ? (
                                 <View style={styles.loadingBox}>
                                     <ActivityIndicator size="small" color="#7C3AED" />
+                                </View>
+                            ) : displayAddresses.length === 0 ? (
+                                <View style={styles.emptyAddressBox}>
+                                    <Home01Icon size={28} color="#C4B5FD" />
+                                    <Text style={styles.emptyAddressText}>
+                                        {isHi
+                                            ? 'कोई सहेजा गया पता नहीं। नया पता जोड़ें या अपने वर्तमान स्थान का उपयोग करें।'
+                                            : 'No saved addresses. Add a new address or use your current location.'}
+                                    </Text>
                                 </View>
                             ) : (
                                 displayAddresses.map((item, index) => {
@@ -1276,6 +1269,18 @@ const styles = StyleSheet.create({
     loadingBox: {
         padding: 24,
         alignItems: 'center',
+    },
+    emptyAddressBox: {
+        padding: 28,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 10,
+    },
+    emptyAddressText: {
+        fontSize: 13,
+        color: '#9CA3AF',
+        textAlign: 'center',
+        lineHeight: 19,
     },
     addressRowItem: {
         flexDirection: 'row',
