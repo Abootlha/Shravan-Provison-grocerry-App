@@ -46,6 +46,16 @@ const CategoriesScreen = ({ navigation }) => {
     const [translatedGroups, setTranslatedGroups] = useState(CATEGORY_GROUPS);
 
     useEffect(() => {
+        const unsubscribe = navigation.addListener('focus', () => {
+            DeviceEventEmitter.emit('SET_TAB_BAR_VISIBLE', true);
+            DeviceEventEmitter.emit('ON_SCROLL_Y', 0);
+        });
+        DeviceEventEmitter.emit('SET_TAB_BAR_VISIBLE', true);
+        DeviceEventEmitter.emit('ON_SCROLL_Y', 0);
+        return unsubscribe;
+    }, [navigation]);
+
+    useEffect(() => {
         fetchData();
     }, [currentLanguage]);
 

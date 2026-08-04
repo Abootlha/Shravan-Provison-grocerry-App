@@ -10,6 +10,7 @@ import {
     Alert,
     ActivityIndicator,
     Dimensions,
+    ScrollView,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { Platform } from 'react-native';
@@ -25,6 +26,7 @@ import {
     Home01Icon,
     Briefcase01Icon,
     Building01Icon,
+    Cancel01Icon,
 } from 'hugeicons-react-native';
 import { COLORS } from '../constants';
 import { setSelectedAddress, addSavedAddress } from '../store/slices/locationSlice';
@@ -86,12 +88,42 @@ const AddAddressScreen = ({ navigation, route }) => {
         pincode: editAddress?.pincode || '273202',
     });
     const [searchText, setSearchText] = useState(searchQuery);
+    const [suggestions, setSuggestions] = useState([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const [isSearchingLoading, setIsSearchingLoading] = useState(false);
     const [isServiceable, setIsServiceable] = useState(true);
     const [distanceKm, setDistanceKm] = useState(3.2);
     const [isLoading, setIsLoading] = useState(false);
     const [isCheckingServiceability, setIsCheckingServiceability] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [addressType, setAddressType] = useState(editAddress?.type || 'Home');
+
+    // Live search debouncing effect for Zepto-style address suggestions
+    useEffect(() => {
+        if (!searchText || searchText.trim().length < 2) {
+            setSuggestions([]);
+            setIsSearching(false);
+            setIsSearchingLoading(false);
+            return;
+        }
+
+        setIsSearching(true);
+        setIsSearchingLoading(true);
+
+        const timer = setTimeout(async () => {
+            try {
+                const results = await searchPlaces(searchText.trim(), selectedLocation);
+                setSuggestions(results || []);
+            } catch (err) {
+                console.log('Search places error:', err);
+                setSuggestions([]);
+            } finally {
+                setIsSearchingLoading(false);
+            }
+        }, 300);
+
+        return () => clearTimeout(timer);
+    }, [searchText]);
 
     // Get user's current location on mount (unless editing existing location)
     useEffect(() => {
@@ -244,7 +276,60 @@ const AddAddressScreen = ({ navigation, route }) => {
 
     const handleRegionChangeComplete = (newRegion) => {
         setRegion(newRegion);
-        // Map panning only moves viewport; pin indicator moves ONLY when user taps map or presses GPS button
+    };
+
+    const handleSelectSuggestion = async (item) => {
+        setIsSearching(false);
+        setSuggestions([]);
+        setSearchText(item.name || item.formattedAddress);
+
+        let lat = item.latitude;
+        let lng = item.longitude;
+
+        if (lat === null || lng === null) {
+            setIsLoading(true);
+            try {
+                const geocoded = await geocodeAddress(item.formattedAddress || item.name);
+                if (geocoded?.latitude && geocoded?.longitude) {
+                    lat = geocoded.latitude;
+                    lng = geocoded.longitude;
+                }
+            } catch (e) {
+                console.log('Geocoding suggestion error:', e);
+            } finally {
+                setIsLoading(false);
+            }
+        }
+
+        if (lat && lng) {
+            const newRegion = {
+                latitude: lat,
+                longitude: lng,
+                latitudeDelta: LATITUDE_DELTA,
+                longitudeDelta: LONGITUDE_DELTA,
+            };
+
+            setRegion(newRegion);
+            setSelectedLocation({ latitude: lat, longitude: lng });
+
+            setAddressDetails({
+                address: item.formattedAddress || item.name,
+                city: item.city || 'Gorakhpur',
+                pincode: item.pincode || '273202',
+            });
+
+            if (mapRef.current?.animateToRegion) {
+                mapRef.current.animateToRegion(newRegion, 500);
+            }
+
+            checkServiceability(lat, lng);
+        }
+    };
+
+    const handleClearSearch = () => {
+        setSearchText('');
+        setSuggestions([]);
+        setIsSearching(false);
     };
 
     const handleSearchSubmit = async () => {
@@ -290,6 +375,7 @@ const AddAddressScreen = ({ navigation, route }) => {
             console.log('Geocode error:', error);
         } finally {
             setIsLoading(false);
+            setIsSearching(false);
         }
     };
 
@@ -410,24 +496,139 @@ const AddAddressScreen = ({ navigation, route }) => {
                             onSubmitEditing={handleSearchSubmit}
                             returnKeyType="search"
                         />
+                        {searchText.length > 0 && (
+                            <TouchableOpacity
+                                onPress={handleClearSearch}
+                                style={styles.clearSearchBtn}
+                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            >
+                                <Cancel01Icon size={18} color="#6B7280" strokeWidth={2} />
+                            </TouchableOpacity>
+                        )}
                     </View>
                 </View>
             </LinearGradient>
 
-            {/* 3. MAP COMPONENT */}
-            <View style={styles.mapContainer}>
-                <MapComponent
-                    region={region}
-                    selectedLocation={selectedLocation}
-                    addressDetails={addressDetails}
-                    isLoading={isLoading}
-                    onMapPress={handleMapPress}
-                    onRegionChangeComplete={handleRegionChangeComplete}
-                    onCurrentLocationPress={handleCurrentLocationPress}
-                />
-            </View>
+            {/* 3. DYNAMIC SEARCH SUGGESTIONS OVERLAY (ZEPTO UI PARITY) OR MAP & BOTTOM SHEET */}
+            {isSearching ? (
+                <View style={styles.suggestionsContainer}>
+                    <View style={styles.suggestionsTitleRow}>
+                        <Text style={styles.suggestionsSectionHeader}>
+                            {isHi ? 'खोज परिणाम' : 'SEARCH RESULTS'}
+                        </Text>
+                        {isSearchingLoading && (
+                            <ActivityIndicator size="small" color="#7C3AED" style={{ marginLeft: 8 }} />
+                        )}
+                    </View>
 
-            {/* 4. BOTTOM SHEET CONTENT */}
+                    {suggestions.length === 0 && !isSearchingLoading ? (
+                        <View style={styles.emptySuggestionsBox}>
+                            <Text style={styles.emptySuggestionsText}>
+                                {isHi
+                                    ? 'कोई स्थान नहीं मिला। कृपया दूसरा कीवर्ड खोजें।'
+                                    : 'No matching location found.'}
+                            </Text>
+                        </View>
+                    ) : (
+                        <ScrollView
+                            style={styles.suggestionsScrollView}
+                            keyboardShouldPersistTaps="handled"
+                            showsVerticalScrollIndicator={false}
+                        >
+                            {suggestions.map((item, index) => {
+                                const dist =
+                                    item.latitude && item.longitude
+                                        ? calculateDistanceKm(
+                                              STORE_LOCATION.latitude,
+                                              STORE_LOCATION.longitude,
+                                              item.latitude,
+                                              item.longitude
+                                          )
+                                        : null;
+
+                                const isDeliverable = dist === null || dist <= STORE_LOCATION.maxRadiusKm;
+
+                                return (
+                                    <TouchableOpacity
+                                        key={item.placeId || index}
+                                        disabled={!isDeliverable}
+                                        style={[
+                                            styles.zeptoSuggestionCard,
+                                            !isDeliverable && styles.zeptoSuggestionCardDisabled,
+                                        ]}
+                                        onPress={() => isDeliverable && handleSelectSuggestion(item)}
+                                        activeOpacity={isDeliverable ? 0.75 : 1}
+                                    >
+                                        <View style={[styles.greenLocationBadge, !isDeliverable && styles.redLocationBadge]}>
+                                            <Location01Icon
+                                                size={18}
+                                                color={isDeliverable ? '#10B981' : '#EF4444'}
+                                                strokeWidth={2.2}
+                                            />
+                                        </View>
+
+                                        <View style={styles.zeptoSuggestionTextGroup}>
+                                            <Text
+                                                style={[
+                                                    styles.zeptoSuggestionTitle,
+                                                    !isDeliverable && styles.disabledText,
+                                                ]}
+                                                numberOfLines={1}
+                                            >
+                                                {item.name}
+                                            </Text>
+                                            <Text
+                                                style={[
+                                                    styles.zeptoSuggestionAddress,
+                                                    !isDeliverable && styles.disabledTextSecondary,
+                                                ]}
+                                            >
+                                                {item.formattedAddress}
+                                            </Text>
+                                            {dist !== null && (
+                                                <View style={styles.distanceBadgeRow}>
+                                                    <Text
+                                                        style={[
+                                                            styles.zeptoDistanceTag,
+                                                            !isDeliverable && styles.zeptoDistanceTagRed,
+                                                        ]}
+                                                    >
+                                                        📍 {dist} km {isHi ? 'स्टोर से' : 'from store'}
+                                                        {!isDeliverable && (isHi ? ' (सीमा 10 km)' : ' (Max 10 km)')}
+                                                    </Text>
+                                                </View>
+                                            )}
+                                        </View>
+
+                                        {!isDeliverable && (
+                                            <View style={styles.zeptoNotDeliverablePill}>
+                                                <Text style={styles.zeptoNotDeliverableText}>
+                                                    {isHi ? 'डिलीवरी अनुपलब्ध' : 'Not Deliverable'}
+                                                </Text>
+                                            </View>
+                                        )}
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </ScrollView>
+                    )}
+                </View>
+            ) : (
+                <>
+                    {/* MAP COMPONENT */}
+                    <View style={styles.mapContainer}>
+                        <MapComponent
+                            region={region}
+                            selectedLocation={selectedLocation}
+                            addressDetails={addressDetails}
+                            isLoading={isLoading}
+                            onMapPress={handleMapPress}
+                            onRegionChangeComplete={handleRegionChangeComplete}
+                            onCurrentLocationPress={handleCurrentLocationPress}
+                        />
+                    </View>
+
+                    {/* BOTTOM SHEET CONTENT */}
             <View style={styles.bottomSheet}>
                 {/* A. SELECTED LOCATION CARD */}
                 <View
@@ -602,7 +803,9 @@ const AddAddressScreen = ({ navigation, route }) => {
                     </LinearGradient>
                 </TouchableOpacity>
             </View>
-        </View>
+        </>
+    )}
+</View>
     );
 };
 
@@ -645,156 +848,281 @@ const styles = StyleSheet.create({
         elevation: 2,
     },
     lightHeaderTitle: {
-        fontSize: 17.5,
-        fontWeight: '800',
+        fontSize: 16,
+        fontWeight: '700',
         color: '#111827',
-        letterSpacing: -0.3,
     },
     searchContainer: {
         paddingHorizontal: 16,
+        marginTop: 6,
     },
     searchBar: {
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: '#FFFFFF',
         borderRadius: 14,
-        paddingHorizontal: 14,
-        height: 42,
+        paddingHorizontal: 12,
+        height: 44,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
+        shadowOpacity: 0.04,
         shadowRadius: 6,
         elevation: 2,
     },
     searchInput: {
         flex: 1,
-        fontSize: 14,
-        fontWeight: '500',
+        fontSize: 13.5,
         color: '#111827',
         marginLeft: 8,
+        paddingVertical: 0,
     },
-    mapContainer: {
+    clearSearchBtn: {
+        padding: 4,
+        marginLeft: 6,
+    },
+    // ZEPTO SUGGESTIONS OVERLAY STYLES
+    suggestionsContainer: {
         flex: 1,
-        position: 'relative',
-    },
-    bottomSheet: {
-        backgroundColor: '#FFFFFF',
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
+        backgroundColor: '#F9FAFB',
         paddingHorizontal: 16,
         paddingTop: 12,
-        paddingBottom: 16,
-
-        shadowColor: '#000000',
-        shadowOffset: { width: 0, height: -4 },
-        shadowOpacity: 0.08,
-        shadowRadius: 12,
-        elevation: 8,
     },
-    selectedLocationCard: {
+    suggestionsTitleRow: {
         flexDirection: 'row',
         alignItems: 'center',
+        marginBottom: 10,
+        paddingHorizontal: 4,
+    },
+    suggestionsSectionHeader: {
+        fontSize: 12.5,
+        fontWeight: '800',
+        color: '#7C3AED',
+        letterSpacing: 0.5,
+    },
+    emptySuggestionsBox: {
         backgroundColor: '#FFFFFF',
         borderRadius: 16,
-        padding: 12,
+        padding: 24,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 10,
         borderWidth: 1,
-        borderColor: '#ECFDF5',
+        borderColor: '#F3F4F6',
+    },
+    emptySuggestionsText: {
+        fontSize: 14,
+        color: '#6B7280',
+        fontWeight: '500',
+    },
+    suggestionsScrollView: {
+        flex: 1,
+    },
+    zeptoSuggestionCard: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        backgroundColor: '#FFFFFF',
+        borderRadius: 16,
+        padding: 14,
         marginBottom: 10,
-
+        borderWidth: 1,
+        borderColor: '#F3F4F6',
         shadowColor: '#000000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.03,
+        shadowOpacity: 0.04,
         shadowRadius: 6,
         elevation: 2,
     },
-    selectedLocationCardRed: {
-        borderColor: '#FECACA',
-        backgroundColor: '#FEF2F2',
+    suggestionBorderBottom: {
+        marginBottom: 10,
     },
-    locationIconBadge: {
+    goldLocationBadge: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: '#FEF3C7',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+        marginTop: 2,
+    },
+    zeptoSuggestionCardDisabled: {
+        backgroundColor: '#F9FAFB',
+        borderColor: '#E5E7EB',
+        opacity: 0.6,
+    },
+    greenLocationBadge: {
         width: 36,
         height: 36,
         borderRadius: 18,
         backgroundColor: '#D1FAE5',
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: 10,
+        marginRight: 12,
+        marginTop: 2,
     },
-    locationIconBadgeGreen: {
-        backgroundColor: '#D1FAE5',
-    },
-    locationIconBadgeRed: {
+    redLocationBadge: {
         backgroundColor: '#FEE2E2',
     },
-    selectedLocationTextGroup: {
+    zeptoSuggestionTextGroup: {
         flex: 1,
+        marginRight: 8,
     },
-    selectedLocationHeading: {
-        fontSize: 13.5,
+    zeptoSuggestionTitle: {
+        fontSize: 15,
         fontWeight: '700',
         color: '#111827',
-        lineHeight: 18,
+        lineHeight: 20,
     },
-    coordsText: {
+    zeptoSuggestionAddress: {
+        fontSize: 12.5,
+        fontWeight: '400',
+        color: '#4B5563',
+        lineHeight: 18,
+        marginTop: 3,
+    },
+    disabledText: {
+        color: '#6B7280',
+    },
+    disabledTextSecondary: {
+        color: '#9CA3AF',
+    },
+    distanceBadgeRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 5,
+    },
+    zeptoDistanceTag: {
         fontSize: 11.5,
         fontWeight: '700',
         color: '#059669',
-        marginTop: 2,
-        letterSpacing: 0.2,
+        backgroundColor: '#ECFDF5',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 6,
+        overflow: 'hidden',
     },
-    coordsTextRed: {
+    zeptoDistanceTagRed: {
         color: '#DC2626',
+        backgroundColor: '#FEF2F2',
     },
-    notServiceableSubtext: {
-        fontSize: 11.5,
-        fontWeight: '600',
-        color: '#EF4444',
-        marginTop: 3,
-        lineHeight: 16,
+    zeptoNotDeliverablePill: {
+        backgroundColor: '#FEF2F2',
+        borderWidth: 1,
+        borderColor: '#FCA5A5',
+        borderRadius: 8,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        alignSelf: 'flex-start',
+        marginTop: 2,
     },
-    serviceableSubtext: {
-        fontSize: 11.5,
+    zeptoNotDeliverableText: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#991B1B',
+    },
+    mapContainer: {
+        flex: 1,
+        overflow: 'hidden',
+    },
+    bottomSheet: {
+        backgroundColor: '#FFFFFF',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        padding: 16,
+        paddingBottom: 24,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+        elevation: 10,
+    },
+    selectedAddressCard: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        backgroundColor: '#F9FAFB',
+        borderRadius: 16,
+        padding: 14,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: '#F3F4F6',
+    },
+    purpleLocationBadge: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: '#F3E8FF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    addressTextWrapper: {
+        flex: 1,
+    },
+    addressTitleText: {
+        fontSize: 15,
+        fontWeight: '800',
+        color: '#111827',
+    },
+    addressFullText: {
+        fontSize: 13,
+        color: '#4B5563',
+        marginTop: 2,
+        lineHeight: 18,
+    },
+    cityPincodeRow: {
+        flexDirection: 'row',
+        gap: 10,
+        marginTop: 6,
+    },
+    cityText: {
+        fontSize: 12,
         fontWeight: '600',
-        color: '#059669',
-        marginTop: 3,
-        lineHeight: 16,
+        color: '#6B7280',
+    },
+    pincodeText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#6B7280',
     },
     serviceableBanner: {
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: '#ECFDF5',
-        borderWidth: 1,
-        borderColor: '#A7F3D0',
-        borderRadius: 14,
-        paddingHorizontal: 14,
+        borderRadius: 12,
+        paddingHorizontal: 12,
         paddingVertical: 10,
         marginBottom: 14,
-        gap: 10,
-    },
-    notServiceableBanner: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        backgroundColor: '#FEE2E2',
         borderWidth: 1,
-        borderColor: '#FECACA',
-        borderRadius: 14,
-        paddingHorizontal: 14,
-        paddingVertical: 12,
-        marginBottom: 14,
-        gap: 10,
-    },
-    bannerTextGroup: {
-        flex: 1,
+        borderColor: '#A7F3D0',
+        gap: 8,
     },
     serviceableText: {
         fontSize: 12.5,
         fontWeight: '700',
         color: '#047857',
+        flex: 1,
+    },
+    notServiceableBanner: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        backgroundColor: '#FEF2F2',
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        marginBottom: 14,
+        borderWidth: 1,
+        borderColor: '#FCA5A5',
+        gap: 8,
+    },
+    bannerTextGroup: {
+        flex: 1,
     },
     notServiceableText: {
         fontSize: 12.5,
         fontWeight: '700',
-        color: '#DC2626',
+        color: '#991B1B',
         lineHeight: 17,
     },
     distanceSubtext: {

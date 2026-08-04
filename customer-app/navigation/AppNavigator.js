@@ -48,6 +48,11 @@ const CustomTabBar = ({ state, descriptors, navigation }) => {
     const scrollY = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
+        // Always reset tab bar position to visible when switching tabs
+        scrollY.setValue(0);
+    }, [state.index]);
+
+    useEffect(() => {
         const listener = DeviceEventEmitter.addListener('ON_SCROLL_Y', (y) => {
             scrollY.setValue(y);
         });

@@ -88,13 +88,13 @@ export async function reverseGeocode(latitude, longitude) {
 }
 
 export async function searchPlaces(query, location = null) {
-    if (!query || query.length < 3) {
+    if (!query || query.trim().length < 2) {
         return [];
     }
 
     try {
         const params = new URLSearchParams({
-            query: query,
+            query: query.trim(),
         });
 
         if (location?.latitude && location?.longitude) {
@@ -105,7 +105,7 @@ export async function searchPlaces(query, location = null) {
         const response = await fetch(`${SEARCH_URL}?${params.toString()}`);
 
         if (!response.ok) {
-            console.warn('MapMyIndia Search API error:', response.status);
+            console.warn('Search API error:', response.status);
             return [];
         }
 
@@ -115,11 +115,12 @@ export async function searchPlaces(query, location = null) {
             return [];
         }
 
-        return data.results.map(result => ({
-            placeId: result.place_id,
-            formattedAddress: result.formattedAddress || result.eLoc,
-            latitude: parseFloat(result.lat),
-            longitude: parseFloat(result.lng),
+        return data.results.map((result, idx) => ({
+            placeId: result.placeId || result.place_id || `place-${idx}-${Date.now()}`,
+            name: result.name || result.formattedAddress?.split(',')[0] || query.trim(),
+            formattedAddress: result.formattedAddress || result.name || query.trim(),
+            latitude: result.latitude !== null && result.latitude !== undefined ? parseFloat(result.latitude) : null,
+            longitude: result.longitude !== null && result.longitude !== undefined ? parseFloat(result.longitude) : null,
             city: result.city || '',
             state: result.state || '',
             pincode: result.pincode || '',

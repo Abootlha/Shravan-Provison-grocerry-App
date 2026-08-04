@@ -31,6 +31,7 @@ import {
     PencilEdit01Icon,
     Delete02Icon,
     CheckmarkCircle01Icon,
+    Cancel01Icon,
 } from 'hugeicons-react-native';
 import {
     setCurrentLocation,
@@ -40,10 +41,32 @@ import {
     setSavedAddresses,
     removeSavedAddress,
 } from '../store/slices/locationSlice';
-import { UserService } from '../services';
+import { UserService, searchPlaces } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
 
 import MapViewContainer from '../components/MapViewContainer';
+
+// Store Center Location for distance calculation
+const STORE_LOCATION = {
+    latitude: 26.7588,
+    longitude: 83.3700,
+    maxRadiusKm: 10.0,
+};
+
+const calculateDistanceKm = (lat1, lon1, lat2, lon2) => {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return null;
+    const R = 6371; // Earth radius in km
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return parseFloat((R * c).toFixed(1));
+};
 
 const LocationScreen = ({ navigation }) => {
     const insets = useSafeAreaInsets();
@@ -54,9 +77,68 @@ const LocationScreen = ({ navigation }) => {
         (state) => state.location
     );
     const [searchQuery, setSearchQuery] = useState('');
+    const [suggestions, setSuggestions] = useState([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const [isSearchingLoading, setIsSearchingLoading] = useState(false);
     const [isFetchingAddresses, setIsFetchingAddresses] = useState(false);
     const [selectedAddressForAction, setSelectedAddressForAction] = useState(null);
     const [actionModalVisible, setActionModalVisible] = useState(false);
+
+    // Live debounced search effect for Zepto-style address recommendations
+    useEffect(() => {
+        if (!searchQuery || searchQuery.trim().length < 2) {
+            setSuggestions([]);
+            setIsSearching(false);
+            setIsSearchingLoading(false);
+            return;
+        }
+
+        setIsSearching(true);
+        setIsSearchingLoading(true);
+
+        const timer = setTimeout(async () => {
+            try {
+                const results = await searchPlaces(searchQuery.trim(), selectedAddress?.coords || null);
+                setSuggestions(results || []);
+            } catch (err) {
+                console.log('Search places error in LocationScreen:', err);
+                setSuggestions([]);
+            } finally {
+                setIsSearchingLoading(false);
+            }
+        }, 300);
+
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
+
+    const handleSelectSuggestion = (item) => {
+        const fullAddrStr = item.name && !item.formattedAddress?.includes(item.name)
+            ? `${item.name}, ${item.formattedAddress}`
+            : item.formattedAddress || item.name;
+
+        const formattedAddress = {
+            id: item.placeId || `search-${Date.now()}`,
+            type: 'Searched Location',
+            address: fullAddrStr,
+            city: item.city || 'Gorakhpur',
+            pincode: item.pincode || '',
+            isDefault: false,
+            latitude: item.latitude,
+            longitude: item.longitude,
+            coords: item.latitude && item.longitude ? { latitude: item.latitude, longitude: item.longitude } : null,
+        };
+
+        dispatch(setSelectedAddress(formattedAddress));
+        setIsSearching(false);
+        setSuggestions([]);
+        setSearchQuery('');
+    };
+
+    const handleClearSearch = () => {
+        setSearchQuery('');
+        setSuggestions([]);
+        setIsSearching(false);
+    };
 
     // Fetch saved addresses from backend on mount
     useEffect(() => {
@@ -115,7 +197,8 @@ const LocationScreen = ({ navigation }) => {
                 dispatch(setSelectedAddress(null));
             }
         } catch (error) {
-            console.log('Failed to fetch addresses:', error);
+            console.log('Failed to fetch addresses:', error?.response?.status === 401 ? 'Unauthorized (User not logged in)' : error);
+            dispatch(setSavedAddresses([]));
         } finally {
             setIsFetchingAddresses(false);
         }
@@ -408,182 +491,292 @@ const LocationScreen = ({ navigation }) => {
                         onSubmitEditing={handleSearchSubmit}
                         returnKeyType="search"
                     />
-                    <TouchableOpacity onPress={handleEnableLocation} activeOpacity={0.7}>
-                        <Target01Icon size={20} color="#7C3AED" strokeWidth={2} />
-                    </TouchableOpacity>
+                    {searchQuery.length > 0 ? (
+                        <TouchableOpacity onPress={handleClearSearch} style={styles.clearSearchBtn}>
+                            <Cancel01Icon size={18} color="#6B7280" strokeWidth={2} />
+                        </TouchableOpacity>
+                    ) : (
+                        <TouchableOpacity onPress={handleEnableLocation} activeOpacity={0.7}>
+                            <Target01Icon size={20} color="#7C3AED" strokeWidth={2} />
+                        </TouchableOpacity>
+                    )}
                 </View>
 
-                {/* 3. USE MY CURRENT LOCATION BANNER */}
-                <TouchableOpacity
-                    style={styles.currentLocationCard}
-                    activeOpacity={0.9}
-                    onPress={handleEnableLocation}
-                    disabled={isLoading}
-                >
-                    <View style={styles.currentLocationLeft}>
-                        <View style={styles.navIconBadge}>
-                            <Navigation01Icon size={20} color="#7C3AED" strokeWidth={2.2} />
+                {/* 3. DYNAMIC EXPANDED SEARCH SUGGESTIONS OVERLAY */}
+                {isSearching ? (
+                    <View style={styles.suggestionsContainer}>
+                        <View style={styles.suggestionsTitleRow}>
+                            <Text style={styles.suggestionsSectionHeader}>
+                                {isHi ? 'खोज परिणाम' : 'SEARCH RESULTS'}
+                            </Text>
+                            {isSearchingLoading && (
+                                <ActivityIndicator size="small" color="#7C3AED" style={{ marginLeft: 8 }} />
+                            )}
                         </View>
-                        <View style={styles.currentLocationTextGroup}>
-                            <Text style={styles.currentLocationTitle}>
-                                {isHi ? 'वर्तमान स्थान का उपयोग करें' : 'Use my current location'}
-                            </Text>
-                            <Text style={styles.currentLocationSubtitle}>
-                                {isHi
-                                    ? 'हम आपके वर्तमान स्थान पर डिलीवरी करेंगे'
-                                    : "We'll deliver to your current location"}
-                            </Text>
-                            <View style={styles.expressTagRow}>
-                                <FlashIcon size={13} color="#7C3AED" strokeWidth={2.5} />
-                                <Text style={styles.expressTagText}>
-                                    {isHi ? '10 मिनट में डिलीवरी' : 'Delivering in 10 minutes'}
+
+                        {suggestions.length === 0 && !isSearchingLoading ? (
+                            <View style={styles.emptySuggestionsBox}>
+                                <Text style={styles.emptySuggestionsText}>
+                                    {isHi
+                                        ? 'कोई स्थान नहीं मिला। कृपया दूसरा कीवर्ड खोजें।'
+                                        : 'No matching location found.'}
                                 </Text>
                             </View>
-                        </View>
-                    </View>
-
-                    <View style={styles.useLocationBtn}>
-                        {isLoading ? (
-                            <ActivityIndicator size="small" color="#FFFFFF" />
                         ) : (
-                            <Text style={styles.useLocationBtnText}>
-                                {isHi ? 'उपयोग करें' : 'Use Location'}
-                            </Text>
-                        )}
-                    </View>
-                </TouchableOpacity>
+                            <View style={styles.suggestionsListGroup}>
+                                {suggestions.map((item, index) => {
+                                    const dist =
+                                        item.latitude && item.longitude
+                                            ? calculateDistanceKm(
+                                                  STORE_LOCATION.latitude,
+                                                  STORE_LOCATION.longitude,
+                                                  item.latitude,
+                                                  item.longitude
+                                              )
+                                            : null;
 
-                {/* 4. SAVED ADDRESSES SECTION */}
-                <View style={styles.savedSectionHeader}>
-                    <Text style={styles.savedSectionTitle}>
-                        {isHi ? 'सहेजे गए पते' : 'Saved Addresses'}
-                    </Text>
-                    <TouchableOpacity onPress={handleAddNewAddress} activeOpacity={0.7}>
-                        <Text style={styles.addNewLinkText}>
-                            {isHi ? '+ नया जोड़ें' : '+ Add New'}
-                        </Text>
-                    </TouchableOpacity>
-                </View>
+                                    const isDeliverable = dist === null || dist <= STORE_LOCATION.maxRadiusKm;
 
-                {/* Grouped Addresses Card */}
-                <View style={styles.addressCardGroup}>
-                    {isFetchingAddresses ? (
-                        <View style={styles.loadingBox}>
-                            <ActivityIndicator size="small" color="#7C3AED" />
-                        </View>
-                    ) : (
-                        displayAddresses.map((item, index) => {
-                            const isSelected =
-                                selectedAddress?.id === item.id ||
-                                (!selectedAddress && index === 0);
-                            const isHome = item.type?.toLowerCase() === 'home';
-
-                            return (
-                                <View key={item.id || index}>
-                                    <TouchableOpacity
-                                        style={[
-                                            styles.addressRowItem,
-                                            isSelected && styles.addressRowItemSelected,
-                                        ]}
-                                        activeOpacity={0.8}
-                                        onPress={() => handleSelectAddress(item)}
-                                    >
-                                        {/* Icon Badge */}
-                                        <View
+                                    return (
+                                        <TouchableOpacity
+                                            key={item.placeId || index}
+                                            disabled={!isDeliverable}
                                             style={[
-                                                styles.addressIconBg,
-                                                {
-                                                    backgroundColor: isHome
-                                                        ? '#F3E8FF'
-                                                        : '#FCE7F3',
-                                                },
+                                                styles.zeptoSuggestionCard,
+                                                !isDeliverable && styles.zeptoSuggestionCardDisabled,
                                             ]}
+                                            onPress={() => isDeliverable && handleSelectSuggestion(item)}
+                                            activeOpacity={isDeliverable ? 0.75 : 1}
                                         >
-                                            {isHome ? (
-                                                <Home01Icon size={18} color="#7C3AED" strokeWidth={2.2} />
-                                            ) : (
-                                                <Briefcase01Icon size={18} color="#EC4899" strokeWidth={2.2} />
-                                            )}
-                                        </View>
+                                            <View style={[styles.greenLocationBadge, !isDeliverable && styles.redLocationBadge]}>
+                                                <Location01Icon
+                                                    size={18}
+                                                    color={isDeliverable ? '#10B981' : '#EF4444'}
+                                                    strokeWidth={2.2}
+                                                />
+                                            </View>
 
-                                        {/* Content */}
-                                        <View style={styles.addressTextContent}>
-                                            <View style={styles.addressTitleRow}>
-                                                <Text style={styles.addressTypeTitle}>
-                                                    {item.type || (isHome ? 'Home' : 'Office')}
+                                            <View style={styles.zeptoSuggestionTextGroup}>
+                                                <Text
+                                                    style={[
+                                                        styles.zeptoSuggestionTitle,
+                                                        !isDeliverable && styles.disabledText,
+                                                    ]}
+                                                    numberOfLines={1}
+                                                >
+                                                    {item.name}
                                                 </Text>
-                                                {item.isDefault && (
-                                                    <View style={styles.defaultPill}>
-                                                        <Text style={styles.defaultPillText}>
-                                                            {isHi ? 'डिफ़ॉल्ट' : 'Default'}
+                                                <Text
+                                                    style={[
+                                                        styles.zeptoSuggestionAddress,
+                                                        !isDeliverable && styles.disabledTextSecondary,
+                                                    ]}
+                                                >
+                                                    {item.formattedAddress}
+                                                </Text>
+                                                {dist !== null && (
+                                                    <View style={styles.distanceBadgeRow}>
+                                                        <Text
+                                                            style={[
+                                                                styles.zeptoDistanceTag,
+                                                                !isDeliverable && styles.zeptoDistanceTagRed,
+                                                            ]}
+                                                        >
+                                                            📍 {dist} km {isHi ? 'स्टोर से' : 'from store'}
+                                                            {!isDeliverable && (isHi ? ' (सीमा 10 km)' : ' (Max 10 km)')}
                                                         </Text>
                                                     </View>
                                                 )}
                                             </View>
-                                            <Text
-                                                style={styles.addressFullText}
-                                                numberOfLines={1}
-                                            >
-                                                {item.address}, {item.city} - {item.pincode}
-                                            </Text>
-                                        </View>
 
-                                        {/* More Options */}
-                                        <TouchableOpacity
-                                            style={styles.moreIconBtn}
-                                            activeOpacity={0.6}
-                                            onPress={() => handleOpenActionMenu(item, index)}
-                                        >
-                                            <MoreVerticalIcon size={18} color="#9CA3AF" strokeWidth={2} />
+                                            {!isDeliverable && (
+                                                <View style={styles.zeptoNotDeliverablePill}>
+                                                    <Text style={styles.zeptoNotDeliverableText}>
+                                                        {isHi ? 'डिलीवरी अनुपलब्ध' : 'Not Deliverable'}
+                                                    </Text>
+                                                </View>
+                                            )}
                                         </TouchableOpacity>
-                                    </TouchableOpacity>
-
-                                    {index < displayAddresses.length - 1 && (
-                                        <View style={styles.addressRowDivider} />
-                                    )}
-                                </View>
-                            );
-                        })
-                    )}
-
-                    {/* Full Width "+ Add New Address" button inside Group */}
-                    <TouchableOpacity
-                        style={styles.innerAddAddressBtn}
-                        activeOpacity={0.8}
-                        onPress={handleAddNewAddress}
-                    >
-                        <Location01Icon size={18} color="#7C3AED" strokeWidth={2.2} />
-                        <Text style={styles.innerAddAddressText}>
-                            {isHi ? 'नया पता जोड़ें' : 'Add New Address'}
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-
-                {/* 5. REAL MAP PREVIEW CARD WITH 3D LOCATOR & FULL ADDRESS TOOLTIP */}
-                <View style={styles.mapCardContainer}>
-                    <View style={styles.mapCanvas}>
-                        {/* Real Interactive Map Layer (Native MapView or Web iframe) */}
-                        <MapViewContainer
-                            latitude={currentDisplayAddr?.latitude}
-                            longitude={currentDisplayAddr?.longitude}
-                            addressText={[
-                                currentDisplayAddr?.address,
-                                currentDisplayAddr?.city,
-                                currentDisplayAddr?.pincode ? `- ${currentDisplayAddr.pincode}` : ''
-                            ].filter(Boolean).join(', ') || 'Medical Road, Gorakhpur - 273001'}
-                            onMapPress={handleMapPress}
-                        />
-
-                        {/* Locate Me Floating Button */}
-                        <TouchableOpacity
-                            style={styles.locateMeBtn}
-                            activeOpacity={0.85}
-                            onPress={handleEnableLocation}
-                        >
-                            <Target01Icon size={22} color="#FFFFFF" strokeWidth={2.2} />
-                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+                        )}
                     </View>
-                </View>
+                ) : (
+                    <>
+                        {/* 4. USE MY CURRENT LOCATION BANNER */}
+                        <TouchableOpacity
+                            style={styles.currentLocationCard}
+                            activeOpacity={0.9}
+                            onPress={handleEnableLocation}
+                            disabled={isLoading}
+                        >
+                            <View style={styles.currentLocationLeft}>
+                                <View style={styles.navIconBadge}>
+                                    <Navigation01Icon size={20} color="#7C3AED" strokeWidth={2.2} />
+                                </View>
+                                <View style={styles.currentLocationTextGroup}>
+                                    <Text style={styles.currentLocationTitle}>
+                                        {isHi ? 'वर्तमान स्थान का उपयोग करें' : 'Use my current location'}
+                                    </Text>
+                                    <Text style={styles.currentLocationSubtitle}>
+                                        {isHi
+                                            ? 'हम आपके वर्तमान स्थान पर डिलीवरी करेंगे'
+                                            : "We'll deliver to your current location"}
+                                    </Text>
+                                    <View style={styles.expressTagRow}>
+                                        <FlashIcon size={13} color="#7C3AED" strokeWidth={2.5} />
+                                        <Text style={styles.expressTagText}>
+                                            {isHi ? '10 मिनट में डिलीवरी' : 'Delivering in 10 minutes'}
+                                        </Text>
+                                    </View>
+                                </View>
+                            </View>
+
+                            <View style={styles.useLocationBtn}>
+                                {isLoading ? (
+                                    <ActivityIndicator size="small" color="#FFFFFF" />
+                                ) : (
+                                    <Text style={styles.useLocationBtnText}>
+                                        {isHi ? 'उपयोग करें' : 'Use Location'}
+                                    </Text>
+                                )}
+                            </View>
+                        </TouchableOpacity>
+
+                        {/* 5. SAVED ADDRESSES SECTION */}
+                        <View style={styles.savedSectionHeader}>
+                            <Text style={styles.savedSectionTitle}>
+                                {isHi ? 'सहेजे गए पते' : 'Saved Addresses'}
+                            </Text>
+                            <TouchableOpacity onPress={handleAddNewAddress} activeOpacity={0.7}>
+                                <Text style={styles.addNewLinkText}>
+                                    {isHi ? '+ नया जोड़ें' : '+ Add New'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Grouped Addresses Card */}
+                        <View style={styles.addressCardGroup}>
+                            {isFetchingAddresses ? (
+                                <View style={styles.loadingBox}>
+                                    <ActivityIndicator size="small" color="#7C3AED" />
+                                </View>
+                            ) : (
+                                displayAddresses.map((item, index) => {
+                                    const isSelected =
+                                        selectedAddress?.id === item.id ||
+                                        (!selectedAddress && index === 0);
+                                    const isHome = item.type?.toLowerCase() === 'home';
+
+                                    return (
+                                        <View key={item.id || index}>
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.addressRowItem,
+                                                    isSelected && styles.addressRowItemSelected,
+                                                ]}
+                                                activeOpacity={0.8}
+                                                onPress={() => dispatch(setSelectedAddress(item))}
+                                            >
+                                                {/* Icon Badge */}
+                                                <View
+                                                    style={[
+                                                        styles.addressIconBg,
+                                                        {
+                                                            backgroundColor: isHome
+                                                                ? '#F3E8FF'
+                                                                : '#FCE7F3',
+                                                        },
+                                                    ]}
+                                                >
+                                                    {isHome ? (
+                                                        <Home01Icon size={18} color="#7C3AED" strokeWidth={2.2} />
+                                                    ) : (
+                                                        <Briefcase01Icon size={18} color="#EC4899" strokeWidth={2.2} />
+                                                    )}
+                                                </View>
+
+                                                {/* Content */}
+                                                <View style={styles.addressTextContent}>
+                                                    <View style={styles.addressTitleRow}>
+                                                        <Text style={styles.addressTypeTitle}>
+                                                            {item.type || (isHome ? 'Home' : 'Office')}
+                                                        </Text>
+                                                        {item.isDefault && (
+                                                            <View style={styles.defaultPill}>
+                                                                <Text style={styles.defaultPillText}>
+                                                                    {isHi ? 'डिफ़ॉल्ट' : 'Default'}
+                                                                </Text>
+                                                            </View>
+                                                        )}
+                                                    </View>
+                                                    <Text
+                                                        style={styles.addressFullText}
+                                                        numberOfLines={1}
+                                                    >
+                                                        {item.address}
+                                                        {item.city ? `, ${item.city}` : ''}
+                                                        {item.pincode ? ` - ${item.pincode}` : ''}
+                                                    </Text>
+                                                </View>
+
+                                                {/* More Options */}
+                                                <TouchableOpacity
+                                                    style={styles.moreIconBtn}
+                                                    activeOpacity={0.6}
+                                                    onPress={() => handleOpenActionMenu(item, index)}
+                                                >
+                                                    <MoreVerticalIcon size={18} color="#9CA3AF" strokeWidth={2} />
+                                                </TouchableOpacity>
+                                            </TouchableOpacity>
+
+                                            {index < displayAddresses.length - 1 && (
+                                                <View style={styles.addressRowDivider} />
+                                            )}
+                                        </View>
+                                    );
+                                })
+                            )}
+
+                            {/* Full Width "+ Add New Address" button inside Group */}
+                            <TouchableOpacity
+                                style={styles.innerAddAddressBtn}
+                                activeOpacity={0.8}
+                                onPress={handleAddNewAddress}
+                            >
+                                <Location01Icon size={18} color="#7C3AED" strokeWidth={2.2} />
+                                <Text style={styles.innerAddAddressText}>
+                                    {isHi ? 'नया पता जोड़ें' : 'Add New Address'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* 6. REAL MAP PREVIEW CARD WITH 3D LOCATOR & FULL ADDRESS TOOLTIP */}
+                        <View style={styles.mapCardContainer}>
+                            <View style={styles.mapCanvas}>
+                                <MapViewContainer
+                                    latitude={currentDisplayAddr?.latitude}
+                                    longitude={currentDisplayAddr?.longitude}
+                                    addressText={[
+                                        currentDisplayAddr?.address,
+                                        currentDisplayAddr?.city,
+                                        currentDisplayAddr?.pincode ? `- ${currentDisplayAddr.pincode}` : ''
+                                    ].filter(Boolean).join(', ') || 'Medical Road, Gorakhpur - 273001'}
+                                    onMapPress={handleMapPress}
+                                />
+
+                                <TouchableOpacity
+                                    style={styles.locateMeBtn}
+                                    activeOpacity={0.85}
+                                    onPress={handleEnableLocation}
+                                >
+                                    <Target01Icon size={22} color="#FFFFFF" strokeWidth={2.2} />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </>
+                )}
 
                 <View style={{ height: 110 }} />
             </ScrollView>
@@ -831,6 +1024,138 @@ const styles = StyleSheet.create({
         color: '#111827',
         marginLeft: 10,
         marginRight: 8,
+    },
+    clearSearchBtn: {
+        padding: 4,
+    },
+
+    /* DYNAMIC SEARCH SUGGESTIONS OVERLAY */
+    suggestionsContainer: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: 20,
+        padding: 16,
+        marginBottom: 20,
+        borderWidth: 1,
+        borderColor: '#E9D5FF',
+
+        shadowColor: '#7C3AED',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+        elevation: 4,
+    },
+    suggestionsTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 12,
+    },
+    suggestionsSectionHeader: {
+        fontSize: 12,
+        fontWeight: '800',
+        color: '#7C3AED',
+        letterSpacing: 0.8,
+    },
+    emptySuggestionsBox: {
+        paddingVertical: 20,
+        alignItems: 'center',
+    },
+    emptySuggestionsText: {
+        fontSize: 13,
+        color: '#6B7280',
+        fontWeight: '500',
+    },
+    suggestionsListGroup: {
+        gap: 10,
+    },
+    zeptoSuggestionCard: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        backgroundColor: '#FFFFFF',
+        borderRadius: 16,
+        padding: 14,
+        borderWidth: 1,
+        borderColor: '#F3E8FF',
+
+        shadowColor: '#7C3AED',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.04,
+        shadowRadius: 6,
+        elevation: 2,
+    },
+    zeptoSuggestionCardDisabled: {
+        backgroundColor: '#F9FAFB',
+        borderColor: '#E5E7EB',
+        opacity: 0.6,
+    },
+    greenLocationBadge: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: '#D1FAE5',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+        marginTop: 2,
+    },
+    redLocationBadge: {
+        backgroundColor: '#FEE2E2',
+    },
+    zeptoSuggestionTextGroup: {
+        flex: 1,
+        marginRight: 8,
+    },
+    zeptoSuggestionTitle: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#111827',
+        lineHeight: 20,
+    },
+    zeptoSuggestionAddress: {
+        fontSize: 12.5,
+        fontWeight: '400',
+        color: '#4B5563',
+        lineHeight: 18,
+        marginTop: 3,
+    },
+    disabledText: {
+        color: '#6B7280',
+    },
+    disabledTextSecondary: {
+        color: '#9CA3AF',
+    },
+    distanceBadgeRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 5,
+    },
+    zeptoDistanceTag: {
+        fontSize: 11.5,
+        fontWeight: '700',
+        color: '#059669',
+        backgroundColor: '#ECFDF5',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 6,
+        overflow: 'hidden',
+    },
+    zeptoDistanceTagRed: {
+        color: '#DC2626',
+        backgroundColor: '#FEF2F2',
+    },
+    zeptoNotDeliverablePill: {
+        backgroundColor: '#FEF2F2',
+        borderWidth: 1,
+        borderColor: '#FCA5A5',
+        borderRadius: 8,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        alignSelf: 'flex-start',
+        marginTop: 2,
+    },
+    zeptoNotDeliverableText: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#991B1B',
     },
 
     /* USE CURRENT LOCATION BANNER */

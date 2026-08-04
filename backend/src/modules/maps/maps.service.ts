@@ -134,38 +134,131 @@ export class MapsService {
       throw new BadRequestException('Query is required');
     }
 
-    const directGeocode = await this.geocodeWithFallback(query);
-    if (directGeocode?.latitude && directGeocode?.longitude) {
-      return {
-        responseCode: 200,
-        results: [directGeocode],
-      };
+    const trimmedQuery = query.trim();
+    const results: any[] = [];
+    const seenKeys = new Set<string>();
+
+    // 1. Fetch multi-results from Nominatim (OpenStreetMap India)
+    try {
+      const nomRes = await axios.get('https://nominatim.openstreetmap.org/search', {
+        params: {
+          q: trimmedQuery,
+          format: 'jsonv2',
+          countrycodes: 'in',
+          limit: 10,
+          addressdetails: 1,
+        },
+        headers: {
+          'User-Agent': 'ShravanKirana/1.0 (maps proxy)',
+        },
+        timeout: 8000,
+      });
+
+      if (Array.isArray(nomRes.data)) {
+        for (const item of nomRes.data) {
+          const lat = parseFloat(item.lat);
+          const lon = parseFloat(item.lon);
+          const displayName = item.display_name || '';
+
+          if (!displayName) continue;
+
+          // Split display name to extract primary title and clean address
+          const parts = displayName.split(',').map((s: string) => s.trim());
+          const placeName = parts[0] || trimmedQuery;
+          const key = `${lat.toFixed(4)}_${lon.toFixed(4)}`;
+
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            results.push({
+              placeId: item.place_id?.toString() || key,
+              name: placeName,
+              formattedAddress: displayName,
+              latitude: lat,
+              longitude: lon,
+              city:
+                item.address?.city ||
+                item.address?.town ||
+                item.address?.suburb ||
+                item.address?.county ||
+                item.address?.state_district ||
+                'Gorakhpur',
+              state: item.address?.state || 'Uttar Pradesh',
+              pincode: item.address?.postcode || '',
+              type: item.type || 'place',
+            });
+          }
+        }
+      }
+    } catch (error: any) {
+      this.logger.warn(`Nominatim multi-search failed for "${trimmedQuery}": ${error?.message}`);
     }
 
-    const response = await axios.get(`${this.atlasBaseUrl}/search/json`, {
-      headers: await this.getBearerHeaders(),
-      params: {
-        query: query.trim(),
-        region: 'ind',
-      },
-      timeout: 10000,
-    });
+    // 2. Fetch Mappls Atlas suggested locations if OAuth available
+    try {
+      if (this.clientId && this.clientSecret) {
+        const headers = await this.getBearerHeaders();
+        const response = await axios.get(`${this.atlasBaseUrl}/search/json`, {
+          headers,
+          params: {
+            query: trimmedQuery,
+            region: 'ind',
+          },
+          timeout: 8000,
+        });
 
-    const suggestions = response.data?.suggestedLocations || [];
+        const suggestions = response.data?.suggestedLocations || [];
+        for (const result of suggestions) {
+          const placeName = result.placeName || trimmedQuery;
+          const fullAddr = [result.placeName, result.placeAddress].filter(Boolean).join(', ');
+          const key = result.eLoc || placeName;
+
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            let lat = result.latitude ? parseFloat(result.latitude) : null;
+            let lon = result.longitude ? parseFloat(result.longitude) : null;
+
+            if (!lat || !lon) {
+              const coords = await this.lookupCoordinatesFallback(fullAddr);
+              if (coords) {
+                lat = coords.latitude;
+                lon = coords.longitude;
+              }
+            }
+
+            results.push({
+              placeId: key,
+              name: placeName,
+              formattedAddress: fullAddr || placeName,
+              latitude: lat,
+              longitude: lon,
+              city: result.placeName || '',
+              state: '',
+              pincode: '',
+              type: result.type || '',
+              eloc: result.eLoc || '',
+            });
+          }
+        }
+      }
+    } catch (error: any) {
+      this.logger.warn(`Mappls search failed for "${trimmedQuery}": ${error?.message}`);
+    }
+
+    // 3. Fallback: If no results found yet, use direct geocode fallback
+    if (results.length === 0) {
+      const directGeocode = await this.geocodeWithFallback(trimmedQuery);
+      if (directGeocode?.latitude && directGeocode?.longitude) {
+        const parts = (directGeocode.formattedAddress || trimmedQuery).split(',').map((s: string) => s.trim());
+        results.push({
+          ...directGeocode,
+          name: parts[0] || trimmedQuery,
+        });
+      }
+    }
 
     return {
       responseCode: 200,
-      results: suggestions.map((result: any) => ({
-        placeId: result.eLoc || result.placeName,
-        formattedAddress: [result.placeName, result.placeAddress].filter(Boolean).join(', '),
-        latitude: null,
-        longitude: null,
-        city: result.placeName || '',
-        state: '',
-        pincode: '',
-        type: result.type || '',
-        eloc: result.eLoc || '',
-      })),
+      results,
     };
   }
 
