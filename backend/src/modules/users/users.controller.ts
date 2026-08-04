@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Body, Param, Delete, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Delete, UseGuards, Request } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard)
@@ -17,6 +18,21 @@ export class UsersController {
             name: user.name,
             phone: user.phone,
             email: user.email,
+            profilePicture: user.profilePicture,
+            role: user.role,
+            addresses: user.addresses,
+        };
+    }
+
+    @Put('me')
+    async updateProfile(@Request() req: any, @Body() updateData: UpdateProfileDto) {
+        const user = await this.usersService.updateProfile(req.user.userId, updateData);
+        return {
+            id: user._id,
+            name: user.name,
+            phone: user.phone,
+            email: user.email,
+            profilePicture: user.profilePicture,
             role: user.role,
             addresses: user.addresses,
         };
@@ -25,6 +41,12 @@ export class UsersController {
     @Post('addresses')
     async addAddress(@Request() req: any, @Body() address: any) {
         const user = await this.usersService.addAddress(req.user.userId, address);
+        return { addresses: user.addresses };
+    }
+
+    @Put('addresses/:index')
+    async updateAddress(@Request() req: any, @Param('index') index: string, @Body() address: any) {
+        const user = await this.usersService.updateAddress(req.user.userId, parseInt(index), address);
         return { addresses: user.addresses };
     }
 

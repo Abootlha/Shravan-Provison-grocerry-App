@@ -68,48 +68,67 @@ const BannerCarousel = ({ banners, autoPlayInterval = 4000 }) => {
                 snapToInterval={BANNER_WIDTH}
                 contentContainerStyle={styles.scrollContent}
             >
-                {banners.map((banner, index) => (
-                    <Animated.View
-                        key={banner.id}
-                        style={[
-                            styles.bannerWrapper,
-                            { opacity: currentIndex === index ? fadeAnim : 0.85 }
-                        ]}
-                    >
-                        <TouchableOpacity
-                            style={[styles.banner, { backgroundColor: banner.color }]}
-                            activeOpacity={0.95}
-                        >
-                            {/* Gradient overlay for better text readability */}
-                            <View style={styles.gradientOverlay} />
+                {banners.map((banner, index) => {
+                    const imageSource = typeof banner.image === 'string' ? { uri: banner.image } : banner.image;
+                    const isFullImage = banner.isFullImage || typeof banner.image !== 'string';
 
-                            <View style={styles.bannerContent}>
-                                <View style={styles.textContainer}>
-                                    {banner.tag && (
-                                        <View style={styles.tagBadge}>
-                                            <Text style={styles.tagText}>{banner.tag}</Text>
+                    return (
+                        <Animated.View
+                            key={banner.id}
+                            style={[
+                                styles.bannerWrapper,
+                                { opacity: currentIndex === index ? fadeAnim : 0.85 }
+                            ]}
+                        >
+                            <TouchableOpacity
+                                style={[
+                                    styles.banner,
+                                    banner.color ? { backgroundColor: banner.color } : null,
+                                    isFullImage && styles.fullImageBannerContainer
+                                ]}
+                                activeOpacity={0.95}
+                            >
+                                {isFullImage ? (
+                                    <Image
+                                        source={imageSource}
+                                        style={styles.fullBannerImage}
+                                        resizeMode="cover"
+                                    />
+                                ) : (
+                                    <>
+                                        {/* Gradient overlay for better text readability */}
+                                        <View style={styles.gradientOverlay} />
+
+                                        <View style={styles.bannerContent}>
+                                            <View style={styles.textContainer}>
+                                                {banner.tag && (
+                                                    <View style={styles.tagBadge}>
+                                                        <Text style={styles.tagText}>{banner.tag}</Text>
+                                                    </View>
+                                                )}
+                                                {banner.subtitle && <Text style={styles.subtitle}>{banner.subtitle}</Text>}
+                                                {banner.title && <Text style={styles.title}>{banner.title}</Text>}
+                                                <TouchableOpacity style={styles.shopButton}>
+                                                    <Text style={styles.shopButtonText}>Shop Now</Text>
+                                                    <MaterialCommunityIcons
+                                                        name="arrow-right"
+                                                        size={14}
+                                                        color={COLORS.text}
+                                                    />
+                                                </TouchableOpacity>
+                                            </View>
+                                            <Image
+                                                source={imageSource}
+                                                style={styles.bannerImage}
+                                                resizeMode="contain"
+                                            />
                                         </View>
-                                    )}
-                                    <Text style={styles.subtitle}>{banner.subtitle}</Text>
-                                    <Text style={styles.title}>{banner.title}</Text>
-                                    <TouchableOpacity style={styles.shopButton}>
-                                        <Text style={styles.shopButtonText}>Shop Now</Text>
-                                        <MaterialCommunityIcons
-                                            name="arrow-right"
-                                            size={14}
-                                            color={COLORS.text}
-                                        />
-                                    </TouchableOpacity>
-                                </View>
-                                <Image
-                                    source={{ uri: banner.image }}
-                                    style={styles.bannerImage}
-                                    resizeMode="contain"
-                                />
-                            </View>
-                        </TouchableOpacity>
-                    </Animated.View>
-                ))}
+                                    </>
+                                )}
+                            </TouchableOpacity>
+                        </Animated.View>
+                    );
+                })}
             </ScrollView>
 
             {/* Pagination Dots */}
@@ -130,7 +149,7 @@ const BannerCarousel = ({ banners, autoPlayInterval = 4000 }) => {
 
 const styles = StyleSheet.create({
     container: {
-        marginVertical: 16,
+        marginBottom: 0,
     },
     scrollContent: {
         paddingHorizontal: 16,
@@ -143,7 +162,15 @@ const styles = StyleSheet.create({
         height: BANNER_HEIGHT,
         borderRadius: 20,
         overflow: 'hidden',
-        ...SHADOWS.medium,
+        ...SHADOWS.light,
+    },
+    fullImageBannerContainer: {
+        backgroundColor: '#FFFFFF',
+    },
+    fullBannerImage: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 20,
     },
     gradientOverlay: {
         ...StyleSheet.absoluteFillObject,

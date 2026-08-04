@@ -1,81 +1,94 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
     View,
     Text,
-    ScrollView,
+    Animated,
     StyleSheet,
     TouchableOpacity,
-    SafeAreaView,
     StatusBar,
     Image,
     Dimensions,
+    ActivityIndicator,
+    DeviceEventEmitter,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { COLORS, CATEGORIES, CATEGORY_GROUPS } from '../constants';
+import { useSelector } from 'react-redux';
+import { COLORS, CATEGORIES, CATEGORY_GROUPS, SHADOWS } from '../constants';
+import { Header, SearchBar, CategoryCard } from '../components';
+import { ProductService } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
 import { translateToHindi } from '../services/translationService';
 
 const { width } = Dimensions.get('window');
-const COLUMN_COUNT = 4;
+const COLUMN_COUNT = 3;
 const ITEM_SPACING = 12;
-const HORIZONTAL_PADDING = 16;
-const ITEM_WIDTH = (width - (HORIZONTAL_PADDING * 2) - (ITEM_SPACING * (COLUMN_COUNT - 1))) / COLUMN_COUNT;
+const HORIZONTAL_PADDING = 14;
+const ITEM_WIDTH = Math.floor((width - (HORIZONTAL_PADDING * 2) - (ITEM_SPACING * (COLUMN_COUNT - 1))) / COLUMN_COUNT);
+
+const PASTEL_PALETTE = ['#FFF3E0', '#E8F5E9', '#E3F2FD', '#F3E5F5', '#FFF8E1', '#FCE4EC', '#E0F2F1', '#FFEBEE'];
 
 const CategoriesScreen = ({ navigation }) => {
-    const insets = useSafeAreaInsets();
     const { t, currentLanguage } = useTranslation();
-    const [translatedCategories, setTranslatedCategories] = useState(CATEGORIES);
+    const cartItems = useSelector((state) => state.cart.totalItems);
+    const { selectedAddress } = useSelector((state) => state.location);
+
+    const scrollY = useRef(new Animated.Value(0)).current;
+    const lastScrollY = useRef(0);
+
+    const handleScroll = (event) => {
+        const currentY = Math.max(0, event.nativeEvent.contentOffset.y);
+        scrollY.setValue(currentY);
+        DeviceEventEmitter.emit('ON_SCROLL_Y', currentY);
+    };
+
+    const [categories, setCategories] = useState([]);
+    const [loading, setLoading] = useState(true);
     const [translatedGroups, setTranslatedGroups] = useState(CATEGORY_GROUPS);
 
-    // Translate categories and groups when language changes
     useEffect(() => {
-        translateData();
+        fetchData();
     }, [currentLanguage]);
 
-    const translateData = async () => {
-        if (currentLanguage === 'en') {
-            // Reset to original English
-            setTranslatedCategories(CATEGORIES);
-            setTranslatedGroups(CATEGORY_GROUPS);
-            return;
-        }
+    const fetchData = async () => {
+        try {
+            setLoading(true);
 
-        if (currentLanguage === 'hi') {
-            try {
-                // Translate categories and groups in parallel
-                const [translatedCats, translatedGrps] = await Promise.all([
-                    Promise.all(
-                        CATEGORIES.map(async (cat) => ({
-                            ...cat,
-                            translatedName: await translateToHindi(cat.name)
-                        }))
-                    ),
-                    Promise.all(
-                        CATEGORY_GROUPS.map(group => translateToHindi(group))
-                    )
-                ]);
-                
-                // Set both states together to avoid intermediate renders
-                setTranslatedCategories(translatedCats);
-                setTranslatedGroups(translatedGrps);
-            } catch (err) {
-                console.error('Translation error:', err);
-                // Fallback to English on error
-                setTranslatedCategories(CATEGORIES);
+            // Fetch real categories from backend API
+            const apiCategories = await ProductService.getCategories();
+            let rawList = (apiCategories && apiCategories.length > 0) ? apiCategories : CATEGORIES;
+
+            if (currentLanguage === 'hi') {
+                try {
+                    const [translatedCats, translatedGrps] = await Promise.all([
+                        Promise.all(
+                            rawList.map(async (cat) => ({
+                                ...cat,
+                                translatedName: cat.nameHi || await translateToHindi(cat.name)
+                            }))
+                        ),
+                        Promise.all(
+                            CATEGORY_GROUPS.map(group => translateToHindi(group))
+                        )
+                    ]);
+                    setCategories(translatedCats);
+                    setTranslatedGroups(translatedGrps);
+                } catch (translationErr) {
+                    console.error('Translation error in CategoriesScreen:', translationErr);
+                    setCategories(rawList);
+                    setTranslatedGroups(CATEGORY_GROUPS);
+                }
+            } else {
+                setCategories(rawList);
                 setTranslatedGroups(CATEGORY_GROUPS);
             }
+        } catch (err) {
+            console.error('Error loading categories:', err);
+            setCategories(CATEGORIES);
+            setTranslatedGroups(CATEGORY_GROUPS);
+        } finally {
+            setLoading(false);
         }
     };
-    // Group categories by their group field
-    const groupedCategories = useMemo(() => {
-        const groups = {};
-        translatedGroups.forEach((group, index) => {
-            const originalGroup = CATEGORY_GROUPS[index];
-            groups[group] = translatedCategories.filter(cat => cat.group === originalGroup);
-        });
-        return groups;
-    }, [translatedCategories, translatedGroups]);
 
     const handleCategoryPress = (category) => {
         navigation.navigate('Category', { category });
@@ -85,39 +98,42 @@ const CategoriesScreen = ({ navigation }) => {
         navigation.navigate('Search');
     };
 
-    const renderCategoryItem = (category) => {
+    const handleLocationPress = () => {
+        navigation.navigate('Location');
+    };
+
+    const renderCategoryItem = (category, index) => {
         const displayName = currentLanguage === 'hi' && category.translatedName 
             ? category.translatedName 
             : category.name;
-        
+
+        const imageUrl = category.icon || category.image;
+
         return (
-            <TouchableOpacity
-                key={category.id}
-                style={styles.categoryItem}
+            <CategoryCard
+                key={category._id || category.id || index}
+                category={{
+                    id: category._id || category.id,
+                    name: displayName,
+                    icon: category.icon || 'package-variant',
+                    color: category.color,
+                    image: imageUrl
+                }}
+                index={index}
                 onPress={() => handleCategoryPress(category)}
-                activeOpacity={0.7}
-            >
-                <View style={[styles.imageContainer, { backgroundColor: category.color }]}>
-                    <Image
-                        source={{ uri: category.image }}
-                        style={styles.categoryImage}
-                        resizeMode="contain"
-                    />
-                </View>
-                <Text style={styles.categoryName} numberOfLines={2}>
-                    {displayName}
-                </Text>
-            </TouchableOpacity>
+                size="medium"
+                width={ITEM_WIDTH}
+            />
         );
     };
 
-    const renderCategoryGrid = (categories) => {
+    const renderCategoryGrid = (categoryList) => {
         const rows = [];
-        for (let i = 0; i < categories.length; i += COLUMN_COUNT) {
-            const rowItems = categories.slice(i, i + COLUMN_COUNT);
+        for (let i = 0; i < categoryList.length; i += COLUMN_COUNT) {
+            const rowItems = categoryList.slice(i, i + COLUMN_COUNT);
             rows.push(
                 <View key={i} style={styles.row}>
-                    {rowItems.map(renderCategoryItem)}
+                    {rowItems.map((item, idx) => renderCategoryItem(item, i + idx))}
                     {/* Fill empty slots to maintain grid alignment */}
                     {rowItems.length < COLUMN_COUNT &&
                         Array(COLUMN_COUNT - rowItems.length).fill(null).map((_, index) => (
@@ -130,167 +146,127 @@ const CategoriesScreen = ({ navigation }) => {
         return rows;
     };
 
-    const renderSection = (groupName) => {
-        const categories = groupedCategories[groupName];
-        if (!categories || categories.length === 0) return null;
-
+    if (loading) {
         return (
-            <View key={groupName} style={styles.section}>
-                <Text style={styles.sectionTitle}>{groupName}</Text>
-                <View style={styles.grid}>
-                    {renderCategoryGrid(categories)}
+            <View style={styles.container}>
+                <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
+                <Header
+                    showLocation
+                    location={selectedAddress?.type || 'Home'}
+                    addressDetail={selectedAddress ? `${selectedAddress.address}` : 'Chavri Road, Market Area'}
+                    deliveryTime="10 minutes"
+                    onLocationPress={handleLocationPress}
+                    onProfilePress={() => navigation.navigate('Main', { screen: 'Account' })}
+                    onWalletPress={() => navigation.navigate('Main', { screen: 'Account' })}
+                >
+                    <View style={styles.embeddedSearchWrapper}>
+                        <SearchBar onPress={handleSearchPress} />
+                    </View>
+                </Header>
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={COLORS.secondary} />
+                    <Text style={styles.loadingText}>{t('loading')}</Text>
                 </View>
             </View>
         );
-    };
+    }
 
     return (
-        <SafeAreaView style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
+        <View style={styles.container}>
+            <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
-            {/* Header */}
-            <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) + 8 }]}>
-                <TouchableOpacity
-                    style={styles.backButton}
-                    onPress={() => navigation.goBack()}
+            {/* Sticky Header with Animated Collapsible Hero & Embedded SearchBar */}
+            <View style={styles.stickyHeaderWrapper}>
+                <Header
+                    showLocation
+                    location={selectedAddress?.type || 'Home'}
+                    addressDetail={selectedAddress ? `${selectedAddress.address}` : 'Chavri Road, Market Area'}
+                    deliveryTime="10 minutes"
+                    onLocationPress={handleLocationPress}
+                    onProfilePress={() => navigation.navigate('Main', { screen: 'Account' })}
+                    onWalletPress={() => navigation.navigate('Main', { screen: 'Account' })}
+                    scrollY={scrollY}
                 >
-                    <MaterialCommunityIcons
-                        name="chevron-left"
-                        size={28}
-                        color={COLORS.text}
-                    />
-                </TouchableOpacity>
-                <View style={styles.headerCenter}>
-                    <View style={styles.deliveryInfo}>
-                        <MaterialCommunityIcons
-                            name="lightning-bolt"
-                            size={16}
-                            color="#E91E63"
-                        />
-                        <Text style={styles.deliveryTime}>10 {t('minutes')}</Text>
+                    <View style={styles.embeddedSearchWrapper}>
+                        <SearchBar onPress={handleSearchPress} />
                     </View>
-                    <Text style={styles.locationText} numberOfLines={1}>
-                        Shravan Kirana Store
-                    </Text>
-                </View>
-                <TouchableOpacity
-                    style={styles.searchButton}
-                    onPress={handleSearchPress}
-                >
-                    <MaterialCommunityIcons
-                        name="magnify"
-                        size={24}
-                        color={COLORS.text}
-                    />
-                </TouchableOpacity>
+                </Header>
             </View>
 
-            {/* Divider */}
-            <View style={styles.divider} />
-
-            {/* Categories Content */}
-            <ScrollView
+            {/* Scrollable Categories List */}
+            <Animated.ScrollView
                 style={styles.scrollView}
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
+                bounces={false}
+                scrollEventThrottle={16}
+                onScroll={handleScroll}
             >
-                {translatedGroups.map(renderSection)}
-            </ScrollView>
-        </SafeAreaView>
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>
+                        {currentLanguage === 'hi' ? 'सभी श्रेणियाँ' : 'All Categories'}
+                    </Text>
+                    <View style={styles.grid}>
+                        {renderCategoryGrid(categories)}
+                    </View>
+                </View>
+            </Animated.ScrollView>
+        </View>
     );
 };
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: COLORS.white,
+        backgroundColor: '#FAF9F6',
     },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 8,
-        paddingVertical: 12,
-        backgroundColor: COLORS.white,
+    stickyHeaderWrapper: {
+        zIndex: 100,
+        backgroundColor: 'transparent',
     },
-    backButton: {
-        padding: 4,
+    embeddedSearchWrapper: {
+        paddingHorizontal: 16,
+        paddingBottom: 10,
+        paddingTop: 4,
     },
-    headerCenter: {
+    loadingContainer: {
         flex: 1,
-        marginLeft: 8,
-    },
-    deliveryInfo: {
-        flexDirection: 'row',
+        justifyContent: 'center',
         alignItems: 'center',
     },
-    deliveryTime: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: COLORS.text,
-        marginLeft: 4,
-    },
-    locationText: {
-        fontSize: 13,
+    loadingText: {
+        marginTop: 12,
+        fontSize: 14,
         color: COLORS.textSecondary,
-        marginTop: 2,
-    },
-    searchButton: {
-        padding: 8,
-    },
-    divider: {
-        height: 1,
-        backgroundColor: COLORS.border,
+        fontWeight: '500',
     },
     scrollView: {
         flex: 1,
     },
     scrollContent: {
-        paddingBottom: 24,
+        paddingTop: 4,
+        paddingBottom: 90,
     },
     section: {
         paddingHorizontal: HORIZONTAL_PADDING,
-        marginTop: 24,
+        marginTop: 6,
     },
     sectionTitle: {
-        fontSize: 18,
+        fontSize: 17,
         fontWeight: '700',
         color: COLORS.text,
-        marginBottom: 16,
+        marginBottom: 10,
     },
     grid: {
-
+        flexDirection: 'column',
     },
     row: {
         flexDirection: 'row',
-        marginBottom: ITEM_SPACING,
-    },
-    categoryItem: {
-        width: ITEM_WIDTH,
-        marginRight: ITEM_SPACING,
-        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 14,
     },
     emptySlot: {
         width: ITEM_WIDTH,
-        marginRight: ITEM_SPACING,
-    },
-    imageContainer: {
-        width: ITEM_WIDTH - 8,
-        height: ITEM_WIDTH - 8,
-        borderRadius: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 8,
-    },
-    categoryImage: {
-        width: '65%',
-        height: '65%',
-    },
-    categoryName: {
-        fontSize: 11,
-        fontWeight: '500',
-        color: COLORS.text,
-        textAlign: 'center',
-        lineHeight: 14,
     },
 });
 

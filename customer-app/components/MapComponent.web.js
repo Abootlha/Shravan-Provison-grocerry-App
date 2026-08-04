@@ -55,28 +55,8 @@ const MapComponent = ({
                     </View>
                 )}
 
-                {selectedLocation && (
-                    <View style={styles.selectionPill}>
-                        <MaterialCommunityIcons name="map-marker" size={14} color="#E91E63" />
-                        <Text style={styles.selectionPillText}>Selected delivery pin</Text>
-                    </View>
-                )}
-            </View>
 
-            {selectedLocation && (
-                <View style={styles.webLocationCard}>
-                    <MaterialCommunityIcons name="map-marker" size={24} color="#E91E63" />
-                    <View style={styles.webLocationDetails}>
-                        <Text style={styles.webLocationTitle}>{addressDetails.address || 'Selected Location'}</Text>
-                        <Text style={styles.webLocationSubtitle}>
-                            {[addressDetails.city, addressDetails.pincode].filter(Boolean).join(', ')}
-                        </Text>
-                        <Text style={styles.webLocationCoords}>
-                            Lat: {selectedLocation.latitude.toFixed(6)}, Lng: {selectedLocation.longitude.toFixed(6)}
-                        </Text>
-                    </View>
-                </View>
-            )}
+            </View>
 
             <TouchableOpacity style={styles.webGpsButton} onPress={onCurrentLocationPress}>
                 <MaterialCommunityIcons name="crosshairs-gps" size={20} color="#E91E63" />
@@ -99,13 +79,13 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
     },
     previewShell: {
-        height: 260,
+        height: 350,
         borderRadius: 18,
         overflow: 'hidden',
         backgroundColor: '#FFF8FA',
         borderWidth: 1,
         borderColor: '#FCE4EC',
-        marginBottom: 16,
+        marginBottom: 8,
         position: 'relative',
     },
     webNotice: {

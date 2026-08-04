@@ -13,8 +13,8 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
-import { Header, ProductCard } from '../components';
-import { COLORS } from '../constants';
+import { Header, ProductCard, FloatingCartBar } from '../components';
+import { COLORS, SHADOWS } from '../constants';
 import { ProductService } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
 import { translateToHindi } from '../services/translationService';
@@ -53,12 +53,12 @@ const CategoryScreen = ({ route, navigation }) => {
         try {
             setLoading(true);
             setError(null);
-            
+
             // Fetch subcategories for this category
             const categoryId = category._id || category.id;
             const response = await ProductService.getSubcategories({ parentId: categoryId });
             let subcats = response.subcategories || [];
-            
+
             // If Hindi is selected, translate immediately before setting state
             if (currentLanguage === 'hi' && subcats.length > 0) {
                 try {
@@ -73,9 +73,9 @@ const CategoryScreen = ({ route, navigation }) => {
                     // Continue with English if translation fails
                 }
             }
-            
+
             setSubcategories(subcats);
-            
+
             // Auto-select first subcategory
             if (subcats.length > 0) {
                 setSelectedSubcategory(subcats[0]);
@@ -93,15 +93,15 @@ const CategoryScreen = ({ route, navigation }) => {
     const fetchProducts = async (subcategoryId, isCategory = false) => {
         try {
             setLoading(true);
-            
+
             // Fetch products for this subcategory or category
-            const params = isCategory 
+            const params = isCategory
                 ? { categoryId: subcategoryId, limit: 100 }
                 : { subcategoryId, limit: 100 };
-                
+
             const productsData = await ProductService.getProducts(params);
             let finalProducts = productsData.products || [];
-            
+
             // If Hindi is selected, translate immediately before setting state
             if (currentLanguage === 'hi' && finalProducts.length > 0) {
                 try {
@@ -116,7 +116,7 @@ const CategoryScreen = ({ route, navigation }) => {
                     // Continue with English if translation fails
                 }
             }
-            
+
             setProducts(finalProducts);
         } catch (err) {
             console.error('Error fetching products:', err);
@@ -169,22 +169,22 @@ const CategoryScreen = ({ route, navigation }) => {
 
     const renderSubcategory = ({ item }) => {
         const isSelected = selectedSubcategory?._id === item._id;
-        const displayName = currentLanguage === 'hi' && item.translatedName 
-            ? item.translatedName 
+        const displayName = currentLanguage === 'hi' && item.translatedName
+            ? item.translatedName
             : item.name;
-        
+
         // Check if icon is a valid image URL or base64
         // Skip base64 images that are too large (over 100KB)
         const hasValidImage = item.icon && (
-            item.icon.startsWith('http') || 
+            item.icon.startsWith('http') ||
             (item.icon.startsWith('data:image/') && item.icon.length < 100000)
         );
-        
+
         // Warn about large base64 images
         if (item.icon && item.icon.startsWith('data:image/') && item.icon.length > 100000) {
             console.warn(`Base64 image too large for ${item.name}: ${Math.round(item.icon.length / 1024)}KB. Please use an image URL or compress the image.`);
         }
-        
+
         return (
             <TouchableOpacity
                 style={[
@@ -196,8 +196,8 @@ const CategoryScreen = ({ route, navigation }) => {
             >
                 {/* Subcategory Icon/Image */}
                 {hasValidImage ? (
-                    <Image 
-                        source={{ uri: item.icon }} 
+                    <Image
+                        source={{ uri: item.icon }}
                         style={styles.subcategoryIcon}
                         resizeMode="contain"
                         onError={(e) => {
@@ -209,14 +209,14 @@ const CategoryScreen = ({ route, navigation }) => {
                         styles.subcategoryIconPlaceholder,
                         isSelected && styles.subcategoryIconPlaceholderActive
                     ]}>
-                        <MaterialCommunityIcons 
-                            name="package-variant" 
-                            size={24} 
-                            color={isSelected ? COLORS.secondary : COLORS.textSecondary} 
+                        <MaterialCommunityIcons
+                            name="package-variant"
+                            size={24}
+                            color={isSelected ? COLORS.secondary : COLORS.textSecondary}
                         />
                     </View>
                 )}
-                
+
                 {/* Subcategory Name */}
                 <Text
                     style={[
@@ -227,7 +227,7 @@ const CategoryScreen = ({ route, navigation }) => {
                 >
                     {displayName}
                 </Text>
-                
+
                 {/* Active Indicator */}
                 {isSelected && <View style={styles.activeIndicator} />}
             </TouchableOpacity>
@@ -235,13 +235,13 @@ const CategoryScreen = ({ route, navigation }) => {
     };
 
     const renderProduct = ({ item }) => {
-        const displayName = currentLanguage === 'hi' && item.translatedName 
-            ? item.translatedName 
+        const displayName = currentLanguage === 'hi' && item.translatedName
+            ? item.translatedName
             : item.name;
-        
+
         return (
             <View style={styles.productWrapper}>
-                <ProductCard 
+                <ProductCard
                     product={{
                         id: item._id,
                         name: displayName,
@@ -251,11 +251,11 @@ const CategoryScreen = ({ route, navigation }) => {
                         image: item.image,
                         categoryId: item.categoryId?._id || item.categoryId,
                         inStock: item.isAvailable && item.stock > 0,
-                        discount: item.originalPrice > item.price 
-                            ? Math.round((1 - item.price / item.originalPrice) * 100) 
+                        discount: item.originalPrice > item.price
+                            ? Math.round((1 - item.price / item.originalPrice) * 100)
                             : 0
-                    }} 
-                    onPress={() => handleProductPress(item)} 
+                    }}
+                    onPress={() => handleProductPress(item)}
                 />
             </View>
         );
@@ -263,23 +263,30 @@ const CategoryScreen = ({ route, navigation }) => {
 
     if (error) {
         return (
-            <SafeAreaView style={styles.container}>
-                <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
+            <View style={styles.container}>
+                <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
                 <Header
                     showLocation
                     showBack
                     location={selectedAddress?.type || 'Home'}
                     subtitle={selectedAddress ? `${selectedAddress.address}` : 'Select your location'}
-                    whiteBackground
+                    deliveryTime="10 mins"
                     onBackPress={handleBackPress}
                     onLocationPress={handleLocationPress}
-                    rightComponent={
-                        <View style={styles.headerRight}>
-                            <SearchButton />
-                            <CartBadge />
-                        </View>
-                    }
-                />
+                    showProfileAndWallet={false}
+                    showCart={true}
+                    cartItems={cartItems}
+                    onCartPress={handleCartPress}
+                    bgImages={[
+                        require('../assets/basket1.png'),
+                        require('../assets/snacks.png'),
+                        require('../assets/personal-care.png'),
+                        require('../assets/rashan.png')
+                    ]}
+                    bgImageStyle={{ width: '100%', height: '100%' }}
+                >
+                    <View style={{ height: 25 }} />
+                </Header>
                 <View style={styles.errorContainer}>
                     <MaterialCommunityIcons name="alert-circle-outline" size={64} color={COLORS.textSecondary} />
                     <Text style={styles.errorText}>{error}</Text>
@@ -287,13 +294,13 @@ const CategoryScreen = ({ route, navigation }) => {
                         <Text style={styles.retryButtonText}>Retry</Text>
                     </TouchableOpacity>
                 </View>
-            </SafeAreaView>
+            </View>
         );
     }
 
     return (
-        <SafeAreaView style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
+        <View style={styles.container}>
+            <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
             {/* Reusable Header with Location and Back Button */}
             <Header
@@ -301,16 +308,23 @@ const CategoryScreen = ({ route, navigation }) => {
                 showBack
                 location={selectedAddress?.type || 'Home'}
                 subtitle={selectedAddress ? `${selectedAddress.address}` : 'Select your location'}
-                whiteBackground
+                deliveryTime="10 mins"
                 onBackPress={handleBackPress}
                 onLocationPress={handleLocationPress}
-                rightComponent={
-                    <View style={styles.headerRight}>
-                        <SearchButton />
-                        <CartBadge />
-                    </View>
-                }
-            />
+                showProfileAndWallet={false}
+                showCart={true}
+                cartItems={cartItems}
+                onCartPress={handleCartPress}
+                bgImages={[
+                    require('../assets/basket1.png'),
+                    require('../assets/snacks.png'),
+                    require('../assets/personal-care.png'),
+                    require('../assets/rashan.png')
+                ]}
+                bgImageStyle={{ width: '100%', height: '100%' }}
+            >
+                <View style={{ height: 25 }} />
+            </Header>
 
             <View style={styles.content}>
                 {/* Left Sidebar - Subcategories */}
@@ -350,7 +364,10 @@ const CategoryScreen = ({ route, navigation }) => {
                     )}
                 </View>
             </View>
-        </SafeAreaView>
+
+            {/* Premium Floating Cart Bar */}
+            <FloatingCartBar onPress={handleCartPress} />
+        </View>
     );
 };
 
@@ -364,38 +381,42 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     searchButton: {
-        marginRight: 8,
+        marginRight: 6,
     },
     searchIconWrapper: {
-        width: 42,
-        height: 42,
+        width: 38,
+        height: 38,
         borderRadius: 12,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.white,
         alignItems: 'center',
         justifyContent: 'center',
+        ...SHADOWS.light,
     },
     cartButton: {
         position: 'relative',
     },
     cartIconWrapper: {
-        width: 42,
-        height: 42,
+        width: 38,
+        height: 38,
         borderRadius: 12,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.white,
         alignItems: 'center',
         justifyContent: 'center',
+        ...SHADOWS.light,
     },
     badge: {
         position: 'absolute',
-        top: -4,
-        right: -4,
-        backgroundColor: COLORS.secondary,
+        top: -3,
+        right: -3,
+        backgroundColor: '#E53935',
         borderRadius: 10,
-        minWidth: 20,
-        height: 20,
+        minWidth: 18,
+        height: 18,
         alignItems: 'center',
         justifyContent: 'center',
-        paddingHorizontal: 5,
+        paddingHorizontal: 4,
+        borderWidth: 1.5,
+        borderColor: COLORS.white,
     },
     badgeText: {
         color: COLORS.white,

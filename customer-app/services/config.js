@@ -49,11 +49,12 @@ export const ENDPOINTS = {
     user: {
         PROFILE: '/users/me',
         ADDRESSES: '/users/addresses',
+        UPDATE_ADDRESS: (addressIndex) => `/users/addresses/${addressIndex}`,
         REMOVE_ADDRESS: (addressIndex) => `/users/addresses/${addressIndex}`,
     },
     categories: {
         LIST: '/categories',
-        SUBCATEGORIES: (categoryId) => `/categories/${categoryId}/subcategories`,
+        SUBCATEGORIES: (categoryId) => `/subcategories?parentId=${categoryId}`,
     },
     products: {
         LIST: '/products',

@@ -3,10 +3,31 @@ import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS, SHADOWS } from '../constants';
 
-const CategoryCard = ({ category, onPress, size = 'medium', showItemCount = false }) => {
+const PASTEL_COLORS = [
+    { bg: '#FFF3E0', border: '#FFE0B2', glow: 'rgba(255, 152, 0, 0.12)' }, // Soft Amber / Peach
+    { bg: '#E8F5E9', border: '#C8E6C9', glow: 'rgba(76, 175, 80, 0.12)' },  // Soft Mint Green
+    { bg: '#E3F2FD', border: '#BBDEFB', glow: 'rgba(33, 150, 243, 0.12)' }, // Soft Sky Blue
+    { bg: '#F3E5F5', border: '#E1BEE7', glow: 'rgba(156, 39, 176, 0.12)' }, // Soft Lavender
+    { bg: '#FFF8E1', border: '#FFECB3', glow: 'rgba(255, 193, 7, 0.12)' },  // Soft Butter Yellow
+    { bg: '#FCE4EC', border: '#F8BBD0', glow: 'rgba(233, 30, 99, 0.12)' },  // Soft Pastel Pink
+    { bg: '#E0F2F1', border: '#B2DFDB', glow: 'rgba(0, 150, 136, 0.12)' },  // Soft Teal
+    { bg: '#FFEBEE', border: '#FFCDD2', glow: 'rgba(244, 67, 54, 0.12)' },  // Soft Coral
+];
+
+const getPastelTheme = (color, index = 0) => {
+    if (color && color !== '#F5F5F5' && color !== '#E8F5E9') {
+        return { bg: color, border: 'rgba(0,0,0,0.06)', glow: 'rgba(0,0,0,0.05)' };
+    }
+    const idx = Math.abs(index) % PASTEL_COLORS.length;
+    return PASTEL_COLORS[idx];
+};
+
+const CategoryCard = ({ category, onPress, index = 0, size = 'medium', showItemCount = false, width: customWidth }) => {
     const isSmall = size === 'small';
     const isMedium = size === 'medium';
     const isLarge = size === 'large';
+
+    const theme = getPastelTheme(category.color, index);
 
     // Check if we have a valid image URL
     const hasValidImage = category.image && (
@@ -22,7 +43,7 @@ const CategoryCard = ({ category, onPress, size = 'medium', showItemCount = fals
                 style={[
                     styles.container,
                     styles.largeContainer,
-                    { backgroundColor: category.color || '#F5F5F5' },
+                    { backgroundColor: theme.bg, borderColor: theme.border },
                 ]}
                 onPress={onPress}
                 activeOpacity={0.85}
@@ -58,17 +79,21 @@ const CategoryCard = ({ category, onPress, size = 'medium', showItemCount = fals
 
     // Small and Medium card layout (vertical with text below)
     return (
-        <View style={styles.wrapper}>
+        <View style={[styles.wrapper, customWidth ? { width: customWidth, marginRight: 0 } : null]}>
             <TouchableOpacity
                 style={[
                     styles.coloredBox,
                     isSmall && styles.smallBox,
                     isMedium && styles.mediumBox,
-                    { backgroundColor: category.color || '#F5F5F5' },
+                    customWidth ? { width: customWidth, height: customWidth, borderRadius: 20 } : null,
+                    { backgroundColor: theme.bg, borderColor: theme.border },
                 ]}
                 onPress={onPress}
                 activeOpacity={0.85}
             >
+                {/* Soft ambient inner glow */}
+                <View style={[styles.glowBlob, { backgroundColor: theme.glow }]} />
+
                 {/* Category Image or Icon */}
                 <View style={[
                     styles.imageWrapper,
@@ -108,6 +133,7 @@ const CategoryCard = ({ category, onPress, size = 'medium', showItemCount = fals
                     styles.nameBelow,
                     isSmall && styles.smallNameBelow,
                     isMedium && styles.mediumNameBelow,
+                    customWidth ? { width: customWidth } : null,
                 ]}
                 numberOfLines={2}
             >
@@ -125,11 +151,20 @@ const styles = StyleSheet.create({
     coloredBox: {
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: 16,
+        borderRadius: 20,
         padding: 12,
-        ...SHADOWS.medium,
+        borderWidth: 1,
+        ...SHADOWS.light,
         position: 'relative',
         overflow: 'hidden',
+    },
+    glowBlob: {
+        position: 'absolute',
+        top: -15,
+        right: -15,
+        width: 60,
+        height: 60,
+        borderRadius: 30,
     },
     smallBox: {
         width: 90,
@@ -161,7 +196,7 @@ const styles = StyleSheet.create({
         borderRadius: 18,
         marginBottom: 10,
         marginRight: 0,
-        ...SHADOWS.medium,
+        ...SHADOWS.light,
     },
     imageWrapper: {
         backgroundColor: 'transparent',

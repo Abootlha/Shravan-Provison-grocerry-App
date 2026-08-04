@@ -6,3 +6,5 @@ export { default as CartItem } from './CartItem';
 export { default as Header } from './Header';
 export { default as QuantitySelector } from './QuantitySelector';
 export { default as EmptyState } from './EmptyState';
+export { default as FloatingCartBar } from './FloatingCartBar';
+export { default as DeleteAccountModal } from './DeleteAccountModal';

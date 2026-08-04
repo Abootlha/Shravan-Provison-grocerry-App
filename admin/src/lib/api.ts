@@ -11,11 +11,12 @@ const SETTINGS_SERVICE = appConfig.settingsServiceUrl;
 const SUBCATEGORY_SERVICE = appConfig.subcategoryServiceUrl || PRODUCT_SERVICE;
 const ITEM_GROUP_SERVICE = appConfig.itemGroupServiceUrl || PRODUCT_SERVICE;
 
-const IS_MICROSERVICES_MODE = Boolean(
-    import.meta.env.PUBLIC_PRODUCT_SERVICE_URL ||
-    import.meta.env.PUBLIC_ORDER_SERVICE_URL ||
-    import.meta.env.PUBLIC_RIDER_SERVICE_URL ||
-    import.meta.env.PUBLIC_AUTH_SERVICE_URL
+const IS_MICROSERVICES_MODE = [
+    PRODUCT_SERVICE,
+    ORDER_SERVICE,
+    RIDER_SERVICE,
+    AUTH_SERVICE,
+].some((serviceUrl) => serviceUrl !== API_BASE
 );
 
 function isTokenExpired(): boolean {
@@ -144,7 +145,7 @@ export const api = {
     getCategories: () => apiRequest(PRODUCT_SERVICE, '/categories'),
     getCategoryTree: () => apiRequest(PRODUCT_SERVICE, IS_MICROSERVICES_MODE ? '/categories/tree' : '/categories/nested'),
     getCategory: (id: string) => apiRequest(PRODUCT_SERVICE, `/categories/${id}`),
-    getSubcategories: (parentId: string) => apiRequest(PRODUCT_SERVICE, `/categories/${parentId}/subcategories`),
+    getSubcategories: (parentId: string) => apiRequest(SUBCATEGORY_SERVICE, `/subcategories?parentId=${parentId}`),
     getAllSubcategories: () => apiRequest(SUBCATEGORY_SERVICE, '/subcategories'),
     createCategory: (data: any) =>
         apiRequest(PRODUCT_SERVICE, '/categories', { method: 'POST', body: JSON.stringify(data) }),

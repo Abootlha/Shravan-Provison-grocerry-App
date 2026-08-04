@@ -5,34 +5,65 @@ import {
     ScrollView,
     TouchableOpacity,
     StyleSheet,
-    SafeAreaView,
     StatusBar,
-    Alert,
     ActivityIndicator,
-    Platform,
+    Image,
+    ImageBackground,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import {
+    Notification01Icon,
+    Settings01Icon,
+    CrownIcon,
+    ShoppingBag01Icon,
+    Tag01Icon,
+    FavouriteIcon,
+    Location01Icon,
+    CreditCardIcon,
+    GiftIcon,
+    CustomerService01Icon,
+    StarIcon,
+    Shield01Icon,
+    ArrowRight01Icon,
+    ArrowLeft01Icon,
+    Logout01Icon,
+} from 'hugeicons-react-native';
 import { useSelector, useDispatch } from 'react-redux';
 import { CommonActions } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { COLORS, SHADOWS } from '../constants';
-import { logout } from '../store/slices/authSlice';
-import { AuthService } from '../services';
+import { logout, updateUser } from '../store/slices/authSlice';
+import { AuthService, UserService, OrderService } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
 
 const ProfileScreen = ({ navigation }) => {
     const insets = useSafeAreaInsets();
-    const { t } = useTranslation();
+    const { t, isHi } = useTranslation();
     const dispatch = useDispatch();
     const { isAuthenticated, user } = useSelector((state) => state.auth);
     const [isLoggingOut, setIsLoggingOut] = useState(false);
+    const [addressCount, setAddressCount] = useState(user?.addresses?.length || 0);
+
+    React.useEffect(() => {
+        const unsubscribe = navigation.addListener('focus', async () => {
+            if (isAuthenticated) {
+                try {
+                    const profile = await UserService.getProfile();
+                    if (profile) {
+                        dispatch(updateUser({ ...user, ...profile }));
+                        if (profile.addresses) {
+                            setAddressCount(profile.addresses.length);
+                        }
+                    }
+                } catch (err) {
+                    console.log('Error fetching user profile in ProfileScreen:', err);
+                }
+            }
+        });
+        return unsubscribe;
+    }, [navigation, isAuthenticated]);
 
     const handleLogout = async () => {
-        performLogout();
-    };
-
-    const performLogout = async () => {
         setIsLoggingOut(true);
 
         try {
@@ -44,12 +75,9 @@ const ProfileScreen = ({ navigation }) => {
 
         await AsyncStorage.multiRemove(['customerUser', 'customerAccessToken', 'customerRefreshToken']);
 
-        // Clear Redux state
         dispatch(logout());
-
         setIsLoggingOut(false);
 
-        // Navigate to Login screen
         navigation.dispatch(
             CommonActions.reset({
                 index: 0,
@@ -58,404 +86,810 @@ const ProfileScreen = ({ navigation }) => {
         );
     };
 
-    const menuSections = [
-        {
-            title: t('myAccount'),
-            items: [
-                { id: '1', icon: 'package-variant', title: t('myOrders'), subtitle: t('viewOrderHistory'), onPress: () => navigation.navigate('OrdersHistory'), badge: null },
-                { id: '2', icon: 'map-marker-outline', title: t('savedAddresses'), subtitle: t('manageDeliveryAddresses'), onPress: () => { }, badge: null },
-                { id: '3', icon: 'wallet-outline', title: t('wallet'), subtitle: `${t('balance')}: ₹0`, onPress: () => { }, badge: null },
-            ],
-        },
-        {
-            title: t('offersRewards'),
-            items: [
-                { id: '4', icon: 'ticket-percent-outline', title: t('coupons'), subtitle: t('availableOffers'), onPress: () => { }, badge: '3' },
-                { id: '5', icon: 'heart-outline', title: t('wishlist'), subtitle: t('yourSavedItems'), onPress: () => { }, badge: null },
-                { id: '6', icon: 'gift-outline', title: t('referEarn'), subtitle: t('getReferral'), onPress: () => { }, badge: 'NEW' },
-            ],
-        },
-        {
-            title: t('settings'),
-            items: [
-                { id: '7', icon: 'bell-outline', title: t('notifications'), subtitle: t('manageAlerts'), onPress: () => { }, badge: null },
-                { id: '8', icon: 'shield-check-outline', title: t('privacySecurity'), subtitle: t('dataPermissions'), onPress: () => { }, badge: null },
-            ],
-        },
-        {
-            title: t('helpInfo'),
-            items: [
-                { id: '9', icon: 'headset', title: t('helpCenter'), subtitle: t('support247'), onPress: () => { }, badge: null },
-                { id: '10', icon: 'information-outline', title: t('about'), subtitle: t('termsPolicies'), onPress: () => { }, badge: null },
-            ],
-        },
-    ];
+    const userName = isAuthenticated && user?.name ? user.name : (isHi ? 'अमित' : 'Amit');
 
     return (
-        <SafeAreaView style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor={COLORS.primary} />
+        <View style={styles.container}>
+            <StatusBar barStyle="dark-content" backgroundColor="#F3E8FF" />
 
-            {/* Profile Header */}
-            <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) + 12 }]}>
-                <View style={styles.headerContent}>
-                    <View style={styles.avatar}>
-                        <MaterialCommunityIcons name="account" size={36} color={COLORS.white} />
+            {/* STICKY TOP HEADER */}
+            <View style={[styles.stickyHeader, { paddingTop: Math.max(insets.top, 10) }]}>
+                <View style={styles.headerRow}>
+                    {/* Back Button */}
+                    <TouchableOpacity
+                        style={styles.backBtn}
+                        onPress={() => (navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Home'))}
+                        activeOpacity={0.75}
+                    >
+                        <ArrowLeft01Icon size={18} color="#1E1B4B" strokeWidth={2.2} />
+                    </TouchableOpacity>
+
+                    {/* Avatar & User Info Touchable */}
+                    <TouchableOpacity
+                        style={styles.userInfoRow}
+                        activeOpacity={0.8}
+                        onPress={() => navigation.navigate('ProfileSettings')}
+                    >
+                        <View style={styles.avatarWrapper}>
+                            {user?.profilePicture || user?.avatar || user?.photo ? (
+                                <Image
+                                    source={{ uri: user.profilePicture || user.avatar || user.photo }}
+                                    style={styles.avatarImage}
+                                />
+                            ) : (
+                                <Image
+                                    source={require('../assets/default-avatar.png')}
+                                    style={styles.avatarImage}
+                                />
+                            )}
+                        </View>
+
+                        {/* User Greeting Text */}
+                        <View style={styles.greetingTextContainer}>
+                            <Text style={styles.greetingTitle} numberOfLines={1}>
+                                {isHi ? `नमस्ते, ${userName} 👋` : `Hello, ${userName} 👋`}
+                            </Text>
+                            <Text style={styles.greetingSubtext} numberOfLines={1}>
+                                {isHi ? 'श्रवण किराना में आपका स्वागत है' : 'Welcome to Shravan Kirana'}
+                            </Text>
+                        </View>
+                    </TouchableOpacity>
+
+                    {/* Top Right Action Icons */}
+                    <View style={styles.topActionsRow}>
+                        <TouchableOpacity style={styles.actionIconBtn} activeOpacity={0.75}>
+                            <Notification01Icon size={18} color="#1E1B4B" strokeWidth={2} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.actionIconBtn}
+                            activeOpacity={0.75}
+                            onPress={() => navigation.navigate('ProfileSettings')}
+                        >
+                            <Settings01Icon size={18} color="#1E1B4B" strokeWidth={2} />
+                        </TouchableOpacity>
                     </View>
-                    <View style={styles.profileText}>
-                        <Text style={styles.name}>
-                            {isAuthenticated && user ? user.name : t('guestUser')}
-                        </Text>
-                        <View style={styles.phoneRow}>
-                            <MaterialCommunityIcons name="phone" size={14} color={COLORS.textSecondary} />
-                            <Text style={styles.phone}>
-                                {isAuthenticated && user ? user.phone : '+91 XXXXX XXXXX'}
+                </View>
+            </View>
+
+            <ScrollView
+                style={styles.scrollView}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{
+                    paddingBottom: 40,
+                }}
+            >
+                <View style={styles.mainContentSheet}>
+
+                {/* 2. SHRAVAN ONE MEMBERSHIP CARD */}
+                <TouchableOpacity style={styles.membershipCard} activeOpacity={0.9}>
+                    <View style={styles.membershipLeft}>
+                        <View style={styles.crownCircle}>
+                            <CrownIcon size={20} color="#FFFFFF" strokeWidth={2.3} />
+                        </View>
+                        <View style={styles.membershipTextGroup}>
+                            <View style={styles.membershipTitleRow}>
+                                <Text style={styles.membershipTitleWhite}>Shravan </Text>
+                                <Text style={styles.membershipTitleGold}>One</Text>
+                            </View>
+                            <Text style={styles.membershipDesc}>
+                                {isHi
+                                    ? 'मुफ्त डिलीवरी, विशेष ऑफर और अधिक लाभ'
+                                    : 'Free delivery, exclusive offers & more benefits'}
                             </Text>
                         </View>
                     </View>
-                    {isAuthenticated ? (
-                        <TouchableOpacity style={styles.editButton}>
-                            <MaterialCommunityIcons name="pencil-outline" size={18} color={COLORS.text} />
+
+                    <View style={styles.viewBenefitsBtn}>
+                        <Text style={styles.viewBenefitsText}>
+                            {isHi ? 'लाभ देखें' : 'View Benefits'}
+                        </Text>
+                        <MaterialCommunityIcons name="chevron-right" size={16} color="#6C3CF4" />
+                    </View>
+                </TouchableOpacity>
+
+                {/* 3. QUICK STATS ROW */}
+                <View style={styles.statsCardContainer}>
+                    {/* Orders Stat */}
+                    <TouchableOpacity
+                        style={styles.statBox}
+                        activeOpacity={0.75}
+                        onPress={() => navigation.navigate('OrdersHistory')}
+                    >
+                        <View style={[styles.statIconCircle, { backgroundColor: '#F3E8FF' }]}>
+                            <ShoppingBag01Icon size={18} color="#7C3AED" strokeWidth={2.1} />
+                        </View>
+                        <Text style={styles.statNumber}>28</Text>
+                        <Text style={styles.statLabel}>{isHi ? 'ऑर्डर' : 'Orders'}</Text>
+                    </TouchableOpacity>
+
+                    {/* Savings Stat */}
+                    <View style={styles.statBox}>
+                        <View style={[styles.statIconCircle, { backgroundColor: '#F3E8FF' }]}>
+                            <Tag01Icon size={18} color="#7C3AED" strokeWidth={2.1} />
+                        </View>
+                        <Text style={styles.statNumber}>₹1,248</Text>
+                        <Text style={styles.statLabel}>{isHi ? 'बचत' : 'Savings'}</Text>
+                    </View>
+
+                    {/* Favourites Stat */}
+                    <View style={styles.statBox}>
+                        <View style={[styles.statIconCircle, { backgroundColor: '#F3E8FF' }]}>
+                            <FavouriteIcon size={18} color="#7C3AED" strokeWidth={2.1} />
+                        </View>
+                        <Text style={styles.statNumber}>12</Text>
+                        <Text style={styles.statLabel}>{isHi ? 'पसंदीदा' : 'Favourites'}</Text>
+                    </View>
+
+                    {/* Addresses Stat */}
+                    <View style={styles.statBox}>
+                        <View style={[styles.statIconCircle, { backgroundColor: '#F3E8FF' }]}>
+                            <Location01Icon size={18} color="#7C3AED" strokeWidth={2.1} />
+                        </View>
+                        <Text style={styles.statNumber}>{addressCount || user?.addresses?.length || 0}</Text>
+                        <Text style={styles.statLabel}>{isHi ? 'पते' : 'Addresses'}</Text>
+                    </View>
+                </View>
+
+                {/* 4. SECTION: ACCOUNT */}
+                <View style={styles.sectionContainer}>
+                    <Text style={styles.sectionHeaderTitle}>{isHi ? 'खाता' : 'Account'}</Text>
+                    <View style={styles.menuGroupCard}>
+                        {/* My Addresses */}
+                        <TouchableOpacity style={styles.menuRowItem} activeOpacity={0.7}>
+                            <View style={styles.menuLeftContent}>
+                                <View style={[styles.menuIconBg, { backgroundColor: '#DCFCE7' }]}>
+                                    <Location01Icon size={18} color="#16A34A" strokeWidth={2.2} />
+                                </View>
+                                <View style={styles.menuTextGroup}>
+                                    <Text style={styles.menuMainTitle}>{isHi ? 'सहेजे गए पते' : 'My Addresses'}</Text>
+                                    <Text style={styles.menuSubTitle}>{isHi ? 'अपने सहेजे गए पते प्रबंधित करें' : 'Manage your saved addresses'}</Text>
+                                </View>
+                            </View>
+                            <MaterialCommunityIcons name="chevron-right" size={20} color="#9CA3AF" />
                         </TouchableOpacity>
-                    ) : (
+
+                        <View style={styles.itemDivider} />
+
+                        {/* Payment Methods */}
+                        <TouchableOpacity style={styles.menuRowItem} activeOpacity={0.7}>
+                            <View style={styles.menuLeftContent}>
+                                <View style={[styles.menuIconBg, { backgroundColor: '#F3E8FF' }]}>
+                                    <CreditCardIcon size={18} color="#7C3AED" strokeWidth={2.2} />
+                                </View>
+                                <View style={styles.menuTextGroup}>
+                                    <Text style={styles.menuMainTitle}>{isHi ? 'भुगतान के तरीके' : 'Payment Methods'}</Text>
+                                    <Text style={styles.menuSubTitle}>{isHi ? 'यूपीआई, कार्ड, वॉलेट और अन्य' : 'UPI, Cards, Wallets & more'}</Text>
+                                </View>
+                            </View>
+                            <MaterialCommunityIcons name="chevron-right" size={20} color="#9CA3AF" />
+                        </TouchableOpacity>
+
+                        <View style={styles.itemDivider} />
+
+                        {/* Profile Settings */}
                         <TouchableOpacity
-                            style={styles.loginButton}
-                            onPress={() => navigation.navigate('Login')}
+                            style={styles.menuRowItem}
+                            activeOpacity={0.7}
+                            onPress={() => navigation.navigate('ProfileSettings')}
                         >
-                            <Text style={styles.loginButtonText}>{t('login')}</Text>
+                            <View style={styles.menuLeftContent}>
+                                <View style={[styles.menuIconBg, { backgroundColor: '#F3E8FF' }]}>
+                                    <Settings01Icon size={18} color="#6C3CF4" strokeWidth={2.2} />
+                                </View>
+                                <View style={styles.menuTextGroup}>
+                                    <Text style={styles.menuMainTitle}>{isHi ? 'प्रोफ़ाइल सेटिंग्स' : 'Profile Settings'}</Text>
+                                    <Text style={styles.menuSubTitle}>{isHi ? 'नाम, फ़ोटो और विवरण प्रबंधित करें' : 'Manage name, photo & details'}</Text>
+                                </View>
+                            </View>
+                            <MaterialCommunityIcons name="chevron-right" size={20} color="#9CA3AF" />
                         </TouchableOpacity>
-                    )}
-                </View>
 
+                        <View style={styles.itemDivider} />
 
-                {/* Membership Banner */}
-                <View style={styles.membershipBanner}>
-                    <View style={styles.membershipLeft}>
-                        <MaterialCommunityIcons name="crown" size={20} color="#FFB300" />
-                        <View style={styles.membershipText}>
-                            <Text style={styles.membershipTitle}>{t('upgradeToPremium')}</Text>
-                            <Text style={styles.membershipSubtitle}>{t('freeDeliveryAllOrders')}</Text>
-                        </View>
+                        {/* My Orders */}
+                        <TouchableOpacity
+                            style={styles.menuRowItem}
+                            activeOpacity={0.7}
+                            onPress={() => navigation.navigate('OrdersHistory')}
+                        >
+                            <View style={styles.menuLeftContent}>
+                                <View style={[styles.menuIconBg, { backgroundColor: '#FFEDD5' }]}>
+                                    <ShoppingBag01Icon size={18} color="#EA580C" strokeWidth={2.2} />
+                                </View>
+                                <View style={styles.menuTextGroup}>
+                                    <Text style={styles.menuMainTitle}>{isHi ? 'मेरे ऑर्डर' : 'My Orders'}</Text>
+                                    <Text style={styles.menuSubTitle}>{isHi ? 'अपने ऑर्डर देखें और ट्रैक करें' : 'View and track your orders'}</Text>
+                                </View>
+                            </View>
+                            <MaterialCommunityIcons name="chevron-right" size={20} color="#9CA3AF" />
+                        </TouchableOpacity>
+
+                        <View style={styles.itemDivider} />
+
+                        {/* My Favourites */}
+                        <TouchableOpacity style={styles.menuRowItem} activeOpacity={0.7}>
+                            <View style={styles.menuLeftContent}>
+                                <View style={[styles.menuIconBg, { backgroundColor: '#FCE7F3' }]}>
+                                    <FavouriteIcon size={18} color="#DB2777" strokeWidth={2.2} />
+                                </View>
+                                <View style={styles.menuTextGroup}>
+                                    <Text style={styles.menuMainTitle}>{isHi ? 'मेरे पसंदीदा' : 'My Favourites'}</Text>
+                                    <Text style={styles.menuSubTitle}>{isHi ? 'आपके पसंदीदा उत्पाद' : 'Your favourite products'}</Text>
+                                </View>
+                            </View>
+                            <MaterialCommunityIcons name="chevron-right" size={20} color="#9CA3AF" />
+                        </TouchableOpacity>
+
+                        <View style={styles.itemDivider} />
+
+                        {/* Shravan One */}
+                        <TouchableOpacity style={styles.menuRowItem} activeOpacity={0.7}>
+                            <View style={styles.menuLeftContent}>
+                                <View style={[styles.menuIconBg, { backgroundColor: '#EDE9FE' }]}>
+                                    <CrownIcon size={18} color="#6D28D9" strokeWidth={2.2} />
+                                </View>
+                                <View style={styles.menuTextGroup}>
+                                    <Text style={styles.menuMainTitle}>Shravan One</Text>
+                                    <Text style={styles.menuSubTitle}>{isHi ? 'सदस्यता और लाभ' : 'Membership and benefits'}</Text>
+                                </View>
+                            </View>
+                            <View style={styles.rightSideWithBadge}>
+                                <View style={styles.newBadgePill}>
+                                    <Text style={styles.newBadgeText}>New</Text>
+                                </View>
+                                <MaterialCommunityIcons name="chevron-right" size={20} color="#9CA3AF" />
+                            </View>
+                        </TouchableOpacity>
                     </View>
-                    <MaterialCommunityIcons name="chevron-right" size={20} color={COLORS.textSecondary} />
                 </View>
-            </View>
 
-            {/* Quick Stats */}
-            <View style={styles.statsRow}>
-                <View style={styles.statItem}>
-                    <Text style={styles.statValue}>5</Text>
-                    <Text style={styles.statLabel}>{t('orders')}</Text>
-                </View>
-                <View style={styles.statDivider} />
-                <View style={styles.statItem}>
-                    <Text style={styles.statValue}>₹0</Text>
-                    <Text style={styles.statLabel}>{t('wallet')}</Text>
-                </View>
-                <View style={styles.statDivider} />
-                <View style={styles.statItem}>
-                    <Text style={styles.statValue}>3</Text>
-                    <Text style={styles.statLabel}>{t('coupons')}</Text>
-                </View>
-                <View style={styles.statDivider} />
-                <View style={styles.statItem}>
-                    <Text style={styles.statValue}>0</Text>
-                    <Text style={styles.statLabel}>{t('wishlist')}</Text>
-                </View>
-            </View>
+                {/* 5. SECTION: MORE */}
+                <View style={styles.sectionContainer}>
+                    <Text style={styles.sectionHeaderTitle}>{isHi ? 'अधिक' : 'More'}</Text>
+                    <View style={styles.menuGroupCard}>
+                        {/* Refer & Earn */}
+                        <TouchableOpacity style={styles.menuRowItem} activeOpacity={0.7}>
+                            <View style={styles.menuLeftContent}>
+                                <View style={[styles.menuIconBg, { backgroundColor: '#DCFCE7' }]}>
+                                    <GiftIcon size={18} color="#16A34A" strokeWidth={2.2} />
+                                </View>
+                                <View style={styles.menuTextGroup}>
+                                    <Text style={styles.menuMainTitle}>{isHi ? 'रेफर करें और कमाएं' : 'Refer & Earn'}</Text>
+                                    <Text style={styles.menuSubTitle}>{isHi ? 'दोस्तों को आमंत्रित करें और पुरस्कार पाएं' : 'Invite friends & earn rewards'}</Text>
+                                </View>
+                            </View>
+                            <View style={styles.rightSideWithBadge}>
+                                <View style={styles.earnBadgePill}>
+                                    <Text style={styles.earnBadgeText}>{isHi ? '₹150 पाएं' : 'Earn ₹150'}</Text>
+                                </View>
+                                <MaterialCommunityIcons name="chevron-right" size={20} color="#9CA3AF" />
+                            </View>
+                        </TouchableOpacity>
 
-            <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-                {menuSections.map((section) => (
-                    <View key={section.title} style={styles.menuSection}>
-                        <Text style={styles.sectionTitle}>{section.title}</Text>
-                        <View style={styles.menuCard}>
-                            {section.items.map((item, index) => (
-                                <TouchableOpacity
-                                    key={item.id}
-                                    style={[
-                                        styles.menuItem,
-                                        index < section.items.length - 1 && styles.menuItemBorder
-                                    ]}
-                                    onPress={item.onPress}
-                                    activeOpacity={0.7}
-                                >
-                                    <View style={styles.menuLeft}>
-                                        <View style={styles.menuIconWrapper}>
-                                            <MaterialCommunityIcons name={item.icon} size={20} color={COLORS.secondary} />
-                                        </View>
-                                        <View style={styles.menuTextWrapper}>
-                                            <Text style={styles.menuTitle}>{item.title}</Text>
-                                            <Text style={styles.menuSubtitle}>{item.subtitle}</Text>
-                                        </View>
-                                    </View>
-                                    <View style={styles.menuRight}>
-                                        {item.badge && (
-                                            <View style={[styles.badge, item.badge === 'NEW' && styles.badgeNew]}>
-                                                <Text style={[styles.badgeText, item.badge === 'NEW' && styles.badgeTextNew]}>
-                                                    {item.badge}
-                                                </Text>
-                                            </View>
-                                        )}
-                                        <MaterialCommunityIcons name="chevron-right" size={20} color={COLORS.textLight} />
-                                    </View>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
+                        <View style={styles.itemDivider} />
+
+                        {/* Help & Support */}
+                        <TouchableOpacity style={styles.menuRowItem} activeOpacity={0.7}>
+                            <View style={styles.menuLeftContent}>
+                                <View style={[styles.menuIconBg, { backgroundColor: '#E0F2FE' }]}>
+                                    <CustomerService01Icon size={18} color="#0284C7" strokeWidth={2.2} />
+                                </View>
+                                <View style={styles.menuTextGroup}>
+                                    <Text style={styles.menuMainTitle}>{isHi ? 'सहायता और समर्थन' : 'Help & Support'}</Text>
+                                    <Text style={styles.menuSubTitle}>{isHi ? 'सामान्य प्रश्न, चैट और कॉल सहायता' : 'FAQs, chat & call support'}</Text>
+                                </View>
+                            </View>
+                            <MaterialCommunityIcons name="chevron-right" size={20} color="#9CA3AF" />
+                        </TouchableOpacity>
+
+                        <View style={styles.itemDivider} />
+
+                        {/* Rate Shravan Kirana */}
+                        <TouchableOpacity style={styles.menuRowItem} activeOpacity={0.7}>
+                            <View style={styles.menuLeftContent}>
+                                <View style={[styles.menuIconBg, { backgroundColor: '#FEF3C7' }]}>
+                                    <StarIcon size={18} color="#D97706" strokeWidth={2.2} />
+                                </View>
+                                <View style={styles.menuTextGroup}>
+                                    <Text style={styles.menuMainTitle}>{isHi ? 'श्रवण किराना को रेट करें' : 'Rate Shravan Kirana'}</Text>
+                                    <Text style={styles.menuSubTitle}>{isHi ? 'अपनी प्रतिक्रिया साझा करें' : 'Share your feedback'}</Text>
+                                </View>
+                            </View>
+                            <MaterialCommunityIcons name="chevron-right" size={20} color="#9CA3AF" />
+                        </TouchableOpacity>
+
+                        <View style={styles.itemDivider} />
+
+                        {/* Privacy Policy */}
+                        <TouchableOpacity style={styles.menuRowItem} activeOpacity={0.7}>
+                            <View style={styles.menuLeftContent}>
+                                <View style={[styles.menuIconBg, { backgroundColor: '#F3E8FF' }]}>
+                                    <Shield01Icon size={18} color="#7C3AED" strokeWidth={2.2} />
+                                </View>
+                                <View style={styles.menuTextGroup}>
+                                    <Text style={styles.menuMainTitle}>{isHi ? 'गोपनीयता नीति' : 'Privacy Policy'}</Text>
+                                    <Text style={styles.menuSubTitle}>{isHi ? 'जानें कि हम आपकी सुरक्षा कैसे करते हैं' : 'Know how we protect you'}</Text>
+                                </View>
+                            </View>
+                            <MaterialCommunityIcons name="chevron-right" size={20} color="#9CA3AF" />
+                        </TouchableOpacity>
                     </View>
-                ))}
+                </View>
 
-                {/* Logout Button */}
+                {/* 6. BOTTOM PROMO BANNER */}
+                <TouchableOpacity style={styles.promoBannerTouchable} activeOpacity={0.9}>
+                    <ImageBackground
+                        source={require('../assets/profile-offer-card.png')}
+                        style={styles.promoBannerCardBg}
+                        imageStyle={{ borderRadius: 20, resizeMode: 'cover' }}
+                    >
+                        <View style={styles.promoTextContent}>
+                            <Text style={styles.promoBannerTitle}>
+                                {isHi ? 'अपने अगले 3 ऑर्डर पर\nमुफ्त डिलीवरी पाएं' : 'Get free delivery on\nyour next 3 orders'}
+                            </Text>
+                            <View style={styles.joinShravanRow}>
+                                <Text style={styles.promoBannerSubtext}>
+                                    {isHi ? 'अभी Shravan One से जुड़ें' : 'Join Shravan One now'}
+                                </Text>
+                                <View style={styles.arrowCirclePill}>
+                                    <ArrowRight01Icon size={12} color="#FFFFFF" strokeWidth={2.5} />
+                                </View>
+                            </View>
+                        </View>
+                    </ImageBackground>
+                </TouchableOpacity>
+
+                {/* 7. LOGOUT BUTTON (IF AUTHENTICATED) */}
                 {isAuthenticated && (
                     <TouchableOpacity
-                        style={styles.logoutButton}
+                        style={styles.logoutBtn}
                         activeOpacity={0.8}
                         onPress={handleLogout}
                         disabled={isLoggingOut}
                     >
                         {isLoggingOut ? (
-                            <ActivityIndicator size="small" color={COLORS.error} />
+                            <ActivityIndicator size="small" color="#EF4444" />
                         ) : (
                             <>
-                                <MaterialCommunityIcons name="logout" size={20} color={COLORS.error} />
-                                <Text style={styles.logoutText}>{t('logout')}</Text>
+                                <Logout01Icon size={18} color="#EF4444" strokeWidth={2.2} />
+                                <Text style={styles.logoutText}>{isHi ? 'लॉगआउट करें' : 'Logout'}</Text>
                             </>
                         )}
                     </TouchableOpacity>
                 )}
 
-                {/* App Version */}
-                <View style={styles.versionContainer}>
-                    <Text style={styles.version}>ShravanKirana v1.0.0</Text>
-                    <Text style={styles.versionSubtext}>{t('madeWithLove')}</Text>
+                {/* APP VERSION */}
+                <View style={styles.versionWrapper}>
+                    <Text style={styles.versionText}>Shravan Kirana v1.0.0</Text>
+                    <Text style={styles.versionSubtext}>Made with ❤️ for instant delivery</Text>
                 </View>
-
-                <View style={{ height: 40 }} />
+                </View>
             </ScrollView>
-        </SafeAreaView>
+        </View>
     );
 };
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: '#F3E8FF',
     },
-    header: {
-        backgroundColor: COLORS.primary,
-        padding: 20,
-        paddingBottom: 16,
-    },
-    headerContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    avatar: {
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-        backgroundColor: COLORS.secondary,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    profileText: {
+    scrollView: {
         flex: 1,
-        marginLeft: 14,
+        backgroundColor: '#F3E8FF',
     },
-    name: {
-        fontSize: 18,
-        fontWeight: '800',
-        color: COLORS.text,
-        letterSpacing: -0.3,
+    mainContentSheet: {
+        backgroundColor: '#FAF7FD',
+        borderTopLeftRadius: 26,
+        borderTopRightRadius: 26,
+        paddingTop: 18,
+        minHeight: 800,
+
+        shadowColor: '#7C3AED',
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.06,
+        shadowRadius: 10,
+        elevation: 4,
     },
-    phoneRow: {
+    /* HEADER STYLES */
+    stickyHeader: {
+        backgroundColor: '#F3E8FF',
+        zIndex: 100,
+        paddingBottom: 12,
+    },
+    headerRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginTop: 4,
-        gap: 6,
+        paddingHorizontal: 14,
+        width: '100%',
     },
-    phone: {
-        fontSize: 13,
-        color: COLORS.textSecondary,
-        fontWeight: '500',
+    userInfoRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+        marginRight: 8,
     },
-    editButton: {
+    backBtn: {
         width: 36,
         height: 36,
-        borderRadius: 12,
-        backgroundColor: 'rgba(255,255,255,0.6)',
+        borderRadius: 18,
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1,
+        borderColor: '#F3E8FF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 8,
+
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.04,
+        shadowRadius: 6,
+        elevation: 2,
+    },
+    avatarWrapper: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: '#F3E8FF',
+        borderWidth: 2,
+        borderColor: '#E9D5FF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+
+        shadowColor: '#7C3AED',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.08,
+        shadowRadius: 6,
+        elevation: 3,
+    },
+    avatarImage: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 24,
+        resizeMode: 'cover',
+    },
+    avatarCircle: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: '#EDE9FE',
         alignItems: 'center',
         justifyContent: 'center',
     },
-    loginButton: {
-        backgroundColor: COLORS.secondary,
-        paddingHorizontal: 20,
-        paddingVertical: 10,
-        borderRadius: 10,
+    greetingTextContainer: {
+        marginLeft: 10,
+        flex: 1,
+        justifyContent: 'center',
     },
-    loginButtonText: {
-        color: COLORS.white,
-        fontSize: 14,
-        fontWeight: '700',
+    greetingTitle: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: '#111827',
+        letterSpacing: -0.3,
     },
-    membershipBanner: {
+    greetingSubtext: {
+        fontSize: 11,
+        color: '#6B7280',
+        fontWeight: '500',
+        marginTop: 1,
+    },
+    brandSubtext: {
+        fontSize: 12,
+        color: '#7C3AED',
+        fontWeight: '800',
+        marginTop: -1,
+    },
+    topActionsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    actionIconBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1,
+        borderColor: '#F3E8FF',
+        alignItems: 'center',
+        justifyContent: 'center',
+
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.04,
+        shadowRadius: 6,
+        elevation: 2,
+    },
+
+    /* MEMBERSHIP CARD STYLES */
+    membershipCard: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        backgroundColor: 'rgba(255,255,255,0.5)',
-        padding: 14,
-        borderRadius: 14,
-        marginTop: 16,
+        backgroundColor: '#6C3CF4',
+        marginHorizontal: 16,
+        borderRadius: 20,
+        padding: 16,
+        marginBottom: 16,
+
+        shadowColor: '#6C3CF4',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.25,
+        shadowRadius: 12,
+        elevation: 5,
     },
     membershipLeft: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
-    },
-    membershipText: {},
-    membershipTitle: {
-        fontSize: 14,
-        fontWeight: '700',
-        color: COLORS.text,
-    },
-    membershipSubtitle: {
-        fontSize: 11,
-        color: COLORS.textSecondary,
-        marginTop: 2,
-    },
-    statsRow: {
-        flexDirection: 'row',
-        backgroundColor: COLORS.white,
-        paddingVertical: 18,
-        ...SHADOWS.light,
-    },
-    statItem: {
         flex: 1,
-        alignItems: 'center',
+        marginRight: 10,
     },
-    statValue: {
-        fontSize: 18,
-        fontWeight: '800',
-        color: COLORS.text,
-    },
-    statLabel: {
-        fontSize: 11,
-        color: COLORS.textSecondary,
-        marginTop: 4,
-        fontWeight: '500',
-    },
-    statDivider: {
-        width: 1,
-        height: 30,
-        backgroundColor: COLORS.border,
-    },
-    scrollView: {
-        flex: 1,
-    },
-    menuSection: {
-        marginTop: 20,
-        paddingHorizontal: 16,
-    },
-    sectionTitle: {
-        fontSize: 13,
-        fontWeight: '700',
-        color: COLORS.textSecondary,
-        marginBottom: 10,
-        letterSpacing: 0.3,
-        textTransform: 'uppercase',
-    },
-    menuCard: {
-        backgroundColor: COLORS.white,
-        borderRadius: 16,
-        ...SHADOWS.light,
-        overflow: 'hidden',
-    },
-    menuItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: 14,
-    },
-    menuItemBorder: {
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.border,
-    },
-    menuLeft: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        flex: 1,
-    },
-    menuIconWrapper: {
+    crownCircle: {
         width: 40,
         height: 40,
-        borderRadius: 12,
-        backgroundColor: '#E8F5E9',
+        borderRadius: 20,
+        backgroundColor: 'rgba(255, 255, 255, 0.2)',
         alignItems: 'center',
         justifyContent: 'center',
     },
-    menuTextWrapper: {
+    membershipTextGroup: {
         marginLeft: 12,
         flex: 1,
     },
-    menuTitle: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: COLORS.text,
-    },
-    menuSubtitle: {
-        fontSize: 11,
-        color: COLORS.textSecondary,
-        marginTop: 2,
-    },
-    menuRight: {
+    membershipTitleRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
     },
-    badge: {
-        backgroundColor: COLORS.secondary,
+    membershipTitleWhite: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: '#FFFFFF',
+    },
+    membershipTitleGold: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: '#FBBF24',
+    },
+    membershipDesc: {
+        fontSize: 11,
+        color: 'rgba(255, 255, 255, 0.85)',
+        fontWeight: '500',
+        marginTop: 2,
+    },
+    viewBenefitsBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFFFFF',
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 20,
+    },
+    viewBenefitsText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#6C3CF4',
+        marginRight: 2,
+    },
+
+    /* QUICK STATS ROW STYLES */
+    statsCardContainer: {
+        flexDirection: 'row',
+        backgroundColor: '#FFFFFF',
+        marginHorizontal: 16,
+        borderRadius: 20,
+        paddingVertical: 14,
+        paddingHorizontal: 6,
+        marginBottom: 20,
+        borderWidth: 1,
+        borderColor: '#F3E8FF',
+
+        shadowColor: '#7C3AED',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.05,
+        shadowRadius: 10,
+        elevation: 2,
+    },
+    statBox: {
+        flex: 1,
+        alignItems: 'center',
+    },
+    statIconCircle: {
+        width: 38,
+        height: 38,
+        borderRadius: 19,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 6,
+    },
+    statNumber: {
+        fontSize: 15,
+        fontWeight: '800',
+        color: '#111827',
+    },
+    statLabel: {
+        fontSize: 11,
+        color: '#6B7280',
+        fontWeight: '500',
+        marginTop: 2,
+    },
+
+    /* SECTION & MENU STYLES */
+    sectionContainer: {
+        marginHorizontal: 16,
+        marginBottom: 20,
+    },
+    sectionHeaderTitle: {
+        fontSize: 15,
+        fontWeight: '800',
+        color: '#111827',
+        marginBottom: 10,
+        letterSpacing: -0.2,
+    },
+    menuGroupCard: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: '#F3E8FF',
+        overflow: 'hidden',
+
+        shadowColor: '#7C3AED',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.04,
+        shadowRadius: 10,
+        elevation: 2,
+    },
+    menuRowItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+    },
+    itemDivider: {
+        height: 1,
+        backgroundColor: '#F8F5FF',
+        marginLeft: 62,
+    },
+    menuLeftContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+    },
+    menuIconBg: {
+        width: 38,
+        height: 38,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    menuTextGroup: {
+        marginLeft: 12,
+        flex: 1,
+    },
+    menuMainTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#111827',
+    },
+    menuSubTitle: {
+        fontSize: 11,
+        color: '#6B7280',
+        fontWeight: '500',
+        marginTop: 2,
+    },
+    rightSideWithBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    newBadgePill: {
+        backgroundColor: '#F3E8FF',
         paddingHorizontal: 8,
         paddingVertical: 3,
-        borderRadius: 10,
+        borderRadius: 8,
     },
-    badgeNew: {
-        backgroundColor: '#FFE0B2',
-    },
-    badgeText: {
-        fontSize: 10,
+    newBadgeText: {
+        fontSize: 11,
         fontWeight: '700',
-        color: COLORS.white,
+        color: '#7C3AED',
     },
-    badgeTextNew: {
-        color: '#E65100',
+    earnBadgePill: {
+        backgroundColor: '#F3E8FF',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 12,
     },
-    logoutButton: {
+    earnBadgeText: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#7C3AED',
+    },
+
+    /* BOTTOM PROMO BANNER */
+    promoBannerTouchable: {
+        marginHorizontal: 16,
+        marginBottom: 20,
+        borderRadius: 20,
+
+        shadowColor: '#7C3AED',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.12,
+        shadowRadius: 10,
+        elevation: 3,
+    },
+    promoBannerCardBg: {
+        width: '100%',
+        height: 145,
+        borderRadius: 20,
+        overflow: 'hidden',
+        justifyContent: 'center',
+        paddingLeft: 22,
+        paddingRight: 10,
+        paddingVertical: 16,
+    },
+    promoTextContent: {
+        maxWidth: '65%',
+    },
+    promoBannerTitle: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: '#1E1B4B',
+        lineHeight: 22,
+        letterSpacing: -0.3,
+    },
+    joinShravanRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 10,
+        gap: 6,
+    },
+    promoBannerSubtext: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#7C3AED',
+    },
+    arrowCirclePill: {
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        backgroundColor: '#7C3AED',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+
+    /* LOGOUT BUTTON */
+    logoutBtn: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#FEE2E2',
-        padding: 14,
+        backgroundColor: '#FEF2F2',
+        borderWidth: 1,
+        borderColor: '#FCA5A5',
         marginHorizontal: 16,
-        marginTop: 24,
-        borderRadius: 14,
-        gap: 10,
+        paddingVertical: 14,
+        borderRadius: 16,
+        gap: 8,
+        marginBottom: 16,
     },
     logoutText: {
         fontSize: 14,
-        fontWeight: '700',
-        color: COLORS.error,
+        fontWeight: '800',
+        color: '#EF4444',
     },
-    versionContainer: {
+    versionWrapper: {
         alignItems: 'center',
-        marginTop: 28,
+        marginTop: 8,
     },
-    version: {
+    versionText: {
         fontSize: 12,
-        color: COLORS.textSecondary,
         fontWeight: '600',
+        color: '#9CA3AF',
     },
     versionSubtext: {
         fontSize: 11,
-        color: COLORS.textLight,
-        marginTop: 4,
+        color: '#D1D5DB',
+        marginTop: 2,
     },
 });
 

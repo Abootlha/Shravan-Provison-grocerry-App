@@ -117,12 +117,22 @@ export const UserService = {
         return response.data;
     },
 
+    updateProfile: async (data) => {
+        const response = await userApi.put(ENDPOINTS.user.PROFILE, data);
+        return response.data;
+    },
+
     addAddress: async (address) => {
         const response = await userApi.post(ENDPOINTS.user.ADDRESSES, address);
         return response.data;
     },
 
-    removeAddress: async (_userId, index) => {
+    updateAddress: async (index, address) => {
+        const response = await userApi.put(ENDPOINTS.user.UPDATE_ADDRESS(index), address);
+        return response.data;
+    },
+
+    removeAddress: async (index) => {
         const response = await userApi.delete(ENDPOINTS.user.REMOVE_ADDRESS(index));
         return response.data;
     },

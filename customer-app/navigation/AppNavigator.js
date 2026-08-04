@@ -1,8 +1,16 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, DeviceEventEmitter, Platform } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import {
+    Home01Icon,
+    GridViewIcon,
+    Search01Icon,
+    ShoppingCart01Icon,
+    UserIcon,
+    Delete02Icon,
+} from 'hugeicons-react-native';
 import { useSelector } from 'react-redux';
 import { useTranslation } from '../hooks/useTranslation';
 
@@ -21,6 +29,7 @@ import {
     OrderTrackingScreen,
     OrderDetailsScreen,
     ProfileScreen,
+    ProfileSettingsScreen,
     OrdersHistoryScreen,
     LocationScreen,
     AddAddressScreen,
@@ -32,10 +41,38 @@ const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 
-// Custom Tab Bar
+// Custom Tab Bar with Blinkit/Zepto Style Finger-Tracking Scroll Animation
 const CustomTabBar = ({ state, descriptors, navigation }) => {
     const totalItems = useSelector((s) => s.cart.totalItems);
     const { t } = useTranslation();
+    const scrollY = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        const listener = DeviceEventEmitter.addListener('ON_SCROLL_Y', (y) => {
+            scrollY.setValue(y);
+        });
+        const resetListener = DeviceEventEmitter.addListener('SET_TAB_BAR_VISIBLE', (visible) => {
+            if (visible) {
+                scrollY.setValue(0);
+            }
+        });
+        return () => {
+            listener.remove();
+            resetListener.remove();
+        };
+    }, []);
+
+    const diffClampScroll = Animated.diffClamp(scrollY, 0, 90);
+    const translateY = diffClampScroll.interpolate({
+        inputRange: [0, 90],
+        outputRange: [0, 90],
+        extrapolate: 'clamp',
+    });
+
+    const currentRouteName = state.routes[state.index]?.name;
+    if (currentRouteName === 'Account') {
+        return null;
+    }
 
     const tabLabels = {
         Home: t('home'),
@@ -46,53 +83,63 @@ const CustomTabBar = ({ state, descriptors, navigation }) => {
     };
 
     return (
-        <View style={styles.tabBar}>
-            {state.routes.map((route, index) => {
-                const { options } = descriptors[route.key];
-                const isFocused = state.index === index;
+        <Animated.View style={[styles.tabBarWrapper, { transform: [{ translateY }] }]}>
+            <View style={styles.tabBar}>
+                {state.routes.map((route, index) => {
+                    const { options } = descriptors[route.key];
+                    const isFocused = state.index === index;
 
-                const iconMap = {
-                    Home: 'home',
-                    Categories: 'view-grid',
-                    Search: 'magnify',
-                    Cart: 'cart',
-                    Account: 'account',
-                };
+                    const tabIconMap = {
+                        Home: Home01Icon,
+                        Categories: GridViewIcon,
+                        Search: Search01Icon,
+                        Cart: ShoppingCart01Icon,
+                        Account: UserIcon,
+                    };
 
-                const onPress = () => {
-                    const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-                    if (!isFocused && !event.defaultPrevented) {
-                        navigation.navigate(route.name);
-                    }
-                };
+                    const IconComponent = tabIconMap[route.name];
 
-                return (
-                    <TouchableOpacity
-                        key={route.key}
-                        accessibilityRole="button"
-                        accessibilityState={isFocused ? { selected: true } : {}}
-                        onPress={onPress}
-                        style={styles.tabItem}
-                    >
-                        <View style={styles.iconContainer}>
-                            <MaterialCommunityIcons
-                                name={isFocused ? iconMap[route.name] : `${iconMap[route.name]}-outline`}
-                                size={24}
-                                color={isFocused ? COLORS.secondary : COLORS.textSecondary}
-                            />
-                            {route.name === 'Cart' && totalItems > 0 && (
-                                <View style={styles.badge}>
-                                    <Text style={styles.badgeText}>{totalItems}</Text>
+                    const onPress = () => {
+                        const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+                        if (!isFocused && !event.defaultPrevented) {
+                            navigation.navigate(route.name);
+                        }
+                    };
+
+                    return (
+                        <TouchableOpacity
+                            key={route.key}
+                            accessibilityRole="button"
+                            accessibilityState={isFocused ? { selected: true } : {}}
+                            onPress={onPress}
+                            style={styles.tabItem}
+                            activeOpacity={0.8}
+                        >
+                            <View style={[styles.tabContentPill, isFocused && styles.tabContentPillActive]}>
+                                <View style={styles.iconContainer}>
+                                    {IconComponent && (
+                                        <IconComponent
+                                            size={22}
+                                            color={isFocused ? '#6C3CF4' : COLORS.textSecondary}
+                                            strokeWidth={isFocused ? 2.5 : 1.8}
+                                        />
+                                    )}
+                                    {route.name === 'Cart' && totalItems > 0 && (
+                                        <View style={styles.badge}>
+                                            <Text style={styles.badgeText}>{totalItems}</Text>
+                                        </View>
+                                    )}
                                 </View>
-                            )}
-                        </View>
-                        <Text style={[styles.tabLabel, isFocused && styles.tabLabelActive]}>
-                            {tabLabels[route.name]}
-                        </Text>
-                    </TouchableOpacity>
-                );
-            })}
-        </View>
+                                <Text style={[styles.tabLabel, isFocused && styles.tabLabelActive]}>
+                                    {tabLabels[route.name]}
+                                </Text>
+                            </View>
+                            {isFocused && <View style={styles.activeDot} />}
+                        </TouchableOpacity>
+                    );
+                })}
+            </View>
+        </Animated.View>
     );
 };
 
@@ -106,7 +153,7 @@ const TabNavigator = () => {
             <Tab.Screen name="Home" component={HomeScreen} />
             <Tab.Screen name="Categories" component={CategoriesScreen} />
             <Tab.Screen name="Search" component={SearchScreen} />
-            <Tab.Screen name="Cart" component={CartScreen} />
+            <Tab.Screen name="Cart" component={CheckoutScreen} />
             <Tab.Screen name="Account" component={ProfileScreen} />
         </Tab.Navigator>
     );
@@ -128,6 +175,7 @@ const AppNavigator = () => {
             <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
             <Stack.Screen name="OrderDetails" component={OrderDetailsScreen} />
             <Stack.Screen name="OrdersHistory" component={OrdersHistoryScreen} />
+            <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} />
             <Stack.Screen name="Location" component={LocationScreen} />
             <Stack.Screen name="AddAddress" component={AddAddressScreen} />
         </Stack.Navigator>
@@ -137,54 +185,88 @@ const AppNavigator = () => {
 
 
 const styles = StyleSheet.create({
+    tabBarWrapper: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        backgroundColor: 'transparent',
+        paddingHorizontal: 12,
+        paddingBottom: 10,
+    },
     tabBar: {
         flexDirection: 'row',
         backgroundColor: COLORS.white,
-        paddingVertical: 8,
-        paddingBottom: 16,
-        borderTopWidth: 1,
-        borderTopColor: COLORS.border,
-        shadowColor: COLORS.black,
-        shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 10,
+        paddingVertical: 6,
+        paddingHorizontal: 8,
+        borderRadius: 26,
+        borderWidth: 1,
+        borderColor: 'rgba(0, 0, 0, 0.05)',
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.12,
+        shadowRadius: 12,
+        elevation: 12,
     },
     tabItem: {
         flex: 1,
         alignItems: 'center',
-        paddingTop: 8,
+        justifyContent: 'center',
+        paddingVertical: 2,
+    },
+    tabContentPill: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 16,
+        minWidth: 58,
+    },
+    tabContentPillActive: {
+        backgroundColor: '#F3E8FF',
     },
     iconContainer: {
         position: 'relative',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     badge: {
         position: 'absolute',
         top: -6,
         right: -10,
-        backgroundColor: COLORS.secondary,
+        backgroundColor: '#6C3CF4',
         borderRadius: 10,
         minWidth: 18,
         height: 18,
         alignItems: 'center',
         justifyContent: 'center',
         paddingHorizontal: 4,
+        borderWidth: 1.5,
+        borderColor: COLORS.white,
     },
     badgeText: {
         color: COLORS.white,
         fontSize: 10,
-        fontWeight: '700',
+        fontWeight: '800',
     },
     tabLabel: {
         fontSize: 11,
         fontWeight: '500',
         color: COLORS.textSecondary,
-        marginTop: 4,
+        marginTop: 2,
     },
     tabLabelActive: {
-        color: COLORS.secondary,
-        fontWeight: '600',
+        color: '#6C3CF4',
+        fontWeight: '800',
+    },
+    activeDot: {
+        width: 4,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: '#6C3CF4',
+        marginTop: 3,
     },
 });
 
 export default AppNavigator;
+

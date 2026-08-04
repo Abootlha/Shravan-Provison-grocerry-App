@@ -8,15 +8,26 @@ import {
     SafeAreaView,
     StatusBar,
 } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import {
+    Delete02Icon,
+    DeliveryTruck01Icon,
+    Ticket01Icon,
+    InformationCircleIcon,
+    FlashIcon,
+    ArrowRight01Icon,
+    GiftIcon,
+} from 'hugeicons-react-native';
 import { useSelector, useDispatch } from 'react-redux';
 import { clearCart } from '../store/slices/cartSlice';
 import { Header, CartItem, EmptyState } from '../components';
 import { COLORS, SHADOWS } from '../constants';
+import { useTranslation } from '../hooks/useTranslation';
 
 const CartScreen = ({ navigation }) => {
     const dispatch = useDispatch();
     const { items, totalAmount, totalItems } = useSelector((state) => state.cart);
+    const { currentLanguage } = useTranslation();
+    const isHi = currentLanguage === 'hi';
 
     const deliveryFee = totalAmount >= 199 ? 0 : 25;
     const packagingFee = 5;
@@ -31,31 +42,34 @@ const CartScreen = ({ navigation }) => {
 
     const renderCartItem = ({ item }) => <CartItem item={item} />;
 
+    const headerTitle = isHi ? 'आपकी कार्ट' : 'My Cart';
+    const headerSubtitle = isHi ? `${totalItems} सामान` : `${totalItems} items`;
+
     if (items.length === 0) {
         return (
-            <SafeAreaView style={styles.container}>
-                <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
-                <Header title="Cart" showBack onBackPress={handleBackPress} />
+            <View style={styles.container}>
+                <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
+                <Header title={headerTitle} showBack onBackPress={handleBackPress} />
                 <EmptyState
                     type="cart"
                     onAction={handleContinueShopping}
                 />
-            </SafeAreaView>
+            </View>
         );
     }
 
     return (
-        <SafeAreaView style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
+        <View style={styles.container}>
+            <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
             <Header
-                title="Cart"
-                subtitle={`${totalItems} items`}
+                title={headerTitle}
+                subtitle={headerSubtitle}
                 showBack
                 onBackPress={handleBackPress}
                 rightComponent={
-                    <TouchableOpacity onPress={handleClearCart} style={styles.clearButton}>
-                        <MaterialCommunityIcons name="delete-outline" size={20} color={COLORS.error} />
+                    <TouchableOpacity onPress={handleClearCart} style={styles.clearButton} activeOpacity={0.75}>
+                        <Delete02Icon size={18} color="#DC2626" strokeWidth={2} />
                     </TouchableOpacity>
                 }
             />
@@ -72,9 +86,13 @@ const CartScreen = ({ navigation }) => {
                         {amountForFreeDelivery > 0 && (
                             <View style={styles.freeDeliveryBanner}>
                                 <View style={styles.freeDeliveryContent}>
-                                    <MaterialCommunityIcons name="truck-fast-outline" size={20} color={COLORS.secondary} />
+                                    <DeliveryTruck01Icon size={20} color="#6C3CF4" strokeWidth={2} />
                                     <Text style={styles.freeDeliveryText}>
-                                        Add <Text style={styles.freeDeliveryAmount}>₹{amountForFreeDelivery}</Text> more for FREE delivery
+                                        {isHi ? (
+                                            <>मुफ़्त डिलीवरी के लिए <Text style={styles.freeDeliveryAmount}>₹{amountForFreeDelivery}</Text> का और सामान जोड़ें</>
+                                        ) : (
+                                            <>Add <Text style={styles.freeDeliveryAmount}>₹{amountForFreeDelivery}</Text> more for FREE delivery</>
+                                        )}
                                     </Text>
                                 </View>
                                 <View style={styles.progressBar}>
@@ -87,31 +105,31 @@ const CartScreen = ({ navigation }) => {
                 ListFooterComponent={() => (
                     <>
                         {/* Coupon Section */}
-                        <TouchableOpacity style={styles.couponSection}>
+                        <TouchableOpacity style={styles.couponSection} activeOpacity={0.85}>
                             <View style={styles.couponLeft}>
                                 <View style={styles.couponIcon}>
-                                    <MaterialCommunityIcons name="ticket-percent-outline" size={20} color={COLORS.secondary} />
+                                    <Ticket01Icon size={20} color="#6C3CF4" strokeWidth={2} />
                                 </View>
                                 <View>
-                                    <Text style={styles.couponText}>Apply Coupon</Text>
-                                    <Text style={styles.couponSubtext}>Save extra on your order</Text>
+                                    <Text style={styles.couponText}>{isHi ? 'कूपन लागू करें' : 'Apply Coupon'}</Text>
+                                    <Text style={styles.couponSubtext}>{isHi ? 'अतिरिक्त छूट पाएं' : 'Save extra on your order'}</Text>
                                 </View>
                             </View>
-                            <MaterialCommunityIcons name="chevron-right" size={22} color={COLORS.textSecondary} />
+                            <ArrowRight01Icon size={18} color={COLORS.textSecondary} strokeWidth={2} />
                         </TouchableOpacity>
 
                         {/* Bill Details */}
                         <View style={styles.billSection}>
-                            <Text style={styles.billTitle}>Bill Details</Text>
+                            <Text style={styles.billTitle}>{isHi ? 'बिल विवरण' : 'Bill Details'}</Text>
 
                             <View style={styles.billRow}>
-                                <Text style={styles.billLabel}>Item Total</Text>
+                                <Text style={styles.billLabel}>{isHi ? 'सामान का कुल मूल्य' : 'Item Total'}</Text>
                                 <Text style={styles.billValue}>₹{totalAmount}</Text>
                             </View>
 
                             <View style={styles.billRow}>
                                 <View style={styles.billLabelRow}>
-                                    <Text style={styles.billLabel}>Delivery Fee</Text>
+                                    <Text style={styles.billLabel}>{isHi ? 'डिलीवरी शुल्क' : 'Delivery Fee'}</Text>
                                     {deliveryFee === 0 && (
                                         <View style={styles.freeBadge}>
                                             <Text style={styles.freeText}>FREE</Text>
@@ -123,21 +141,21 @@ const CartScreen = ({ navigation }) => {
 
                             <View style={styles.billRow}>
                                 <View style={styles.billLabelRow}>
-                                    <Text style={styles.billLabel}>Packaging Fee</Text>
-                                    <MaterialCommunityIcons name="information-outline" size={14} color={COLORS.textLight} style={{ marginLeft: 4 }} />
+                                    <Text style={styles.billLabel}>{isHi ? 'पैकिंग शुल्क' : 'Packaging Fee'}</Text>
+                                    <InformationCircleIcon size={14} color={COLORS.textLight} style={{ marginLeft: 4 }} strokeWidth={2} />
                                 </View>
                                 <Text style={styles.billValue}>₹{packagingFee}</Text>
                             </View>
 
                             <View style={styles.billRow}>
-                                <Text style={[styles.billLabel, styles.discountLabel]}>Discount Applied</Text>
+                                <Text style={[styles.billLabel, styles.discountLabel]}>{isHi ? 'छूट लागू' : 'Discount Applied'}</Text>
                                 <Text style={[styles.billValue, styles.discountValue]}>-₹{discount}</Text>
                             </View>
 
                             <View style={styles.divider} />
 
                             <View style={styles.billRow}>
-                                <Text style={styles.totalLabel}>Grand Total</Text>
+                                <Text style={styles.totalLabel}>{isHi ? 'कुल राशि' : 'Grand Total'}</Text>
                                 <Text style={styles.totalValue}>₹{grandTotal}</Text>
                             </View>
                         </View>
@@ -145,9 +163,13 @@ const CartScreen = ({ navigation }) => {
                         {/* Savings Banner */}
                         {discount > 0 && (
                             <View style={styles.savingsBanner}>
-                                <MaterialCommunityIcons name="party-popper" size={18} color={COLORS.secondary} />
+                                <GiftIcon size={18} color="#6C3CF4" strokeWidth={2} />
                                 <Text style={styles.savingsText}>
-                                    Yay! You're saving <Text style={styles.savingsAmount}>₹{discount + (deliveryFee === 0 ? 25 : 0)}</Text> on this order!
+                                    {isHi ? (
+                                        <>बधाई! आप इस ऑर्डर पर <Text style={styles.savingsAmount}>₹{discount + (deliveryFee === 0 ? 25 : 0)}</Text> बचा रहे हैं!</>
+                                    ) : (
+                                        <>Yay! You're saving <Text style={styles.savingsAmount}>₹{discount + (deliveryFee === 0 ? 25 : 0)}</Text> on this order!</>
+                                    )}
                                 </Text>
                             </View>
                         )}
@@ -155,15 +177,15 @@ const CartScreen = ({ navigation }) => {
                         {/* Delivery Info */}
                         <View style={styles.deliveryInfo}>
                             <View style={styles.deliveryIconWrapper}>
-                                <MaterialCommunityIcons name="lightning-bolt" size={18} color={COLORS.secondary} />
+                                <FlashIcon size={18} color="#D97706" strokeWidth={2} />
                             </View>
                             <View style={styles.deliveryTextContainer}>
-                                <Text style={styles.deliveryTitle}>Delivery in 10-15 mins</Text>
-                                <Text style={styles.deliverySubtitle}>Shipment of {totalItems} items</Text>
+                                <Text style={styles.deliveryTitle}>{isHi ? '10-15 मिनट में डिलीवरी' : 'Delivery in 10-15 mins'}</Text>
+                                <Text style={styles.deliverySubtitle}>{isHi ? `${totalItems} सामान की शिपमेंट` : `Shipment of ${totalItems} items`}</Text>
                             </View>
                         </View>
 
-                        <View style={{ height: 120 }} />
+                        <View style={{ height: 160 }} />
                     </>
                 )}
             />
@@ -172,23 +194,23 @@ const CartScreen = ({ navigation }) => {
             <View style={styles.bottomBar}>
                 <View style={styles.bottomInfo}>
                     <Text style={styles.bottomTotal}>₹{grandTotal}</Text>
-                    <Text style={styles.bottomTotalLabel}>TOTAL</Text>
+                    <Text style={styles.bottomTotalLabel}>{isHi ? 'कुल राशि' : 'TOTAL'}</Text>
                 </View>
                 <TouchableOpacity style={styles.checkoutButton} onPress={handleCheckout} activeOpacity={0.9}>
-                    <Text style={styles.checkoutText}>Proceed to Checkout</Text>
+                    <Text style={styles.checkoutText}>{isHi ? 'चेकआउट की ओर बढ़ें' : 'Proceed to Checkout'}</Text>
                     <View style={styles.checkoutArrow}>
-                        <MaterialCommunityIcons name="arrow-right" size={18} color={COLORS.secondary} />
+                        <ArrowRight01Icon size={16} color="#6C3CF4" strokeWidth={2.5} />
                     </View>
                 </TouchableOpacity>
             </View>
-        </SafeAreaView>
+        </View>
     );
 };
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: '#FAF9F6',
     },
     clearButton: {
         width: 36,
@@ -197,15 +219,19 @@ const styles = StyleSheet.create({
         backgroundColor: '#FEE2E2',
         alignItems: 'center',
         justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: '#FCA5A5',
     },
     cartList: {
         padding: 16,
     },
     freeDeliveryBanner: {
-        backgroundColor: '#E8F5E9',
+        backgroundColor: '#F3E8FF',
         padding: 14,
         borderRadius: 14,
         marginBottom: 16,
+        borderWidth: 1,
+        borderColor: '#E9D5FF',
     },
     freeDeliveryContent: {
         flexDirection: 'row',
@@ -219,18 +245,18 @@ const styles = StyleSheet.create({
     },
     freeDeliveryAmount: {
         fontWeight: '800',
-        color: COLORS.secondary,
+        color: '#6C3CF4',
     },
     progressBar: {
         height: 4,
-        backgroundColor: 'rgba(12, 131, 31, 0.2)',
+        backgroundColor: 'rgba(108, 60, 244, 0.2)',
         borderRadius: 2,
         marginTop: 10,
         overflow: 'hidden',
     },
     progressFill: {
         height: '100%',
-        backgroundColor: COLORS.secondary,
+        backgroundColor: '#6C3CF4',
         borderRadius: 2,
     },
     couponSection: {
@@ -252,7 +278,7 @@ const styles = StyleSheet.create({
         width: 40,
         height: 40,
         borderRadius: 12,
-        backgroundColor: '#E8F5E9',
+        backgroundColor: '#F3E8FF',
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -304,7 +330,7 @@ const styles = StyleSheet.create({
         color: COLORS.textLight,
     },
     freeBadge: {
-        backgroundColor: COLORS.secondary,
+        backgroundColor: '#6C3CF4',
         paddingHorizontal: 8,
         paddingVertical: 3,
         borderRadius: 6,
@@ -316,10 +342,10 @@ const styles = StyleSheet.create({
         color: COLORS.white,
     },
     discountLabel: {
-        color: COLORS.secondary,
+        color: '#6C3CF4',
     },
     discountValue: {
-        color: COLORS.secondary,
+        color: '#6C3CF4',
         fontWeight: '700',
     },
     divider: {
@@ -340,7 +366,7 @@ const styles = StyleSheet.create({
     savingsBanner: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#E8F5E9',
+        backgroundColor: '#F3E8FF',
         padding: 12,
         borderRadius: 12,
         marginTop: 12,
@@ -353,7 +379,7 @@ const styles = StyleSheet.create({
     },
     savingsAmount: {
         fontWeight: '800',
-        color: COLORS.secondary,
+        color: '#6C3CF4',
     },
     deliveryInfo: {
         flexDirection: 'row',
@@ -387,18 +413,23 @@ const styles = StyleSheet.create({
     },
     bottomBar: {
         position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
+        bottom: 76,
+        left: 12,
+        right: 12,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         backgroundColor: COLORS.white,
-        paddingHorizontal: 20,
-        paddingVertical: 16,
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        ...SHADOWS.dark,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderRadius: 22,
+        shadowColor: '#6C3CF4',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.15,
+        shadowRadius: 14,
+        elevation: 10,
+        borderWidth: 1,
+        borderColor: '#F3E8FF',
     },
     bottomInfo: {
         flex: 1,
@@ -418,11 +449,16 @@ const styles = StyleSheet.create({
     checkoutButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: COLORS.secondary,
+        backgroundColor: '#6C3CF4',
         paddingHorizontal: 22,
         paddingVertical: 14,
         borderRadius: 14,
         gap: 10,
+        shadowColor: '#6C3CF4',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.25,
+        shadowRadius: 8,
+        elevation: 4,
     },
     checkoutText: {
         color: COLORS.white,

@@ -17,7 +17,7 @@ export enum VehicleType {
     FOUR_WHEELER = 'Four Wheeler',
 }
 
-@Schema({ timestamps: true })
+@Schema({ timestamps: true, collection: 'riders' })
 export class Rider {
     @Prop({ required: true })
     name!: string;

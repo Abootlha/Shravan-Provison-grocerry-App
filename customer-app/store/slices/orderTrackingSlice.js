@@ -24,6 +24,7 @@ const orderTrackingSlice = createSlice({
         setCurrentOrder: (state, action) => {
             state.currentOrder = action.payload;
             state.error = null;
+            state.isLoading = false;
 
             const tracking = action.payload?.tracking;
             state.activeLeg = tracking?.activeLeg || null;

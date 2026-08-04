@@ -13,6 +13,7 @@ export { default as CheckoutScreen } from './CheckoutScreen';
 export { default as OrderTrackingScreen } from './OrderTrackingScreen';
 export { default as OrderDetailsScreen } from './OrderDetailsScreen';
 export { default as ProfileScreen } from './ProfileScreen';
+export { default as ProfileSettingsScreen } from './ProfileSettingsScreen';
 export { default as OrdersHistoryScreen } from './OrdersHistoryScreen';
 export { default as LocationScreen } from './LocationScreen';
 export { default as AddAddressScreen } from './AddAddressScreen';

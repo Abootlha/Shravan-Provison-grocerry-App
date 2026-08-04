@@ -198,19 +198,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
   const handleLogout = useCallback(() => {
     Alert.alert('Logout', 'Are you sure you want to logout?', [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Logout',
-            style: 'destructive',
-            onPress: () => {
-              stopTracking();
-              stopBackgroundTracking().catch(() => undefined);
-              stopSocketTracking();
-              dispatch(logout());
-              navigation.replace('Login');
-            },
-          },
-        ]);
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Logout',
+        style: 'destructive',
+        onPress: () => {
+          stopTracking();
+          stopBackgroundTracking().catch(() => undefined);
+          stopSocketTracking();
+          dispatch(logout());
+          navigation.replace('Login');
+        },
+      },
+    ]);
   }, [dispatch, navigation, stopTracking, stopBackgroundTracking, stopSocketTracking]);
 
   const onRefresh = useCallback(async () => {

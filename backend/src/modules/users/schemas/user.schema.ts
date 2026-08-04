@@ -33,7 +33,7 @@ export class Address {
     longitude?: number;
 }
 
-@Schema({ timestamps: true })
+@Schema({ timestamps: true, collection: 'users' })
 export class User {
     @Prop({ required: true })
     name!: string;
@@ -43,6 +43,9 @@ export class User {
 
     @Prop()
     email?: string;
+
+    @Prop()
+    profilePicture?: string;
 
     // Admin authentication fields
     @Prop({ unique: true, sparse: true })

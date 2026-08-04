@@ -54,6 +54,8 @@ const MapComponent = ({
                     )}
                 </MapView>
 
+
+
                 <TouchableOpacity
                     style={styles.gpsFloatingButton}
                     onPress={onCurrentLocationPress}
@@ -66,35 +68,6 @@ const MapComponent = ({
                     )}
                 </TouchableOpacity>
             </View>
-
-            {selectedLocation ? (
-                <View style={styles.locationCard}>
-                    <View style={styles.locationIconContainer}>
-                        <MaterialCommunityIcons name="map-marker-check" size={24} color="#E91E63" />
-                    </View>
-                    <View style={styles.locationDetails}>
-                        <Text style={styles.locationTitle}>
-                            {addressDetails?.formattedAddress || addressDetails?.address || 'Location Selected'}
-                        </Text>
-                        {!!addressDetails?.city && (
-                            <Text style={styles.locationSubtitle}>
-                                {[addressDetails.city, addressDetails.pincode].filter(Boolean).join(', ')}
-                            </Text>
-                        )}
-                        <Text style={styles.locationCoords}>
-                            {selectedLocation.latitude.toFixed(4)}, {selectedLocation.longitude.toFixed(4)}
-                        </Text>
-                    </View>
-                </View>
-            ) : (
-                <View style={styles.noLocationCard}>
-                    <MaterialCommunityIcons name="map-marker-question" size={32} color={COLORS.textSecondary} />
-                    <Text style={styles.noLocationText}>Tap the map or use current location</Text>
-                    <Text style={styles.noLocationHint}>
-                        Your selected delivery pin will appear here.
-                    </Text>
-                </View>
-            )}
         </View>
     );
 };
@@ -105,8 +78,11 @@ const styles = StyleSheet.create({
         backgroundColor: '#FAFAFA',
     },
     mapShell: {
-        height: 280,
-        margin: 16,
+        flex: 1,
+        minHeight: 320,
+        marginHorizontal: 16,
+        marginTop: 8,
+        marginBottom: 4,
         borderRadius: 18,
         overflow: 'hidden',
         position: 'relative',
@@ -131,6 +107,46 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.18,
         shadowRadius: 20,
         elevation: 8,
+    },
+    topFloatingCard: {
+        position: 'absolute',
+        top: 12,
+        left: 12,
+        right: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(255, 255, 255, 0.96)',
+        borderRadius: 14,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.12,
+        shadowRadius: 6,
+        elevation: 4,
+        zIndex: 20,
+    },
+    topFloatingBadge: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: '#D1FAE5',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 8,
+    },
+    topFloatingTextGroup: {
+        flex: 1,
+    },
+    topFloatingTitle: {
+        fontSize: 12.5,
+        fontWeight: '700',
+        color: '#111827',
+    },
+    topFloatingSubtext: {
+        fontSize: 11,
+        color: '#6B7280',
+        marginTop: 1,
     },
     locationCard: {
         flexDirection: 'row',

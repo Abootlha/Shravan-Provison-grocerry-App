@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
     View,
     Text,
@@ -9,20 +9,37 @@ import {
     StatusBar,
     SafeAreaView,
     ActivityIndicator,
+    Image,
+    Animated,
+    Dimensions,
+    DeviceEventEmitter,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import {
+    DiscountTag01Icon,
+    GiftIcon,
+    CheckmarkBadge01Icon,
+    ShoppingBasket01Icon,
+} from 'hugeicons-react-native';
 import { useSelector } from 'react-redux';
 import {
     Header,
     SearchBar,
-    BannerCarousel,
     CategoryCard,
     ProductCard,
+    FloatingCartBar,
 } from '../components';
-import { COLORS, BANNERS, SHADOWS } from '../constants';
+import { COLORS, SHADOWS } from '../constants';
 import { ProductService } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
 import { translateToHindi } from '../services/translationService';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const BANNER_DATA = [
+    require('../assets/banner-card1.png'),
+    require('../assets/banner-card2.png'),
+    require('../assets/banner-card3.png'),
+];
 
 const HomeScreen = ({ navigation }) => {
     const { t, currentLanguage } = useTranslation();
@@ -30,10 +47,39 @@ const HomeScreen = ({ navigation }) => {
     const totalAmount = useSelector((state) => state.cart.totalAmount);
     const { selectedAddress } = useSelector((state) => state.location);
 
+    const scrollY = useRef(new Animated.Value(0)).current;
+    const lastScrollY = useRef(0);
+
+    const handleScroll = (event) => {
+        const currentY = Math.max(0, event.nativeEvent.contentOffset.y);
+        scrollY.setValue(currentY);
+        DeviceEventEmitter.emit('ON_SCROLL_Y', currentY);
+    };
+
     const [categories, setCategories] = useState([]);
     const [products, setProducts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [activeQuickCat, setActiveQuickCat] = useState('all');
+
+    const carouselRef = useRef(null);
+    const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
+
+    // Auto-scroll effect for banner
+    useEffect(() => {
+        const interval = setInterval(() => {
+            let nextIndex = currentBannerIndex + 1;
+            if (nextIndex >= BANNER_DATA.length) {
+                nextIndex = 0;
+            }
+            if (carouselRef.current) {
+                carouselRef.current.scrollToIndex({ index: nextIndex, animated: true });
+            }
+            setCurrentBannerIndex(nextIndex);
+        }, 5000);
+
+        return () => clearInterval(interval);
+    }, [currentBannerIndex]);
 
     useEffect(() => {
         fetchData();
@@ -48,7 +94,7 @@ const HomeScreen = ({ navigation }) => {
         try {
             setLoading(true);
             setError(null);
-            
+
             // Fetch categories and products in parallel
             const [categoriesData, productsData] = await Promise.all([
                 ProductService.getCategories(),
@@ -76,7 +122,7 @@ const HomeScreen = ({ navigation }) => {
                             }))
                         )
                     ]);
-                    
+
                     finalCategories = translatedCats;
                     finalProducts = translatedProds;
                 } catch (translationErr) {
@@ -101,33 +147,34 @@ const HomeScreen = ({ navigation }) => {
     const handleCartPress = () => navigation.navigate('Cart');
     const handleLocationPress = () => navigation.navigate('Location');
 
-    const renderCategory = ({ item }) => {
-        const displayName = currentLanguage === 'hi' && item.translatedName 
-            ? item.translatedName 
+    const renderCategory = ({ item, index }) => {
+        const displayName = currentLanguage === 'hi' && item.translatedName
+            ? item.translatedName
             : item.name;
-        
+
         return (
-            <CategoryCard 
+            <CategoryCard
                 category={{
                     id: item._id,
                     name: displayName,
                     icon: item.icon || 'package-variant',
-                    color: item.color || '#E8F5E9',
+                    color: item.color,
                     image: item.icon  // Use icon field for image as well
-                }} 
-                onPress={() => handleCategoryPress(item)} 
-                size="medium" 
+                }}
+                index={index}
+                onPress={() => handleCategoryPress(item)}
+                size="medium"
             />
         );
     };
 
     const renderProduct = ({ item }) => {
-        const displayName = currentLanguage === 'hi' && item.translatedName 
-            ? item.translatedName 
+        const displayName = currentLanguage === 'hi' && item.translatedName
+            ? item.translatedName
             : item.name;
-        
+
         return (
-            <ProductCard 
+            <ProductCard
                 product={{
                     id: item._id,
                     name: displayName,
@@ -137,60 +184,57 @@ const HomeScreen = ({ navigation }) => {
                     image: item.image,
                     categoryId: item.categoryId?._id || item.categoryId,
                     inStock: item.isAvailable && item.stock > 0,
-                    discount: item.originalPrice > item.price 
-                        ? Math.round((1 - item.price / item.originalPrice) * 100) 
+                    discount: item.originalPrice > item.price
+                        ? Math.round((1 - item.price / item.originalPrice) * 100)
                         : 0
-                }} 
-                onPress={() => handleProductPress(item)} 
+                }}
+                onPress={() => handleProductPress(item)}
             />
         );
     };
 
-    const CartBadge = () => (
-        <TouchableOpacity style={styles.cartButton} onPress={handleCartPress} activeOpacity={0.85}>
-            <View style={styles.cartIconWrapper}>
-                <MaterialCommunityIcons name="cart-outline" size={22} color={COLORS.text} />
-            </View>
-            {cartItems > 0 && (
-                <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{cartItems}</Text>
-                </View>
-            )}
-        </TouchableOpacity>
-    );
-
     if (loading) {
         return (
-            <SafeAreaView style={styles.container}>
-                <StatusBar barStyle="dark-content" backgroundColor={COLORS.primary} />
+            <View style={styles.container}>
+                <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
                 <Header
                     showLocation
                     location={selectedAddress?.type || 'Home'}
-                    subtitle={selectedAddress ? `${selectedAddress.address}` : 'Select your location'}
-                    deliveryTime="10 mins"
-                    rightComponent={<CartBadge />}
+                    addressDetail={selectedAddress ? `${selectedAddress.address}` : 'Select your location'}
+                    deliveryTime="10 minutes"
                     onLocationPress={handleLocationPress}
-                />
+                    onProfilePress={() => navigation.navigate('Main', { screen: 'Account' })}
+                    onWalletPress={() => navigation.navigate('Main', { screen: 'Account' })}
+                >
+                    <View style={styles.embeddedSearchWrapper}>
+                        <SearchBar onPress={handleSearchPress} />
+                    </View>
+                </Header>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.secondary} />
                     <Text style={styles.loadingText}>{t('loading')}</Text>
                 </View>
-            </SafeAreaView>
+            </View>
         );
     }
 
     if (error) {
         return (
-            <SafeAreaView style={styles.container}>
-                <StatusBar barStyle="dark-content" backgroundColor={COLORS.primary} />
+            <View style={styles.container}>
+                <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
                 <Header
                     showLocation
                     location={selectedAddress?.type || 'Home'}
-                    subtitle={selectedAddress ? `${selectedAddress.address}` : 'Select your location'}
-                    deliveryTime="10 mins"
-                    rightComponent={<CartBadge />}
+                    addressDetail={selectedAddress ? `${selectedAddress.address}` : 'Select your location'}
+                    deliveryTime="10 minutes"
                     onLocationPress={handleLocationPress}
-                />
+                    onProfilePress={() => navigation.navigate('Main', { screen: 'Account' })}
+                    onWalletPress={() => navigation.navigate('Main', { screen: 'Account' })}
+                >
+                    <View style={styles.embeddedSearchWrapper}>
+                        <SearchBar onPress={handleSearchPress} />
+                    </View>
+                </Header>
                 <View style={styles.errorContainer}>
                     <MaterialCommunityIcons name="alert-circle-outline" size={64} color={COLORS.textSecondary} />
                     <Text style={styles.errorText}>{error}</Text>
@@ -198,32 +242,153 @@ const HomeScreen = ({ navigation }) => {
                         <Text style={styles.retryButtonText}>{t('retry')}</Text>
                     </TouchableOpacity>
                 </View>
-            </SafeAreaView>
+            </View>
         );
     }
 
     return (
-        <SafeAreaView style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor={COLORS.primary} />
+        <View style={styles.container}>
+            <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
-            {/* Header with Location */}
-            <Header
-                showLocation
-                location={selectedAddress?.type || 'Home'}
-                subtitle={selectedAddress ? `${selectedAddress.address}` : 'Select your location'}
-                deliveryTime="10 mins"
-                rightComponent={<CartBadge />}
-                onLocationPress={handleLocationPress}
-            />
+            {/* Subtle Gradient & Ambient Glow Blobs Background */}
+            <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+                <View style={styles.ambientBlobTopRight} />
+                <View style={styles.ambientBlobMidLeft} />
+                <View style={styles.ambientBlobBottomRight} />
+            </View>
 
-            <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-                {/* Search Bar */}
-                <SearchBar onPress={handleSearchPress} />
+            {/* ===== STICKY HEADER (Location, SearchBar, Popular Tags & Quick Categories Sticky) ===== */}
+            <View style={styles.stickyHeaderWrapper}>
+                <Header
+                    showLocation
+                    location={selectedAddress?.type || 'Home'}
+                    addressDetail={selectedAddress ? `${selectedAddress.address}` : 'Select your location'}
+                    deliveryTime="10 minutes"
+                    onLocationPress={handleLocationPress}
+                    onProfilePress={() => navigation.navigate('Main', { screen: 'Account' })}
+                    onWalletPress={() => navigation.navigate('Main', { screen: 'Account' })}
+                    scrollY={scrollY}
+                >
+                    {/* Integrated Search Bar */}
+                    <View style={styles.embeddedSearchWrapper}>
+                        <SearchBar onPress={handleSearchPress} />
+                    </View>
 
-                {/* Banner Carousel */}
-                <BannerCarousel banners={BANNERS} />
+                    {/* Quick Categories Bar (Sticky with Header) */}
+                    <View style={styles.quickCatBar}>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickCatScroll}>
+                            {[
+                                { id: 'all', name: 'All', icon: 'basket-outline' },
+                                { id: 'atta', name: 'Atta & Rice', icon: 'barley' },
+                                { id: 'snacks', name: 'Snacks', icon: 'cookie-outline' },
+                                { id: 'dairy', name: 'Dairy & Milk', icon: 'cup-water' },
+                                { id: 'beauty', name: 'Beauty', icon: 'lipstick' },
+                                { id: 'drinks', name: 'Beverages', icon: 'bottle-soda-outline' },
+                            ].map((cat) => {
+                                const isSelected = activeQuickCat === cat.id;
+                                return (
+                                    <TouchableOpacity
+                                        key={cat.id}
+                                        style={[styles.quickCatPill, isSelected && styles.quickCatPillActive]}
+                                        onPress={() => setActiveQuickCat(cat.id)}
+                                        activeOpacity={0.8}
+                                    >
+                                        <MaterialCommunityIcons
+                                            name={cat.icon}
+                                            size={15}
+                                            color={isSelected ? '#111111' : '#444444'}
+                                        />
+                                        <Text style={[styles.quickCatText, isSelected && styles.quickCatTextActive]}>
+                                            {cat.name}
+                                        </Text>
+                                        {isSelected && <View style={styles.quickCatActiveLine} />}
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </ScrollView>
+                    </View>
+                </Header>
+            </View>
 
-                {/* Categories Section */}
+            {/* ===== SCROLLABLE CONTENT (NON-STICKY) ===== */}
+            <Animated.ScrollView
+                style={styles.scrollView}
+                showsVerticalScrollIndicator={false}
+                bounces={false}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
+            >
+                {/* Hero Banner Carousel (Auto-scrolling) */}
+                <View style={styles.heroBannerWrapper}>
+                    <FlatList
+                        ref={carouselRef}
+                        data={BANNER_DATA}
+                        keyExtractor={(_, index) => index.toString()}
+                        horizontal
+                        pagingEnabled
+                        showsHorizontalScrollIndicator={false}
+                        onMomentumScrollEnd={(event) => {
+                            const index = Math.round(event.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+                            setCurrentBannerIndex(index);
+                        }}
+                        renderItem={({ item }) => (
+                            <TouchableOpacity
+                                style={{ width: SCREEN_WIDTH, alignItems: 'center' }}
+                                activeOpacity={0.92}
+                                onPress={() => navigation.navigate('Categories')}
+                            >
+                                <View style={styles.bannerContainer}>
+                                    <Image
+                                        source={item}
+                                        style={styles.heroBannerCardImage}
+                                        resizeMode="cover"
+                                    />
+                                    <View style={styles.bannerOverlay}>
+                                        <View style={styles.bannerTopPill}>
+                                            <MaterialCommunityIcons name="moped" size={14} color="#4C1D95" />
+                                            <Text style={styles.bannerTopPillText}>FREE DELIVERY</Text>
+                                        </View>
+                                        <Text style={styles.bannerHeadline}>Your Daily{'\n'}Essentials</Text>
+                                        <Text style={styles.bannerSubtitle}>Delivered in</Text>
+                                        <Text style={styles.bannerHighlight}>10 minutes</Text>
+                                        <TouchableOpacity style={styles.bannerShopButton} onPress={() => navigation.navigate('Categories')}>
+                                            <Text style={styles.bannerShopButtonText}>Shop Now</Text>
+                                            <MaterialCommunityIcons name="arrow-right" size={16} color="#000" />
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+                            </TouchableOpacity>
+                        )}
+                    />
+                </View>
+
+                {/* 4 Feature Grid Cards (Blinkit / Quick-Commerce Style with Hugeicons) */}
+                <View style={styles.featureGridContainer}>
+                    {[
+                        { title: 'Top Offers', subtitle: 'Best deals', IconComponent: DiscountTag01Icon, bg: '#F5EEFF', iconColor: '#7C3AED' },
+                        { title: 'Combo Store', subtitle: 'Save more', IconComponent: GiftIcon, bg: '#EDEAFF', iconColor: '#6366F1' },
+                        { title: 'New Arrivals', subtitle: 'Just in', IconComponent: CheckmarkBadge01Icon, bg: '#E0F2FE', iconColor: '#0284C7' },
+                        { title: 'Smart Basket', subtitle: 'Buy again', IconComponent: ShoppingBasket01Icon, bg: '#F3E8FF', iconColor: '#9333EA' },
+                    ].map((card, idx) => {
+                        const Icon = card.IconComponent;
+                        return (
+                            <TouchableOpacity
+                                key={idx}
+                                style={[styles.featureGridCard, { backgroundColor: card.bg }]}
+                                onPress={() => navigation.navigate('Categories')}
+                                activeOpacity={0.85}
+                            >
+                                <View style={[styles.featureIconCircle, { backgroundColor: 'rgba(255,255,255,0.9)' }]}>
+                                    <Icon size={22} color={card.iconColor} strokeWidth={2} />
+                                </View>
+                                <Text style={styles.featureCardTitle}>{card.title}</Text>
+                                <Text style={styles.featureCardSubtitle}>{card.subtitle}</Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </View>
+
+                {/* Categories Section (Shop by Category) */}
                 <View style={styles.section}>
                     <View style={styles.sectionHeader}>
                         <View>
@@ -251,14 +416,16 @@ const HomeScreen = ({ navigation }) => {
                     )}
                 </View>
 
-                {/* Featured Products */}
+                {/* Flash Deals Section (with Timer Badge) */}
                 <View style={styles.section}>
                     <View style={styles.sectionHeader}>
                         <View style={styles.sectionTitleRow}>
-                            <View style={styles.sectionBadge}>
-                                <MaterialCommunityIcons name="star" size={12} color="#FFB300" />
+                            <MaterialCommunityIcons name="lightning-bolt" size={20} color="#7C3AED" />
+                            <Text style={styles.sectionTitle}>Flash Deals</Text>
+                            <View style={styles.timerBadge}>
+                                <MaterialCommunityIcons name="clock-outline" size={12} color="#7C3AED" />
+                                <Text style={styles.timerText}>08 : 45 : 12</Text>
                             </View>
-                            <Text style={styles.sectionTitle}>{t('featuredProducts')}</Text>
                         </View>
                         <TouchableOpacity style={styles.seeAllButton}>
                             <Text style={styles.seeAllText}>{t('viewAll')}</Text>
@@ -311,69 +478,192 @@ const HomeScreen = ({ navigation }) => {
                     )}
                 </View>
 
-                {/* Quick Links */}
-                <View style={styles.quickLinksSection}>
-                    <Text style={styles.quickLinksTitle}>{t('quickAccess')}</Text>
-                    <View style={styles.quickLinks}>
-                        <TouchableOpacity style={styles.quickLink}>
-                            <View style={[styles.quickIcon, { backgroundColor: '#FFF3E0' }]}>
-                                <MaterialCommunityIcons name="percent" size={22} color="#FF9800" />
-                            </View>
-                            <Text style={styles.quickLinkText}>{t('offers')}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.quickLink}>
-                            <View style={[styles.quickIcon, { backgroundColor: '#E3F2FD' }]}>
-                                <MaterialCommunityIcons name="lightning-bolt" size={22} color="#1976D2" />
-                            </View>
-                            <Text style={styles.quickLinkText}>{t('flashSale')}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.quickLink}>
-                            <View style={[styles.quickIcon, { backgroundColor: '#E8F5E9' }]}>
-                                <MaterialCommunityIcons name="package-variant" size={22} color={COLORS.secondary} />
-                            </View>
-                            <Text style={styles.quickLinkText}>{t('combos')}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.quickLink}>
-                            <View style={[styles.quickIcon, { backgroundColor: '#FCE4EC' }]}>
-                                <MaterialCommunityIcons name="crown" size={22} color="#E91E63" />
-                            </View>
-                            <Text style={styles.quickLinkText}>{t('premium')}</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-
                 <View style={styles.bottomPadding} />
-            </ScrollView>
+            </Animated.ScrollView>
 
-            {/* Floating Cart Bar */}
-            {cartItems > 0 && (
-                <TouchableOpacity style={styles.floatingCart} onPress={handleCartPress} activeOpacity={0.95}>
-                    <View style={styles.floatingCartLeft}>
-                        <View style={styles.floatingCartBadge}>
-                            <Text style={styles.floatingCartItems}>{cartItems} items</Text>
-                        </View>
-                        <Text style={styles.floatingCartTotal}>₹{totalAmount}</Text>
-                    </View>
-                    <View style={styles.floatingCartRight}>
-                        <Text style={styles.floatingCartText}>View Cart</Text>
-                        <MaterialCommunityIcons name="arrow-right" size={18} color={COLORS.white} />
-                    </View>
-                </TouchableOpacity>
-            )}
-        </SafeAreaView>
+            {/* Premium Floating Cart Bar */}
+            <FloatingCartBar onPress={handleCartPress} />
+        </View>
     );
 };
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        flexDirection: 'column',
+        backgroundColor: '#FAFAFC', // Subtle soft tint background
+        position: 'relative',
+    },
+    ambientBlobTopRight: {
+        position: 'absolute',
+        top: 160,
+        right: -70,
+        width: 240,
+        height: 240,
+        borderRadius: 120,
+        backgroundColor: '#FFE0B2',
+        opacity: 0.28,
+    },
+    ambientBlobMidLeft: {
+        position: 'absolute',
+        top: 420,
+        left: -90,
+        width: 260,
+        height: 260,
+        borderRadius: 130,
+        backgroundColor: '#C8E6C9',
+        opacity: 0.25,
+    },
+    ambientBlobBottomRight: {
+        position: 'absolute',
+        top: 750,
+        right: -80,
+        width: 250,
+        height: 250,
+        borderRadius: 125,
+        backgroundColor: '#F8BBD0',
+        opacity: 0.22,
+    },
+    heroBannerWrapper: {
+        marginTop: 4,
+        marginBottom: 14,
+    },
+    bannerContainer: {
+        width: SCREEN_WIDTH - 32,
+        height: 250,
+        borderRadius: 22,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.05)',
+        ...SHADOWS.medium,
+        position: 'relative',
+        backgroundColor: '#6C48C5',
+    },
+    heroBannerCardImage: {
+        width: '100%',
+        height: '100%',
+        position: 'absolute',
+    },
+    bannerOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        padding: 24,
+        justifyContent: 'center',
+        alignItems: 'flex-start',
+    },
+    bannerTopPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFFFFF',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 16,
+        marginBottom: 16,
+    },
+    bannerTopPillText: {
+        fontSize: 10,
+        fontWeight: '800',
+        color: '#4C1D95',
+        marginLeft: 4,
+    },
+    bannerHeadline: {
+        fontSize: 28,
+        fontWeight: '800',
+        color: '#FFFFFF',
+        lineHeight: 32,
+        marginBottom: 8,
+    },
+    bannerSubtitle: {
+        fontSize: 18,
+        fontWeight: '600',
+        color: 'rgba(255,255,255,0.7)',
+        marginBottom: 4,
+    },
+    bannerHighlight: {
+        fontSize: 22,
+        fontWeight: '800',
+        color: '#FDE047',
+        marginBottom: 16,
+    },
+    bannerShopButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFFFFF',
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 20,
+    },
+    bannerShopButtonText: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#111111',
+        marginRight: 4,
+    },
+    stickyHeaderWrapper: {
+        zIndex: 100,
+        backgroundColor: 'transparent',
+    },
+    featureGridContainer: {
+        flexDirection: 'row',
+        paddingHorizontal: 16,
+        gap: 10,
+        marginBottom: 16,
+    },
+    featureGridCard: {
+        flex: 1,
+        borderRadius: 16,
+        padding: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.04)',
+        ...SHADOWS.light,
+    },
+    featureIconCircle: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 6,
+    },
+    featureCardTitle: {
+        fontSize: 11,
+        fontWeight: '800',
+        color: '#1E1B4B',
+        textAlign: 'center',
+    },
+    featureCardSubtitle: {
+        fontSize: 9,
+        fontWeight: '500',
+        color: '#6B7280',
+        marginTop: 1,
+        textAlign: 'center',
+    },
+    timerBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F3E8FF',
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 12,
+        gap: 4,
+        marginLeft: 6,
+    },
+    timerText: {
+        fontSize: 11,
+        fontWeight: '800',
+        color: '#7C3AED',
+        letterSpacing: 0.5,
     },
     scrollView: {
         flex: 1,
     },
     section: {
-        marginTop: 12,
+        marginTop: 14,
     },
     sectionHeader: {
         flexDirection: 'row',
@@ -422,77 +712,12 @@ const styles = StyleSheet.create({
     productList: {
         paddingHorizontal: 16,
     },
-    quickLinksSection: {
-        marginTop: 20,
-        paddingHorizontal: 16,
-    },
-    quickLinksTitle: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: COLORS.text,
-        marginBottom: 14,
-    },
-    quickLinks: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        backgroundColor: COLORS.white,
-        padding: 16,
-        borderRadius: 16,
-        ...SHADOWS.light,
-    },
-    quickLink: {
-        alignItems: 'center',
-        flex: 1,
-    },
-    quickIcon: {
-        width: 48,
-        height: 48,
-        borderRadius: 14,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 8,
-    },
-    quickLinkText: {
-        fontSize: 11,
-        fontWeight: '600',
-        color: COLORS.text,
-    },
-    cartButton: {
-        position: 'relative',
-    },
-    cartIconWrapper: {
-        width: 40,
-        height: 40,
-        borderRadius: 12,
-        backgroundColor: 'rgba(255,255,255,0.6)',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    badge: {
-        position: 'absolute',
-        top: -4,
-        right: -4,
-        backgroundColor: COLORS.secondary,
-        borderRadius: 10,
-        minWidth: 20,
-        height: 20,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 5,
-        borderWidth: 2,
-        borderColor: COLORS.primary,
-    },
-    badgeText: {
-        color: COLORS.white,
-        fontSize: 10,
-        fontWeight: '800',
-    },
     bottomPadding: {
-        height: 100,
+        height: 140,
     },
     floatingCart: {
         position: 'absolute',
-        bottom: 20,
+        bottom: 76,
         left: 16,
         right: 16,
         backgroundColor: COLORS.secondary,
@@ -577,6 +802,55 @@ const styles = StyleSheet.create({
     emptyText: {
         fontSize: 13,
         color: COLORS.textSecondary,
+    },
+    embeddedSearchWrapper: {
+        marginTop: 6,
+        marginBottom: 4,
+    },
+    quickCatBar: {
+        marginTop: 2,
+        marginBottom: 8,
+        paddingHorizontal: 16,
+    },
+    quickCatScroll: {
+        gap: 10,
+        alignItems: 'center',
+        paddingRight: 16,
+    },
+    quickCatPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        paddingHorizontal: 12,
+        paddingVertical: 7,
+        borderRadius: 18,
+        backgroundColor: 'rgba(255, 255, 255, 0.65)',
+        borderWidth: 1,
+        borderColor: 'rgba(0, 0, 0, 0.04)',
+        position: 'relative',
+    },
+    quickCatPillActive: {
+        backgroundColor: COLORS.white,
+        borderColor: 'rgba(0, 0, 0, 0.1)',
+        ...SHADOWS.light,
+    },
+    quickCatText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#444444',
+    },
+    quickCatTextActive: {
+        fontWeight: '800',
+        color: '#111111',
+    },
+    quickCatActiveLine: {
+        position: 'absolute',
+        bottom: -2,
+        left: 12,
+        right: 12,
+        height: 2.5,
+        backgroundColor: '#111111',
+        borderRadius: 2,
     },
 });
 
