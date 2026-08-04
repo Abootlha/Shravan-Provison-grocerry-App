@@ -138,11 +138,47 @@ export class MapsService {
     const results: any[] = [];
     const seenKeys = new Set<string>();
 
-    // 1. Fetch multi-results from Nominatim (OpenStreetMap India)
+    // 1 & 2. Fetch from both providers in parallel to cut latency.
+    const [nominatimResults, mapplsResults] = await Promise.all([
+      this.searchNominatim(trimmedQuery),
+      this.searchMappls(trimmedQuery),
+    ]);
+
+    for (const item of [...nominatimResults, ...mapplsResults]) {
+      const key = item.placeId;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        results.push(item);
+      }
+    }
+
+    // 3. Fallback: If no results found yet, use direct geocode fallback
+    if (results.length === 0) {
+      try {
+        const directGeocode = await this.geocodeWithFallback(trimmedQuery);
+        if (directGeocode?.latitude && directGeocode?.longitude) {
+          const parts = (directGeocode.formattedAddress || trimmedQuery).split(',').map((s: string) => s.trim());
+          results.push({
+            ...directGeocode,
+            name: parts[0] || trimmedQuery,
+          });
+        }
+      } catch (error: any) {
+        this.logger.warn(`Geocode fallback failed for "${trimmedQuery}": ${error?.message}`);
+      }
+    }
+
+    return {
+      responseCode: 200,
+      results,
+    };
+  }
+
+  private async searchNominatim(query: string): Promise<any[]> {
     try {
       const nomRes = await axios.get('https://nominatim.openstreetmap.org/search', {
         params: {
-          q: trimmedQuery,
+          q: query,
           format: 'jsonv2',
           countrycodes: 'in',
           limit: 10,
@@ -154,112 +190,119 @@ export class MapsService {
         timeout: 8000,
       });
 
-      if (Array.isArray(nomRes.data)) {
-        for (const item of nomRes.data) {
-          const lat = parseFloat(item.lat);
-          const lon = parseFloat(item.lon);
-          const displayName = item.display_name || '';
-
-          if (!displayName) continue;
-
-          // Split display name to extract primary title and clean address
-          const parts = displayName.split(',').map((s: string) => s.trim());
-          const placeName = parts[0] || trimmedQuery;
-          const key = `${lat.toFixed(4)}_${lon.toFixed(4)}`;
-
-          if (!seenKeys.has(key)) {
-            seenKeys.add(key);
-            results.push({
-              placeId: item.place_id?.toString() || key,
-              name: placeName,
-              formattedAddress: displayName,
-              latitude: lat,
-              longitude: lon,
-              city:
-                item.address?.city ||
-                item.address?.town ||
-                item.address?.suburb ||
-                item.address?.county ||
-                item.address?.state_district ||
-                'Gorakhpur',
-              state: item.address?.state || 'Uttar Pradesh',
-              pincode: item.address?.postcode || '',
-              type: item.type || 'place',
-            });
-          }
-        }
+      if (!Array.isArray(nomRes.data)) {
+        return [];
       }
-    } catch (error: any) {
-      this.logger.warn(`Nominatim multi-search failed for "${trimmedQuery}": ${error?.message}`);
-    }
 
-    // 2. Fetch Mappls Atlas suggested locations if OAuth available
-    try {
-      if (this.clientId && this.clientSecret) {
-        const headers = await this.getBearerHeaders();
-        const response = await axios.get(`${this.atlasBaseUrl}/search/json`, {
-          headers,
-          params: {
-            query: trimmedQuery,
-            region: 'ind',
-          },
-          timeout: 8000,
-        });
+      const results: any[] = [];
+      for (const item of nomRes.data) {
+        const lat = parseFloat(item.lat);
+        const lon = parseFloat(item.lon);
+        const displayName = item.display_name || '';
 
-        const suggestions = response.data?.suggestedLocations || [];
-        for (const result of suggestions) {
-          const placeName = result.placeName || trimmedQuery;
-          const fullAddr = [result.placeName, result.placeAddress].filter(Boolean).join(', ');
-          const key = result.eLoc || placeName;
+        if (!displayName) continue;
 
-          if (!seenKeys.has(key)) {
-            seenKeys.add(key);
-            let lat = result.latitude ? parseFloat(result.latitude) : null;
-            let lon = result.longitude ? parseFloat(result.longitude) : null;
+        const parts = displayName.split(',').map((s: string) => s.trim());
+        const placeName = parts[0] || query;
+        const key = item.place_id?.toString() || `${lat.toFixed(4)}_${lon.toFixed(4)}`;
 
-            if (!lat || !lon) {
-              const coords = await this.lookupCoordinatesFallback(fullAddr);
-              if (coords) {
-                lat = coords.latitude;
-                lon = coords.longitude;
-              }
-            }
-
-            results.push({
-              placeId: key,
-              name: placeName,
-              formattedAddress: fullAddr || placeName,
-              latitude: lat,
-              longitude: lon,
-              city: result.placeName || '',
-              state: '',
-              pincode: '',
-              type: result.type || '',
-              eloc: result.eLoc || '',
-            });
-          }
-        }
-      }
-    } catch (error: any) {
-      this.logger.warn(`Mappls search failed for "${trimmedQuery}": ${error?.message}`);
-    }
-
-    // 3. Fallback: If no results found yet, use direct geocode fallback
-    if (results.length === 0) {
-      const directGeocode = await this.geocodeWithFallback(trimmedQuery);
-      if (directGeocode?.latitude && directGeocode?.longitude) {
-        const parts = (directGeocode.formattedAddress || trimmedQuery).split(',').map((s: string) => s.trim());
         results.push({
-          ...directGeocode,
-          name: parts[0] || trimmedQuery,
+          placeId: key,
+          name: placeName,
+          formattedAddress: displayName,
+          latitude: lat,
+          longitude: lon,
+          city:
+            item.address?.city ||
+            item.address?.town ||
+            item.address?.suburb ||
+            item.address?.county ||
+            item.address?.state_district ||
+            'Gorakhpur',
+          state: item.address?.state || 'Uttar Pradesh',
+          pincode: item.address?.postcode || '',
+          type: item.type || 'place',
         });
       }
+      return results;
+    } catch (error: any) {
+      this.logger.warn(`Nominatim multi-search failed for "${query}": ${error?.message}`);
+      return [];
+    }
+  }
+
+  private async searchMappls(query: string): Promise<any[]> {
+    if (!this.clientId || !this.clientSecret) {
+      return [];
     }
 
-    return {
-      responseCode: 200,
-      results,
-    };
+    try {
+      const headers = await this.getBearerHeaders();
+      const response = await axios.get(`${this.atlasBaseUrl}/search/json`, {
+        headers,
+        params: {
+          query,
+          region: 'ind',
+        },
+        timeout: 8000,
+      });
+
+      const suggestions = response.data?.suggestedLocations || [];
+      const entries: Array<{
+        placeId: string;
+        name: string;
+        fullAddr: string;
+        eloc: string;
+        type: string;
+        lat: number | null;
+        lon: number | null;
+      }> = [];
+
+      for (const result of suggestions) {
+        const placeName = result.placeName || query;
+        const fullAddr = [result.placeName, result.placeAddress].filter(Boolean).join(', ');
+        const key = result.eLoc || placeName;
+        const lat = result.latitude ? parseFloat(result.latitude) : null;
+        const lon = result.longitude ? parseFloat(result.longitude) : null;
+        entries.push({
+          placeId: key,
+          name: placeName,
+          fullAddr: fullAddr || placeName,
+          eloc: result.eLoc || '',
+          type: result.type || '',
+          lat,
+          lon,
+        });
+      }
+
+      // Resolve missing coordinates for all items in parallel (big latency win).
+      await Promise.allSettled(
+        entries.map(async (entry) => {
+          if (entry.lat && entry.lon) return;
+          const coords = await this.lookupCoordinatesFallback(entry.fullAddr);
+          if (coords) {
+            entry.lat = coords.latitude;
+            entry.lon = coords.longitude;
+          }
+        })
+      );
+
+      return entries.map((entry) => ({
+        placeId: entry.placeId,
+        name: entry.name,
+        formattedAddress: entry.fullAddr,
+        latitude: entry.lat,
+        longitude: entry.lon,
+        city: entry.name,
+        state: '',
+        pincode: '',
+        type: entry.type,
+        eloc: entry.eloc,
+      }));
+    } catch (error: any) {
+      this.logger.warn(`Mappls search failed for "${query}": ${error?.message}`);
+      return [];
+    }
   }
 
   async geocodeAddress(address: string) {
