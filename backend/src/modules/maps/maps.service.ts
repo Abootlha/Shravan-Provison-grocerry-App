@@ -167,7 +167,6 @@ export class MapsService {
     }
 
     const trimmedQuery = query.trim();
-    const results: any[] = [];
     const seenKeys = new Set<string>();
 
     // 1 & 2. Fetch from both providers in parallel to cut latency.
@@ -176,44 +175,50 @@ export class MapsService {
       this.searchMappls(trimmedQuery),
     ]);
 
+    // Merge results, deduplicate by placeId
+    const merged: any[] = [];
     for (const item of [...nominatimResults, ...mapplsResults]) {
       const key = item.placeId;
       if (!seenKeys.has(key)) {
         seenKeys.add(key);
-        results.push(item);
+        merged.push(item);
       }
     }
 
     // 3. Fallback: If no results found yet, use bounded direct geocode fallback
-    if (results.length === 0) {
+    if (merged.length === 0) {
       try {
         const directGeocode = await this.geocodeWithFallback(trimmedQuery, near);
-        if (directGeocode && this.withinDeliveryRadius(this.coordsOf(directGeocode)!)) {
-          const parts = (directGeocode.formattedAddress || trimmedQuery).split(',').map((s: string) => s.trim());
-          results.push({
-            ...directGeocode,
-            name: parts[0] || trimmedQuery,
-          });
+        if (directGeocode) {
+          const coords = this.coordsOf(directGeocode);
+          if (coords) {
+            const parts = (directGeocode.formattedAddress || trimmedQuery).split(',').map((s: string) => s.trim());
+            merged.push({
+              ...directGeocode,
+              name: parts[0] || trimmedQuery,
+            });
+          }
         }
       } catch (error: any) {
         this.logger.warn(`Geocode fallback failed for "${trimmedQuery}": ${error?.message}`);
       }
     }
 
-    // 4. Keep only results inside the store's delivery radius, closest first.
-    const bounded = results
-      .map((item) => ({ item, coords: this.coordsOf(item) }))
-      .filter(({ coords }) => coords && this.withinDeliveryRadius(coords))
-      .sort(
-        (a, b) =>
-          this.distanceKm(this.storeLocation, a.coords!) -
-          this.distanceKm(this.storeLocation, b.coords!),
-      )
-      .map(({ item }) => item);
+    // 4. Enrich each result with distanceKm from store, sort by distance (closest first)
+    const enriched = merged
+      .map((item) => {
+        const coords = this.coordsOf(item);
+        const distanceKm = coords
+          ? parseFloat(this.distanceKm(this.storeLocation, coords).toFixed(1))
+          : null;
+        return { ...item, distanceKm };
+      })
+      .filter((item) => item.distanceKm !== null)
+      .sort((a, b) => (a.distanceKm ?? 999) - (b.distanceKm ?? 999));
 
     return {
       responseCode: 200,
-      results: bounded,
+      results: enriched,
     };
   }
 
@@ -277,12 +282,12 @@ export class MapsService {
           limit: 10,
           addressdetails: 1,
           viewbox,
-          bounded: 1,
+          bounded: 0,
         },
         headers: {
           'User-Agent': 'ShravanKirana/1.0 (maps proxy)',
         },
-        timeout: 6000,
+        timeout: 4000,
       });
 
       if (!Array.isArray(nomRes.data)) {
@@ -339,19 +344,11 @@ export class MapsService {
           query,
           region: 'ind',
         },
-        timeout: 8000,
+        timeout: 4000,
       });
 
       const suggestions = response.data?.suggestedLocations || [];
-      const entries: Array<{
-        placeId: string;
-        name: string;
-        fullAddr: string;
-        eloc: string;
-        type: string;
-        lat: number | null;
-        lon: number | null;
-      }> = [];
+      const results: any[] = [];
 
       for (const result of suggestions) {
         const placeName = result.placeName || query;
@@ -359,41 +356,25 @@ export class MapsService {
         const key = result.eLoc || placeName;
         const lat = result.latitude ? parseFloat(result.latitude) : null;
         const lon = result.longitude ? parseFloat(result.longitude) : null;
-        entries.push({
-          placeId: key,
-          name: placeName,
-          fullAddr: fullAddr || placeName,
-          eloc: result.eLoc || '',
-          type: result.type || '',
-          lat,
-          lon,
-        });
+
+        // Only include results that already have coordinates (skip slow fallback)
+        if (lat && lon) {
+          results.push({
+            placeId: key,
+            name: placeName,
+            formattedAddress: fullAddr || placeName,
+            latitude: lat,
+            longitude: lon,
+            city: placeName,
+            state: '',
+            pincode: '',
+            type: result.type || '',
+            eloc: result.eLoc || '',
+          });
+        }
       }
 
-      // Resolve missing coordinates for all items in parallel (big latency win).
-      await Promise.allSettled(
-        entries.map(async (entry) => {
-          if (entry.lat && entry.lon) return;
-          const coords = await this.lookupCoordinatesFallback(entry.fullAddr);
-          if (coords) {
-            entry.lat = coords.latitude;
-            entry.lon = coords.longitude;
-          }
-        })
-      );
-
-      return entries.map((entry) => ({
-        placeId: entry.placeId,
-        name: entry.name,
-        formattedAddress: entry.fullAddr,
-        latitude: entry.lat,
-        longitude: entry.lon,
-        city: entry.name,
-        state: '',
-        pincode: '',
-        type: entry.type,
-        eloc: entry.eloc,
-      }));
+      return results;
     } catch (error: any) {
       this.logger.warn(`Mappls search failed for "${query}": ${error?.message}`);
       return [];

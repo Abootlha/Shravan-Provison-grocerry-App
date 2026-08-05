@@ -536,15 +536,16 @@ const AddAddressScreen = ({ navigation, route }) => {
                             showsVerticalScrollIndicator={false}
                         >
                             {suggestions.map((item, index) => {
-                                const dist =
-                                    item.latitude && item.longitude
+                                const dist = item.distanceKm != null
+                                    ? item.distanceKm
+                                    : (item.latitude && item.longitude
                                         ? calculateDistanceKm(
                                               STORE_LOCATION.latitude,
                                               STORE_LOCATION.longitude,
                                               item.latitude,
                                               item.longitude
                                           )
-                                        : null;
+                                        : null);
 
                                 const isDeliverable = dist === null || dist <= STORE_LOCATION.maxRadiusKm;
 

@@ -121,6 +121,7 @@ export async function searchPlaces(query, location = null) {
             formattedAddress: result.formattedAddress || result.name || query.trim(),
             latitude: result.latitude !== null && result.latitude !== undefined ? parseFloat(result.latitude) : null,
             longitude: result.longitude !== null && result.longitude !== undefined ? parseFloat(result.longitude) : null,
+            distanceKm: result.distanceKm != null ? result.distanceKm : null,
             city: result.city || '',
             state: result.state || '',
             pincode: result.pincode || '',
