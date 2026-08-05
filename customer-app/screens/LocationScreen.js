@@ -601,7 +601,7 @@ const LocationScreen = ({ navigation }) => {
                                               )
                                             : null);
 
-                                    const isDeliverable = dist === null || dist <= STORE_LOCATION.maxRadiusKm;
+                                    const isDeliverable = dist !== null && dist <= STORE_LOCATION.maxRadiusKm;
 
                                     return (
                                         <TouchableOpacity

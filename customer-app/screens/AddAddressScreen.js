@@ -547,7 +547,7 @@ const AddAddressScreen = ({ navigation, route }) => {
                                           )
                                         : null);
 
-                                const isDeliverable = dist === null || dist <= STORE_LOCATION.maxRadiusKm;
+                                const isDeliverable = dist !== null && dist <= STORE_LOCATION.maxRadiusKm;
 
                                 return (
                                     <TouchableOpacity
@@ -662,8 +662,6 @@ const AddAddressScreen = ({ navigation, route }) => {
                                 ? addressDetails.address
                                 : 'Medical Road, Gorakhpur, Uttar Pradesh - 273010'}
                         </Text>
-
-                        {/* LIVE LATITUDE AND LONGITUDE DISPLAY */}
                         <Text
                             style={[
                                 styles.coordsText,
@@ -1039,7 +1037,7 @@ const styles = StyleSheet.create({
         shadowRadius: 12,
         elevation: 10,
     },
-    selectedAddressCard: {
+    selectedLocationCard: {
         flexDirection: 'row',
         alignItems: 'flex-start',
         backgroundColor: '#F9FAFB',
@@ -1047,7 +1045,49 @@ const styles = StyleSheet.create({
         padding: 14,
         marginBottom: 12,
         borderWidth: 1,
-        borderColor: '#F3F4F6',
+        borderColor: '#E5E7EB',
+    },
+    selectedLocationCardRed: {
+        backgroundColor: '#FEF2F2',
+        borderColor: '#FCA5A5',
+    },
+    locationIconBadge: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    locationIconBadgeRed: {
+        backgroundColor: '#FEE2E2',
+    },
+    locationIconBadgeGreen: {
+        backgroundColor: '#D1FAE5',
+    },
+    selectedLocationTextGroup: {
+        flex: 1,
+    },
+    selectedLocationHeading: {
+        fontSize: 14,
+        fontWeight: '800',
+        color: '#111827',
+        marginBottom: 2,
+    },
+    selectedLocationSubtext: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#1F2937',
+        lineHeight: 18,
+    },
+    coordsText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#6B7280',
+        marginTop: 4,
+    },
+    coordsTextRed: {
+        color: '#B91C1C',
     },
     purpleLocationBadge: {
         width: 36,
