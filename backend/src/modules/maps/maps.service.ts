@@ -161,15 +161,25 @@ export class MapsService {
     }
   }
 
+  private searchCache = new Map<string, { timestamp: number; data: any }>();
+
   async searchPlaces(query: string, near?: { latitude: number; longitude: number }) {
     if (!query?.trim()) {
       throw new BadRequestException('Query is required');
     }
 
-    const trimmedQuery = query.trim();
+    const trimmedQuery = query.trim().toLowerCase();
+    const cacheKey = `search_${trimmedQuery}_${near ? `${near.latitude}_${near.longitude}` : 'store'}`;
+
+    // 1. Return cached result if available (valid for 5 minutes)
+    const cached = this.searchCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < 300,000) {
+      return cached.data;
+    }
+
     const seenKeys = new Set<string>();
 
-    // 1 & 2. Fetch from both providers in parallel to cut latency.
+    // 2. Fetch from Nominatim and Mappls in parallel with tight timeouts
     const [nominatimResults, mapplsResults] = await Promise.all([
       this.searchNominatim(trimmedQuery, near),
       this.searchMappls(trimmedQuery),
@@ -185,26 +195,7 @@ export class MapsService {
       }
     }
 
-    // 3. Fallback: If no results found yet, use bounded direct geocode fallback
-    if (merged.length === 0) {
-      try {
-        const directGeocode = await this.geocodeWithFallback(trimmedQuery, near);
-        if (directGeocode) {
-          const coords = this.coordsOf(directGeocode);
-          if (coords) {
-            const parts = (directGeocode.formattedAddress || trimmedQuery).split(',').map((s: string) => s.trim());
-            merged.push({
-              ...directGeocode,
-              name: parts[0] || trimmedQuery,
-            });
-          }
-        }
-      } catch (error: any) {
-        this.logger.warn(`Geocode fallback failed for "${trimmedQuery}": ${error?.message}`);
-      }
-    }
-
-    // 4. Enrich each result with distanceKm from store, sort by distance (closest first)
+    // 3. Enrich each result with distanceKm from store, sort by distance (closest first)
     const enriched = merged
       .map((item) => {
         const coords = this.coordsOf(item);
@@ -216,10 +207,21 @@ export class MapsService {
       .filter((item) => item.distanceKm !== null)
       .sort((a, b) => (a.distanceKm ?? 999) - (b.distanceKm ?? 999));
 
-    return {
+    const response = {
       responseCode: 200,
       results: enriched,
     };
+
+    // Cache the response
+    if (enriched.length > 0) {
+      this.searchCache.set(cacheKey, { timestamp: Date.now(), data: response });
+      if (this.searchCache.size > 200) {
+        const firstKey = this.searchCache.keys().next().value;
+        if (firstKey) this.searchCache.delete(firstKey);
+      }
+    }
+
+    return response;
   }
 
   private coordsOf(item: any): { latitude: number; longitude: number } | null {
@@ -272,23 +274,20 @@ export class MapsService {
   ): Promise<any[]> {
     try {
       const centre = near ?? this.storeLocation;
-      const viewbox = this.buildBoundingBox(centre, this.deliveryRadiusKm + 5); // 15km viewbox around store
+      const viewbox = this.buildBoundingBox(centre, this.deliveryRadiusKm + 5);
 
-      // If query does not contain state/region keywords, search both with regional anchor and raw query
       const hasRegion = /gorakhpur|uttar pradesh|u\.p\.|deoria|kushinagar|basti|maharajganj/i.test(query);
       const queryList = hasRegion ? [query] : [`${query}, Gorakhpur, Uttar Pradesh`, query];
 
-      const allResults: any[] = [];
-      const seenIds = new Set<string>();
-
-      for (const q of queryList) {
-        try {
-          const nomRes = await axios.get('https://nominatim.openstreetmap.org/search', {
+      // Run query variants IN PARALLEL with 2s timeout
+      const responses = await Promise.allSettled(
+        queryList.map((q) =>
+          axios.get('https://nominatim.openstreetmap.org/search', {
             params: {
               q,
               format: 'jsonv2',
               countrycodes: 'in',
-              limit: 10,
+              limit: 8,
               addressdetails: 1,
               viewbox,
               bounded: 0,
@@ -296,48 +295,49 @@ export class MapsService {
             headers: {
               'User-Agent': 'ShravanKirana/1.0 (maps proxy)',
             },
-            timeout: 3000,
-          });
+            timeout: 2000,
+          }),
+        ),
+      );
 
-          if (Array.isArray(nomRes.data)) {
-            for (const item of nomRes.data) {
-              const lat = parseFloat(item.lat);
-              const lon = parseFloat(item.lon);
-              const displayName = item.display_name || '';
+      const allResults: any[] = [];
+      const seenIds = new Set<string>();
 
-              if (!displayName || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      for (const res of responses) {
+        if (res.status === 'fulfilled' && Array.isArray(res.value?.data)) {
+          for (const item of res.value.data) {
+            const lat = parseFloat(item.lat);
+            const lon = parseFloat(item.lon);
+            const displayName = item.display_name || '';
 
-              const parts = displayName.split(',').map((s: string) => s.trim());
-              const placeName = parts[0] || query;
-              const key = item.place_id?.toString() || `${lat.toFixed(4)}_${lon.toFixed(4)}`;
+            if (!displayName || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
 
-              if (!seenIds.has(key)) {
-                seenIds.add(key);
-                allResults.push({
-                  placeId: key,
-                  name: placeName,
-                  formattedAddress: displayName,
-                  latitude: lat,
-                  longitude: lon,
-                  city:
-                    item.address?.city ||
-                    item.address?.town ||
-                    item.address?.suburb ||
-                    item.address?.county ||
-                    item.address?.state_district ||
-                    'Gorakhpur',
-                  state: item.address?.state || 'Uttar Pradesh',
-                  pincode: item.address?.postcode || '',
-                  type: item.type || 'place',
-                });
-              }
+            const parts = displayName.split(',').map((s: string) => s.trim());
+            const placeName = parts[0] || query;
+            const key = item.place_id?.toString() || `${lat.toFixed(4)}_${lon.toFixed(4)}`;
+
+            if (!seenIds.has(key)) {
+              seenIds.add(key);
+              allResults.push({
+                placeId: key,
+                name: placeName,
+                formattedAddress: displayName,
+                latitude: lat,
+                longitude: lon,
+                city:
+                  item.address?.city ||
+                  item.address?.town ||
+                  item.address?.suburb ||
+                  item.address?.county ||
+                  item.address?.state_district ||
+                  'Gorakhpur',
+                state: item.address?.state || 'Uttar Pradesh',
+                pincode: item.address?.postcode || '',
+                type: item.type || 'place',
+              });
             }
           }
-        } catch (err: any) {
-          // ignore single query failure and continue loop
         }
-
-        if (allResults.length >= 8) break; // enough relevant results found
       }
 
       return allResults;
@@ -361,45 +361,48 @@ export class MapsService {
           location: `${this.storeLocation.latitude},${this.storeLocation.longitude}`,
           region: 'ind',
         },
-        timeout: 4000,
+        timeout: 2000,
       });
 
       const suggestions = response.data?.suggestedLocations || [];
-      const results: any[] = [];
+      const entries: any[] = [];
 
       for (const result of suggestions) {
         const placeName = result.placeName || query;
         const fullAddr = [result.placeName, result.placeAddress].filter(Boolean).join(', ');
         const key = result.eLoc || placeName;
-        let lat = result.latitude ? parseFloat(result.latitude) : null;
-        let lon = result.longitude ? parseFloat(result.longitude) : null;
+        const lat = result.latitude ? parseFloat(result.latitude) : null;
+        const lon = result.longitude ? parseFloat(result.longitude) : null;
 
-        // If coordinates missing, attempt quick fallback lookup
-        if ((!lat || !lon) && fullAddr) {
-          const fallback = await this.lookupCoordinatesFallback(fullAddr);
-          if (fallback) {
-            lat = fallback.latitude;
-            lon = fallback.longitude;
-          }
-        }
-
-        if (lat && lon && Number.isFinite(lat) && Number.isFinite(lon)) {
-          results.push({
-            placeId: key,
-            name: placeName,
-            formattedAddress: fullAddr || placeName,
-            latitude: lat,
-            longitude: lon,
-            city: placeName,
-            state: '',
-            pincode: '',
-            type: result.type || '',
-            eloc: result.eLoc || '',
-          });
-        }
+        entries.push({
+          placeId: key,
+          name: placeName,
+          formattedAddress: fullAddr || placeName,
+          latitude: lat,
+          longitude: lon,
+          city: placeName,
+          state: '',
+          pincode: '',
+          type: result.type || '',
+          eloc: result.eLoc || '',
+        });
       }
 
-      return results;
+      // Parallel coordinate resolution for items missing lat/lon with tight timeout
+      const missingCoordItems = entries.filter((e) => !e.latitude || !e.longitude);
+      if (missingCoordItems.length > 0) {
+        await Promise.allSettled(
+          missingCoordItems.slice(0, 3).map(async (item) => {
+            const fallback = await this.lookupCoordinatesFallback(item.formattedAddress);
+            if (fallback) {
+              item.latitude = fallback.latitude;
+              item.longitude = fallback.longitude;
+            }
+          }),
+        );
+      }
+
+      return entries.filter((e) => e.latitude && e.longitude);
     } catch (error: any) {
       this.logger.warn(`Mappls search failed for "${query}": ${error?.message}`);
       return [];
