@@ -31,4 +31,10 @@ export default () => ({
         apiKey: process.env.TWOFACTOR_API_KEY || '',
         otpExpiry: 300, // 5 minutes in seconds
     },
+
+    store: {
+        latitude: parseFloat(process.env.STORE_LATITUDE || '26.7588'),
+        longitude: parseFloat(process.env.STORE_LONGITUDE || '83.3700'),
+        maxDeliveryKm: parseFloat(process.env.STORE_MAX_DELIVERY_KM || '15'),
+    },
 });

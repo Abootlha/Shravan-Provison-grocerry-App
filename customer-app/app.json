@@ -14,18 +14,42 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.shravankirana.customer"
+      "bundleIdentifier": "com.shravankirana.customer",
+      "config": {
+        "googleMapsApiKey": "AIzaSyAsiP7CR40fAir7Wz81RvQ1qf7eZTIZGpk"
+      },
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "We need your location to show nearby stores and calculate delivery times.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "We need your location to track your delivery even when the app is in the background."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F8CB46"
       },
-      "package": "com.shravankirana.customer"
+      "package": "com.shravankirana.customer",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyAsiP7CR40fAir7Wz81RvQ1qf7eZTIZGpk"
+        }
+      },
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "scheme": "shravankirana"
+    "scheme": "shravankirana",
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location."
+        }
+      ]
+    ]
   }
 }

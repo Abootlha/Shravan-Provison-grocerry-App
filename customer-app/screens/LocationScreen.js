@@ -51,7 +51,7 @@ import MapViewContainer from '../components/MapViewContainer';
 const STORE_LOCATION = {
     latitude: 26.7588,
     longitude: 83.3700,
-    maxRadiusKm: 10.0,
+    maxRadiusKm: 15.0,
 };
 
 const calculateDistanceKm = (lat1, lon1, lat2, lon2) => {
@@ -107,7 +107,7 @@ const LocationScreen = ({ navigation }) => {
             } finally {
                 setIsSearchingLoading(false);
             }
-        }, 300);
+        }, 500); // Increased debounce time to reduce API calls
 
         return () => clearTimeout(timer);
     }, [searchQuery]);
@@ -180,7 +180,7 @@ const LocationScreen = ({ navigation }) => {
                 // Select default address if none selected or if previously selected address no longer exists
                 const defaultAddr = uniqueAddresses.find((a) => a.isDefault);
                 const selectedStillExists = selectedAddress && uniqueAddresses.some(a => a.id === selectedAddress.id);
-                
+
                 if (defaultAddr && (!selectedAddress || !selectedStillExists)) {
                     dispatch(setSelectedAddress(defaultAddr));
                 } else if (!selectedStillExists && uniqueAddresses.length > 0) {
@@ -594,14 +594,14 @@ const LocationScreen = ({ navigation }) => {
                                         ? item.distanceKm
                                         : (item.latitude && item.longitude
                                             ? calculateDistanceKm(
-                                                  STORE_LOCATION.latitude,
-                                                  STORE_LOCATION.longitude,
-                                                  item.latitude,
-                                                  item.longitude
-                                              )
+                                                STORE_LOCATION.latitude,
+                                                STORE_LOCATION.longitude,
+                                                item.latitude,
+                                                item.longitude
+                                            )
                                             : null);
 
-                                    const isDeliverable = dist !== null && dist <= STORE_LOCATION.maxRadiusKm;
+                                    const isDeliverable = dist === null || dist <= STORE_LOCATION.maxRadiusKm;
 
                                     return (
                                         <TouchableOpacity

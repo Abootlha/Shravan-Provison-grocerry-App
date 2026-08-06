@@ -1,7 +1,17 @@
 import { MAPMYINDIA_CONFIG, LOCATION_URL } from './config';
 import api from './api';
+import Constants from 'expo-constants';
 
 const MAPMYINDIA_API_KEY = MAPMYINDIA_CONFIG.apiKey;
+
+// Google Maps API
+const GOOGLE_MAPS_API_KEY = Constants.expoConfig?.extra?.GOOGLE_MAPS_API_KEY ||
+                            Constants.expoConfig?.ios?.config?.googleMapsApiKey ||
+                            Constants.expoConfig?.android?.config?.googleMaps?.apiKey ||
+                            process.env.GOOGLE_MAPS_API_KEY ||
+                            '';
+
+const GOOGLE_DIRECTIONS_API_URL = 'https://maps.googleapis.com/maps/api/directions/json';
 
 function decodePolyline(encoded) {
     const points = [];
@@ -60,15 +70,29 @@ export async function fetchRoute(origin, destination) {
         return null;
     }
 
-    if (!MAPMYINDIA_API_KEY) {
-        console.warn('Mappls directions disabled: missing API key');
-        return null;
-    }
-
     const cacheKey = getCacheKey(origin, destination);
     const cached = routeCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
         return cached.data;
+    }
+
+    // Try Google Maps first if API key is available
+    if (GOOGLE_MAPS_API_KEY && GOOGLE_MAPS_API_KEY !== 'YOUR_GOOGLE_MAPS_API_KEY_HERE') {
+        try {
+            const googleRoute = await fetchGoogleRoute(origin, destination);
+            if (googleRoute) {
+                routeCache.set(cacheKey, { data: googleRoute, timestamp: Date.now() });
+                return googleRoute;
+            }
+        } catch (error) {
+            console.warn('Google Maps directions failed, falling back to MapMyIndia:', error);
+        }
+    }
+
+    // Fallback to MapMyIndia
+    if (!MAPMYINDIA_API_KEY) {
+        console.warn('Mappls directions disabled: missing API key');
+        return null;
     }
 
     try {
@@ -123,6 +147,88 @@ export async function fetchRoute(origin, destination) {
         console.error('Error fetching directions from MapMyIndia:', error);
         return null;
     }
+}
+
+// Google Maps Directions API
+async function fetchGoogleRoute(origin, destination) {
+    try {
+        const params = new URLSearchParams({
+            origin: `${origin.latitude},${origin.longitude}`,
+            destination: `${destination.latitude},${destination.longitude}`,
+            key: GOOGLE_MAPS_API_KEY,
+            alternatives: 'false',
+            optimize: 'false',
+        });
+
+        const response = await fetch(`${GOOGLE_DIRECTIONS_API_URL}?${params.toString()}`);
+
+        if (!response.ok) {
+            throw new Error(`Google Directions API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (data.status !== 'OK' || !data.routes || !data.routes.length) {
+            console.warn('Google Directions API returned:', data.status);
+            return null;
+        }
+
+        const route = data.routes[0];
+        const leg = route.legs?.[0];
+
+        if (!leg) {
+            return null;
+        }
+
+        // Decode Google's polyline
+        const coordinates = decodePolyline(route.overview_polyline?.points || '');
+
+        if (coordinates.length === 0) {
+            return null;
+        }
+
+        const distanceMeters = leg.distance?.value || 0;
+        const durationSeconds = leg.duration?.value || 0;
+
+        // Calculate bounds from coordinates
+        const bounds = calculateBounds(coordinates);
+
+        return {
+            coordinates,
+            distance: formatDistance(distanceMeters),
+            distanceValue: distanceMeters,
+            duration: formatDuration(durationSeconds),
+            durationValue: durationSeconds,
+            bounds,
+        };
+    } catch (error) {
+        console.error('Error fetching directions from Google:', error);
+        return null;
+    }
+}
+
+// Calculate bounds from coordinates
+function calculateBounds(coordinates) {
+    if (!coordinates || coordinates.length === 0) {
+        return null;
+    }
+
+    let minLat = coordinates[0].latitude;
+    let maxLat = coordinates[0].latitude;
+    let minLng = coordinates[0].longitude;
+    let maxLng = coordinates[0].longitude;
+
+    for (const coord of coordinates) {
+        minLat = Math.min(minLat, coord.latitude);
+        maxLat = Math.max(maxLat, coord.latitude);
+        minLng = Math.min(minLng, coord.longitude);
+        maxLng = Math.max(maxLng, coord.longitude);
+    }
+
+    return {
+        northeast: { latitude: maxLat, longitude: maxLng },
+        southwest: { latitude: minLat, longitude: minLng },
+    };
 }
 
 function formatDistance(meters) {
