@@ -99,7 +99,7 @@ export default function ProductsManager() {
     const [form, setForm] = useState({
         name: '', price: '', originalPrice: '', unit: '', stock: '', categoryId: '',
         subcategoryId: '', itemGroupId: '',  // NEW
-        description: '', image: '', barcode: '', customUnit: '', brand: '',
+        description: '', highlights: '', image: '', barcode: '', customUnit: '', brand: '',
         mrp: '', gst: '', shelfLife: '', storageType: '',
         protein: '', carbs: '', sugar: '', fat: '', transFat: ''
     });
@@ -179,7 +179,7 @@ export default function ProductsManager() {
         setForm({
             name: '', price: '', originalPrice: '', unit: '', stock: '', categoryId: '',
             subcategoryId: '', itemGroupId: '',
-            description: '', image: '', barcode: '', customUnit: '', brand: '',
+            description: '', highlights: '', image: '', barcode: '', customUnit: '', brand: '',
             mrp: '', gst: '', shelfLife: '', storageType: '',
             protein: '', carbs: '', sugar: '', fat: '', transFat: ''
         });
@@ -205,6 +205,7 @@ export default function ProductsManager() {
             subcategoryId: (product as any).subcategoryId?._id || (product as any).subcategoryId || '',
             itemGroupId: (product as any).itemGroupId?._id || (product as any).itemGroupId || '',
             description: product.description || '',
+            highlights: (product as any).highlights || '',
             image: product.image || '',
             customUnit: '',
             barcode: product.barcode || '',
@@ -252,6 +253,7 @@ export default function ProductsManager() {
                 itemGroupId: form.itemGroupId,
                 barcode: form.barcode,
                 description: form.description,
+                highlights: form.highlights,
                 image: form.image || imagePreview,
                 brand: form.brand,
                 gst: Number(form.gst) || 0,
@@ -339,8 +341,7 @@ export default function ProductsManager() {
                     try {
                         const imagesArray = [row.ImageURL1, row.ImageURL2, row.ImageURL3, row.ImageURL4].filter(Boolean);
                         
-                        const data = {
-                            barcode: row.Barcode || '',
+                        const data: any = {
                             name: row.Name,
                             brand: row.Brand || '',
                             price: Number(row.Price) || 0,
@@ -350,10 +351,16 @@ export default function ProductsManager() {
                             categoryId: row.Category || (categories.length > 0 ? categories[0]._id : null),
                             subcategoryId: row.Subcategory || null,
                             itemGroupId: row.ItemGroup || null,
+                            description: row.Description || '',
+                            highlights: row.Highlights || '',
                             images: imagesArray,
                             image: imagesArray.length > 0 ? imagesArray[0] : '',
                             isAvailable: true,
                         };
+
+                        if (row.Barcode && row.Barcode.trim() !== '') {
+                            data.barcode = row.Barcode.trim();
+                        }
                         
                         if (!data.name || !data.price) {
                             throw new Error("Missing required fields (Name, Price)");
@@ -954,6 +961,18 @@ export default function ProductsManager() {
                                                         placeholder="Product description..."
                                                         value={form.description}
                                                         onChange={(e) => setForm({ ...form, description: e.target.value })}
+                                                        className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none resize-none"
+                                                        style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                                                        rows={3}
+                                                    />
+                                                </div>
+
+                                                <div className="mt-4">
+                                                    <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Highlights</label>
+                                                    <textarea
+                                                        placeholder="Product highlights..."
+                                                        value={form.highlights}
+                                                        onChange={(e) => setForm({ ...form, highlights: e.target.value })}
                                                         className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none resize-none"
                                                         style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                                                         rows={3}

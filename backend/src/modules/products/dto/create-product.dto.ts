@@ -52,6 +52,10 @@ export class CreateProductDto {
 
     @IsOptional()
     @IsString()
+    highlights?: string;
+
+    @IsOptional()
+    @IsString()
     image?: string;
 
     @IsOptional()

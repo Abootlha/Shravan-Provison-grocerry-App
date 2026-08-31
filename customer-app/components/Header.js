@@ -127,7 +127,7 @@ const Header = ({
 
     const topContentHeight = scrollY ? scrollY.interpolate({
         inputRange: [0, 70],
-        outputRange: [88, 0],
+        outputRange: [95, 0],
         extrapolate: 'clamp',
     }) : undefined;
 

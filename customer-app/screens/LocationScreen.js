@@ -703,8 +703,8 @@ const LocationScreen = ({ navigation }) => {
                                 {isLoading ? (
                                     <ActivityIndicator size="small" color="#FFFFFF" />
                                 ) : (
-                                    <Text style={styles.useLocationBtnText}>
-                                        {isHi ? 'उपयोग करें' : 'Use Location'}
+                                    <Text style={styles.useLocationBtnText} numberOfLines={1}>
+                                        {isHi ? 'उपयोग करें' : 'Use'}
                                     </Text>
                                 )}
                             </View>
@@ -1300,9 +1300,12 @@ const styles = StyleSheet.create({
     },
     useLocationBtn: {
         backgroundColor: '#7C3AED',
-        paddingHorizontal: 16,
+        paddingHorizontal: 12,
         paddingVertical: 10,
         borderRadius: 12,
+        maxWidth: 100,
+        alignItems: 'center',
+        justifyContent: 'center',
 
         shadowColor: '#7C3AED',
         shadowOffset: { width: 0, height: 3 },
@@ -1311,7 +1314,7 @@ const styles = StyleSheet.create({
         elevation: 3,
     },
     useLocationBtnText: {
-        fontSize: 13,
+        fontSize: 12,
         fontWeight: '800',
         color: '#FFFFFF',
     },
@@ -1605,7 +1608,7 @@ const styles = StyleSheet.create({
         bottom: 0,
         left: 0,
         right: 0,
-        paddingHorizontal: 16,
+        paddingHorizontal: 12,
         backgroundColor: 'transparent',
     },
     deliverHereBanner: {
@@ -1614,8 +1617,8 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         backgroundColor: '#7C3AED',
         borderRadius: 22,
-        paddingVertical: 12,
-        paddingHorizontal: 16,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
 
         shadowColor: '#7C3AED',
         shadowOffset: { width: 0, height: 8 },
@@ -1627,28 +1630,28 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         flex: 1,
-        marginRight: 10,
+        marginRight: 8,
     },
     bagIconBox: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 32,
+        height: 32,
+        borderRadius: 16,
         backgroundColor: 'rgba(255, 255, 255, 0.2)',
         alignItems: 'center',
         justifyContent: 'center',
     },
     deliverTextGroup: {
-        marginLeft: 10,
+        marginLeft: 8,
         flex: 1,
     },
     deliverTitle: {
-        fontSize: 15,
+        fontSize: 13.5,
         fontWeight: '800',
         color: '#FFFFFF',
         letterSpacing: -0.2,
     },
     deliverSubtitle: {
-        fontSize: 11.5,
+        fontSize: 11,
         fontWeight: '500',
         color: '#E9D5FF',
         marginTop: 1,
@@ -1656,15 +1659,17 @@ const styles = StyleSheet.create({
     confirmBtnPill: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
+        gap: 4,
         backgroundColor: '#FFFFFF',
-        paddingHorizontal: 14,
-        paddingVertical: 10,
-        borderRadius: 14,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 12,
+        flexShrink: 1,
     },
     confirmBtnText: {
-        fontSize: 12.5,
+        fontSize: 11.5,
         fontWeight: '800',
         color: '#7C3AED',
+        flexShrink: 1,
     },
 });

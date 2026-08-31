@@ -217,6 +217,9 @@ export class Product {
     @Prop()
     description?: string;
 
+    @Prop()
+    highlights?: string;
+
     @Prop() // Hindi description field
     descriptionHi?: string;
 

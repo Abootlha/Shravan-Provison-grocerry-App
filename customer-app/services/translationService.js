@@ -28,6 +28,11 @@ export const translateToHindi = async (text) => {
             `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=hi&dt=t&q=${encodeURIComponent(text)}`
         );
         
+        if (!response.ok) {
+            // Probably 429 Too Many Requests, fallback to original text silently
+            return text;
+        }
+        
         const data = await response.json();
         
         // Extract translated text from response
@@ -38,7 +43,8 @@ export const translateToHindi = async (text) => {
         
         return translated;
     } catch (error) {
-        console.error('Translation error:', error);
+        // Silently fallback on network/parse errors instead of spamming console
+        // console.error('Translation error:', error.message || error);
         // Return original text if translation fails
         return text;
     }

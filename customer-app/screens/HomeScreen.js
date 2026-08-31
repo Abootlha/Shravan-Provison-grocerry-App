@@ -13,6 +13,8 @@ import {
     Animated,
     Dimensions,
     DeviceEventEmitter,
+    Platform,
+    useWindowDimensions,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -43,6 +45,10 @@ const BANNER_DATA = [
 
 const HomeScreen = ({ navigation }) => {
     const { t, currentLanguage } = useTranslation();
+    const { width: screenWidth } = useWindowDimensions();
+    
+    // Responsive width for feature cards (Always 4 in a row on large screens, scrollable on mobile)
+    const featureCardWidth = Math.max(105, (screenWidth - 32 - 30) / 4);
     const cartItems = useSelector((state) => state.cart.totalItems);
     const totalAmount = useSelector((state) => state.cart.totalAmount);
     const { selectedAddress } = useSelector((state) => state.location);
@@ -50,11 +56,16 @@ const HomeScreen = ({ navigation }) => {
     const scrollY = useRef(new Animated.Value(0)).current;
     const lastScrollY = useRef(0);
 
-    const handleScroll = (event) => {
-        const currentY = Math.max(0, event.nativeEvent.contentOffset.y);
-        scrollY.setValue(currentY);
-        DeviceEventEmitter.emit('ON_SCROLL_Y', currentY);
-    };
+    const handleScroll = Animated.event(
+        [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+        {
+            useNativeDriver: false,
+            listener: (event) => {
+                const currentY = Math.max(0, event.nativeEvent.contentOffset.y);
+                DeviceEventEmitter.emit('ON_SCROLL_Y', currentY);
+            }
+        }
+    );
 
     const [categories, setCategories] = useState([]);
     const [products, setProducts] = useState([]);
@@ -328,6 +339,9 @@ const HomeScreen = ({ navigation }) => {
                 onScroll={handleScroll}
                 scrollEventThrottle={16}
             >
+                {/* Spacer for absolute header */}
+                <View style={{ height: Platform.OS === 'android' ? 270 : 290 }} />
+
                 {/* Hero Banner Carousel (Auto-scrolling) */}
                 <View style={styles.heroBannerWrapper}>
                     <FlatList
@@ -338,16 +352,16 @@ const HomeScreen = ({ navigation }) => {
                         pagingEnabled
                         showsHorizontalScrollIndicator={false}
                         onMomentumScrollEnd={(event) => {
-                            const index = Math.round(event.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+                            const index = Math.round(event.nativeEvent.contentOffset.x / screenWidth);
                             setCurrentBannerIndex(index);
                         }}
                         renderItem={({ item }) => (
                             <TouchableOpacity
-                                style={{ width: SCREEN_WIDTH, alignItems: 'center' }}
+                                style={{ width: screenWidth, alignItems: 'center' }}
                                 activeOpacity={0.92}
                                 onPress={() => navigation.navigate('Categories')}
                             >
-                                <View style={styles.bannerContainer}>
+                                <View style={[styles.bannerContainer, { width: screenWidth - 32 }]}>
                                     <Image
                                         source={item}
                                         style={styles.heroBannerCardImage}
@@ -373,7 +387,11 @@ const HomeScreen = ({ navigation }) => {
                 </View>
 
                 {/* 4 Feature Grid Cards (Blinkit / Quick-Commerce Style with Hugeicons) */}
-                <View style={styles.featureGridContainer}>
+                <ScrollView 
+                    horizontal 
+                    showsHorizontalScrollIndicator={false} 
+                    contentContainerStyle={styles.featureGridContainer}
+                >
                     {[
                         { title: 'Top Offers', subtitle: 'Best deals', IconComponent: DiscountTag01Icon, bg: '#F5EEFF', iconColor: '#7C3AED' },
                         { title: 'Combo Store', subtitle: 'Save more', IconComponent: GiftIcon, bg: '#EDEAFF', iconColor: '#6366F1' },
@@ -384,7 +402,7 @@ const HomeScreen = ({ navigation }) => {
                         return (
                             <TouchableOpacity
                                 key={idx}
-                                style={[styles.featureGridCard, { backgroundColor: card.bg }]}
+                                style={[styles.featureGridCard, { backgroundColor: card.bg, width: featureCardWidth }]}
                                 onPress={() => navigation.navigate('Categories')}
                                 activeOpacity={0.85}
                             >
@@ -396,7 +414,7 @@ const HomeScreen = ({ navigation }) => {
                             </TouchableOpacity>
                         );
                     })}
-                </View>
+                </ScrollView>
 
                 {/* Categories Section (Shop by Category) */}
                 <View style={styles.section}>
@@ -539,7 +557,6 @@ const styles = StyleSheet.create({
         marginBottom: 14,
     },
     bannerContainer: {
-        width: SCREEN_WIDTH - 32,
         height: 250,
         borderRadius: 22,
         overflow: 'hidden',
@@ -613,17 +630,20 @@ const styles = StyleSheet.create({
         marginRight: 4,
     },
     stickyHeaderWrapper: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
         zIndex: 100,
         backgroundColor: 'transparent',
     },
     featureGridContainer: {
         flexDirection: 'row',
         paddingHorizontal: 16,
+        paddingBottom: 16,
         gap: 10,
-        marginBottom: 16,
     },
     featureGridCard: {
-        flex: 1,
         borderRadius: 16,
         padding: 10,
         alignItems: 'center',
