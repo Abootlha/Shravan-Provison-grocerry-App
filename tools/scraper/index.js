@@ -190,6 +190,9 @@ async function extractProductData(page, url) {
                 }
                 if (descriptionArray.length > 0) {
                     let extractedDesc = descriptionArray.join('\n\n');
+                    // Replace competitor support emails with store email
+                    extractedDesc = extractedDesc.replace(/[a-zA-Z0-9._%+-]+@(zeptonow\.com|blinkit\.com|zomato\.com|swiggy\.com|bigbasket\.com)/gi, 'support@shravankirana.in');
+                    
                     result.description = result.description ? result.description + '\n\n' + extractedDesc : extractedDesc;
                 }
             } catch(e) {}
