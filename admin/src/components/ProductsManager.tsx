@@ -98,8 +98,8 @@ export default function ProductsManager() {
 
     const [form, setForm] = useState({
         name: '', price: '', originalPrice: '', unit: '', stock: '', categoryId: '',
-        subcategoryId: '', itemGroupId: '',  // NEW
-        description: '', highlights: '', image: '', barcode: '', customUnit: '', brand: '',
+        subcategoryId: '', itemGroupId: '',
+        description: '', highlights: '', image: '', images: [] as string[], barcode: '', customUnit: '', brand: '',
         mrp: '', gst: '', shelfLife: '', storageType: '',
         protein: '', carbs: '', sugar: '', fat: '', transFat: ''
     });
@@ -179,7 +179,7 @@ export default function ProductsManager() {
         setForm({
             name: '', price: '', originalPrice: '', unit: '', stock: '', categoryId: '',
             subcategoryId: '', itemGroupId: '',
-            description: '', highlights: '', image: '', barcode: '', customUnit: '', brand: '',
+            description: '', highlights: '', image: '', images: [], barcode: '', customUnit: '', brand: '',
             mrp: '', gst: '', shelfLife: '', storageType: '',
             protein: '', carbs: '', sugar: '', fat: '', transFat: ''
         });
@@ -207,6 +207,7 @@ export default function ProductsManager() {
             description: product.description || '',
             highlights: (product as any).highlights || '',
             image: product.image || '',
+            images: product.images || (product.image ? [product.image] : []),
             customUnit: '',
             barcode: product.barcode || '',
             brand: product.brand || '',
@@ -254,7 +255,8 @@ export default function ProductsManager() {
                 barcode: form.barcode,
                 description: form.description,
                 highlights: form.highlights,
-                image: form.image || imagePreview,
+                image: form.images && form.images.length > 0 ? form.images[0] : (form.image || imagePreview),
+                images: form.images && form.images.length > 0 ? form.images.filter(Boolean) : (form.image ? [form.image] : (imagePreview ? [imagePreview] : [])),
                 brand: form.brand,
                 gst: Number(form.gst) || 0,
                 shelfLife: Number(form.shelfLife) || 0,
@@ -282,9 +284,23 @@ export default function ProductsManager() {
         }
     }
 
-    function handleImageUrlChange(url: string) {
-        setForm({ ...form, image: url });
-        setImagePreview(url);
+    function handleImageUrlChange(index: number, url: string) {
+        const newImages = [...(form.images || [])];
+        if (newImages.length === 0 && form.image) {
+            newImages.push(form.image);
+        }
+        newImages[index] = url;
+        setForm({ ...form, images: newImages, image: newImages[0] || '' });
+    }
+
+    function handleAddImageUrl() {
+        setForm({ ...form, images: [...(form.images || []), ''] });
+    }
+
+    function handleRemoveImage(index: number) {
+        const newImages = [...(form.images || [])];
+        newImages.splice(index, 1);
+        setForm({ ...form, images: newImages, image: newImages[0] || '' });
     }
 
     function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -294,7 +310,7 @@ export default function ProductsManager() {
             reader.onloadend = () => {
                 const base64 = reader.result as string;
                 setImagePreview(base64);
-                setForm({ ...form, image: base64 });
+                setForm({ ...form, image: base64, images: [...(form.images || []), base64] });
             };
             reader.readAsDataURL(file);
         }
@@ -302,7 +318,7 @@ export default function ProductsManager() {
 
     function clearImage() {
         setImagePreview('');
-        setForm({ ...form, image: '' });
+        setForm({ ...form, image: '', images: [] });
         if (fileInputRef.current) fileInputRef.current.value = '';
     }
 
@@ -1126,23 +1142,28 @@ export default function ProductsManager() {
 
                                             {/* Images Tab */}
                                             <TabsContent value="images" className="mt-0 space-y-4">
-                                                {imagePreview && (
-                                                    <div className="relative">
-                                                        <img
-                                                            src={imagePreview}
-                                                            alt="Preview"
-                                                            className="w-full h-48 object-contain rounded-lg"
-                                                            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
-                                                        />
-                                                        <Button
-                                                            type="button"
-                                                            variant="destructive"
-                                                            size="icon"
-                                                            className="absolute top-2 right-2 h-8 w-8"
-                                                            onClick={clearImage}
-                                                        >
-                                                            <X className="w-4 h-4" />
-                                                        </Button>
+                                                {/* Previews */}
+                                                {(form.images?.length > 0 || imagePreview) && (
+                                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                        {(form.images?.length > 0 ? form.images.filter(Boolean) : (imagePreview ? [imagePreview] : [])).map((imgUrl, idx) => (
+                                                            <div key={idx} className="relative group">
+                                                                <img
+                                                                    src={imgUrl}
+                                                                    alt={`Preview ${idx + 1}`}
+                                                                    className="w-full h-32 object-contain rounded-lg"
+                                                                    style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+                                                                />
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="destructive"
+                                                                    size="icon"
+                                                                    className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                                    onClick={() => handleRemoveImage(idx)}
+                                                                >
+                                                                    <X className="w-3 h-3" />
+                                                                </Button>
+                                                            </div>
+                                                        ))}
                                                     </div>
                                                 )}
 
@@ -1157,7 +1178,7 @@ export default function ProductsManager() {
                                                             border: imageMode === 'url' ? '2px solid var(--accent)' : '2px solid transparent'
                                                         }}
                                                     >
-                                                        <Link className="w-4 h-4" /> Image URL
+                                                        <Link className="w-4 h-4" /> Image URLs
                                                     </button>
                                                     <button
                                                         type="button"
@@ -1174,11 +1195,33 @@ export default function ProductsManager() {
                                                 </div>
 
                                                 {imageMode === 'url' && (
-                                                    <Input
-                                                        placeholder="https://example.com/image.jpg"
-                                                        value={form.image}
-                                                        onChange={(e) => handleImageUrlChange(e.target.value)}
-                                                    />
+                                                    <div className="space-y-3">
+                                                        {(form.images?.length > 0 ? form.images : ['']).map((url, idx) => (
+                                                            <div key={idx} className="flex gap-2">
+                                                                <Input
+                                                                    placeholder="https://example.com/image.jpg"
+                                                                    value={url}
+                                                                    onChange={(e) => handleImageUrlChange(idx, e.target.value)}
+                                                                />
+                                                                <Button 
+                                                                    type="button" 
+                                                                    variant="outline"
+                                                                    size="icon"
+                                                                    onClick={() => handleRemoveImage(idx)}
+                                                                >
+                                                                    <X className="w-4 h-4" />
+                                                                </Button>
+                                                            </div>
+                                                        ))}
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            className="w-full"
+                                                            onClick={handleAddImageUrl}
+                                                        >
+                                                            + Add Another URL
+                                                        </Button>
+                                                    </div>
                                                 )}
 
                                                 {imageMode === 'file' && (
