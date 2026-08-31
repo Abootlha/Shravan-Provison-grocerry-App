@@ -72,13 +72,11 @@ async function extractProductData(page, url) {
             }
 
             // Try to find more images from generic product galleries
-            if (result.images.length < 4) {
-                const imgs = Array.from(document.querySelectorAll('img'))
-                    .map(img => img.src)
-                    .filter(src => src && (src.includes('product') || src.includes('item') || (img.width && img.width > 300)));
-                
-                result.images = [...new Set([...result.images, ...imgs])]; // unique
-            }
+            const imgs = Array.from(document.querySelectorAll('img'))
+                .filter(img => img.src && (img.src.includes('product') || img.src.includes('item') || (img.width && img.width > 300)))
+                .map(img => img.src);
+
+            result.images = [...new Set([...result.images, ...imgs])]; // unique
 
             // 3. Extract Unit and MRP using Generic Heuristics
             const allTextNodes = Array.from(document.querySelectorAll('h1, h2, h3, p, span, div, li'))

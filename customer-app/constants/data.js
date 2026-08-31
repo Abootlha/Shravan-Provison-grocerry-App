@@ -101,6 +101,7 @@ export const CATEGORIES = [
         id: '12',
         name: 'Baby Care',
         image: 'https://cdn-icons-png.flaticon.com/512/3081/3081840.png',
+        images: ['https://cdn-icons-png.flaticon.com/512/3081/3081840.png', 'https://cdn-icons-png.flaticon.com/512/3081/3081967.png', 'https://cdn-icons-png.flaticon.com/512/3082/3082045.png'],
         icon: 'baby-carriage',
         color: '#FBE9E7',
         group: 'Home & Personal Care',
