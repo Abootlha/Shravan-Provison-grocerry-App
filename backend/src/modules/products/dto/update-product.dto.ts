@@ -52,6 +52,10 @@ export class UpdateProductDto {
 
     @IsOptional()
     @IsString()
+    highlights?: string;
+
+    @IsOptional()
+    @IsString()
     image?: string;
 
     @IsOptional()
