@@ -34,6 +34,7 @@ interface Product {
     isAvailable: boolean;
     barcode?: string;
     image?: string;
+    images?: string[];
     description?: string;
     brand?: string;
     gst?: number;

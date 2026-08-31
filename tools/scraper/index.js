@@ -160,40 +160,49 @@ async function extractProductData(page, url) {
 
             // 6. Extract Highlights/Description
             try {
-                let highlightsArray = [];
-                let descriptionArray = [];
-                const possibleHeaders = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6, div, p, span'));
-
-                for (const el of possibleHeaders) {
+                let highlightsText = '';
+                let descriptionText = '';
+                
+                const possibleHeaders = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6, div, p, span, h2, h3'));
+                
+                for (let i = 0; i < possibleHeaders.length; i++) {
+                    const el = possibleHeaders[i];
                     const text = (el.innerText || '').trim().toLowerCase();
+                    
                     if (text === 'highlights' || text === 'key features') {
-                        let contentEl = el.nextElementSibling || el.parentElement?.nextElementSibling;
-                        if (contentEl) {
-                            let contentText = contentEl.innerText.trim().replace(/\n\n+/g, '\n');
-                            if (contentText.length > 5 && !highlightsArray.includes(contentText)) {
-                                highlightsArray.push(contentText);
-                            }
+                        let contentEl = el.nextElementSibling;
+                        if (!contentEl && el.parentElement) contentEl = el.parentElement.nextElementSibling;
+                        if (contentEl && !highlightsText) {
+                            highlightsText = contentEl.innerText.trim().replace(/\n\n+/g, '\n');
                         }
-                    } else if (text === 'product details' || text === 'description' || text === 'about the product' || text === 'about' || text === 'information') {
-                        let contentEl = el.nextElementSibling || el.parentElement?.nextElementSibling;
-                        if (contentEl) {
-                            let contentText = contentEl.innerText.trim().replace(/\n\n+/g, '\n');
-                            if (contentText.length > 5 && !descriptionArray.includes(contentText)) {
-                                descriptionArray.push(contentText);
-                            }
+                    } else if (text === 'product details' || text === 'about the product' || text === 'information') {
+                        let contentEl = el.nextElementSibling;
+                        if (!contentEl && el.parentElement) contentEl = el.parentElement.nextElementSibling;
+                        if (contentEl && !descriptionText) {
+                            descriptionText = contentEl.innerText.trim().replace(/\n\n+/g, '\n');
                         }
                     }
                 }
-
-                if (highlightsArray.length > 0) {
-                    result.highlights = highlightsArray.join('\n\n');
+                
+                // If descriptionText contains Highlights inside it, split it
+                if (descriptionText && descriptionText.toLowerCase().includes('highlights')) {
+                    const parts = descriptionText.split(/highlights/i);
+                    if (parts.length > 1 && !highlightsText) {
+                        descriptionText = parts[0].trim();
+                        highlightsText = parts[1].trim();
+                    }
                 }
-                if (descriptionArray.length > 0) {
-                    let extractedDesc = descriptionArray.join('\n\n');
-                    // Replace competitor support emails with store email
+
+                if (highlightsText) {
+                    result.highlights = highlightsText;
+                }
+                
+                if (descriptionText) {
+                    let extractedDesc = descriptionText;
                     extractedDesc = extractedDesc.replace(/[a-zA-Z0-9._%+-]+@(zeptonow\.com|blinkit\.com|zomato\.com|swiggy\.com|bigbasket\.com)/gi, 'support@shravankirana.in');
-                    
-                    result.description = result.description ? result.description + '\n\n' + extractedDesc : extractedDesc;
+                    result.description = extractedDesc;
+                } else if (result.description) {
+                    result.description = result.description.replace(/[a-zA-Z0-9._%+-]+@(zeptonow\.com|blinkit\.com|zomato\.com|swiggy\.com|bigbasket\.com)/gi, 'support@shravankirana.in');
                 }
             } catch(e) {}
 
