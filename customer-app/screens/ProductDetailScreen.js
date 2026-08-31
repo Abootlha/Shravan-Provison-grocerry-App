@@ -9,6 +9,7 @@ import {
     SafeAreaView,
     StatusBar,
     Dimensions,
+    FlatList,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useDispatch, useSelector } from 'react-redux';
@@ -21,7 +22,6 @@ import { translateToHindi } from '../services/translationService';
 const { width } = Dimensions.get('window');
 
 const ProductDetailScreen = ({ route, navigation }) => {
-    const insets = useSafeAreaInsets();
     const { product } = route.params;
     const { currentLanguage } = useTranslation();
     const dispatch = useDispatch();
@@ -32,6 +32,8 @@ const ProductDetailScreen = ({ route, navigation }) => {
     const quantity = cartItem ? cartItem.quantity : 0;
 
     const [translatedProduct, setTranslatedProduct] = useState(product);
+    const [activeImageIndex, setActiveImageIndex] = useState(0);
+    const insets = useSafeAreaInsets();
     const [expandedSections, setExpandedSections] = useState({
         description: true,
         highlights: true,
@@ -159,11 +161,42 @@ const ProductDetailScreen = ({ route, navigation }) => {
                             <Text style={styles.discountText}>{translatedProduct.discount}% OFF</Text>
                         </View>
                     )}
-                    <Image
-                        source={{ uri: translatedProduct.image }}
-                        style={styles.productImage}
-                        resizeMode="contain"
+                    <FlatList
+                        data={translatedProduct.images && translatedProduct.images.length > 0 ? translatedProduct.images : [translatedProduct.image]}
+                        horizontal
+                        pagingEnabled
+                        showsHorizontalScrollIndicator={false}
+                        onMomentumScrollEnd={(e) => {
+                            const slideSize = e.nativeEvent.layoutMeasurement.width;
+                            const index = Math.floor(e.nativeEvent.contentOffset.x / slideSize);
+                            setActiveImageIndex(index);
+                        }}
+                        keyExtractor={(_, idx) => idx.toString()}
+                        renderItem={({ item }) => (
+                            <View style={{ width: width, alignItems: 'center', justifyContent: 'center' }}>
+                                <Image
+                                    source={{ uri: item }}
+                                    style={styles.productImage}
+                                    resizeMode="contain"
+                                />
+                            </View>
+                        )}
                     />
+                    
+                    {/* Pagination Dots */}
+                    {(translatedProduct.images && translatedProduct.images.length > 1) && (
+                        <View style={styles.paginationContainer}>
+                            {translatedProduct.images.map((_, i) => (
+                                <View
+                                    key={i}
+                                    style={[
+                                        styles.dot,
+                                        i === activeImageIndex ? styles.activeDot : styles.inactiveDot
+                                    ]}
+                                />
+                            ))}
+                        </View>
+                    )}
                 </View>
 
                 {/* Product Info */}
@@ -751,6 +784,27 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: '700',
         paddingHorizontal: 16,
+    },
+    paginationContainer: {
+        flexDirection: 'row',
+        position: 'absolute',
+        bottom: 15,
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '100%',
+    },
+    dot: {
+        height: 6,
+        borderRadius: 3,
+        marginHorizontal: 3,
+    },
+    activeDot: {
+        width: 12,
+        backgroundColor: COLORS.primary,
+    },
+    inactiveDot: {
+        width: 6,
+        backgroundColor: '#D9D9D9',
     },
 });
 
