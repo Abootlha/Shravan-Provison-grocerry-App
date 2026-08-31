@@ -157,6 +157,11 @@ export class ProductsService {
         if (data.itemGroupId && typeof data.itemGroupId === 'string') {
             data.itemGroupId = new Types.ObjectId(data.itemGroupId) as any;
         }
+
+        // Prevent duplicate entry on sparse unique barcode index
+        if (data.barcode === '') {
+            data.barcode = undefined;
+        }
         
         const product = new this.productModel(data);
         await product.save();
@@ -178,7 +183,16 @@ export class ProductsService {
     }
 
     async update(id: string, data: Partial<Product>): Promise<ProductDocument> {
-        const product = await this.productModel.findByIdAndUpdate(id, data, { new: true })
+        const updatePayload: any = { ...data };
+        
+        // Prevent duplicate entry on sparse unique barcode index
+        if (updatePayload.barcode === '') {
+            delete updatePayload.barcode;
+            updatePayload.$unset = updatePayload.$unset || {};
+            updatePayload.$unset.barcode = 1;
+        }
+
+        const product = await this.productModel.findByIdAndUpdate(id, updatePayload, { new: true })
             .populate('categoryId', 'name type')
             .populate('subcategoryId', 'name parentId')
             .populate('itemGroupId', 'name subcategoryId');
