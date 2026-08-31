@@ -172,6 +172,7 @@ export class ProductsService {
         if (data.categoryId) {
             await this.redisService.delPattern(`products:category:${data.categoryId}:*`);
         }
+        await this.redisService.delPattern(`products:all:*`);
 
         return product;
     }
@@ -186,6 +187,7 @@ export class ProductsService {
         // Invalidate caches
         await this.redisService.del(RedisService.Keys.product(id));
         await this.redisService.delPattern(`products:category:${product.categoryId}:*`);
+        await this.redisService.delPattern(`products:all:*`);
 
         return product;
     }
