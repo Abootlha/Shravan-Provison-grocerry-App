@@ -34,6 +34,7 @@ const ProductDetailScreen = ({ route, navigation }) => {
     const [translatedProduct, setTranslatedProduct] = useState(product);
     const [expandedSections, setExpandedSections] = useState({
         description: true,
+        highlights: true,
         nutritional: false,
         ingredients: false,
         storage: false,
@@ -48,6 +49,7 @@ const ProductDetailScreen = ({ route, navigation }) => {
                         ...product,
                         name: product.nameHi || await translateToHindi(product.name),
                         description: product.descriptionHi || (product.description ? await translateToHindi(product.description) : product.description),
+                        highlights: product.highlightsHi || (product.highlights ? await translateToHindi(product.highlights) : product.highlights),
                         brand: product.brandHi || (product.brand ? await translateToHindi(product.brand) : product.brand)
                     };
                     setTranslatedProduct(translated);
@@ -88,6 +90,51 @@ const ProductDetailScreen = ({ route, navigation }) => {
             ...prev,
             [section]: !prev[section]
         }));
+    };
+
+    const renderDescriptionText = (text) => {
+        if (!text) return null;
+        const lines = text.split('\n');
+        return lines.map((line, index) => {
+            const trimmedLine = line.trim();
+            if (!trimmedLine) return <View key={index} style={{ height: 8 }} />;
+            
+            // Short lines without trailing punctuation act as bold headings
+            const isHeading = trimmedLine.length < 35 && !/[.,;:]$/.test(trimmedLine);
+            if (isHeading) {
+                return (
+                    <Text key={index} style={[styles.description, { fontWeight: '700', color: COLORS.text, marginTop: 12, marginBottom: 4, fontSize: 15 }]}>
+                        {trimmedLine}
+                    </Text>
+                );
+            }
+            return (
+                <Text key={index} style={styles.description}>
+                    {trimmedLine}
+                </Text>
+            );
+        });
+    };
+
+    const renderHighlightsList = (text) => {
+        if (!text) return null;
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+        const pairs = [];
+        for (let i = 0; i < lines.length; i += 2) {
+            if (i + 1 < lines.length && lines[i].length < 40) {
+                pairs.push({ key: lines[i], value: lines[i+1] });
+            } else {
+                pairs.push({ key: null, value: lines[i] });
+                i--;
+            }
+        }
+        
+        return pairs.map((pair, index) => (
+            <View key={index} style={[styles.infoRow, { paddingVertical: 4, borderBottomWidth: index === pairs.length - 1 ? 0 : 1, borderBottomColor: '#F0F0F0' }]}>
+                {pair.key && <Text style={[styles.infoLabel, { flex: 0.4 }]}>{pair.key}</Text>}
+                <Text style={[styles.infoValue, { flex: pair.key ? 0.6 : 1, textAlign: pair.key ? 'right' : 'left' }]}>{pair.value}</Text>
+            </View>
+        ));
     };
 
     return (
@@ -174,10 +221,36 @@ const ProductDetailScreen = ({ route, navigation }) => {
                     </TouchableOpacity>
                     {expandedSections.description && (
                         <View style={styles.sectionContent}>
-                            <Text style={styles.description}>{translatedProduct.description}</Text>
+                            {renderDescriptionText(translatedProduct.description)}
                         </View>
                     )}
                     <View style={styles.sectionDivider} />
+
+                    {/* Highlights Section */}
+                    {translatedProduct.highlights && (
+                        <>
+                            <TouchableOpacity 
+                                style={styles.sectionContainer}
+                                onPress={() => toggleSection('highlights')}
+                                activeOpacity={0.7}
+                            >
+                                <View style={styles.sectionHeader}>
+                                    <Text style={styles.sectionTitle}>Highlights</Text>
+                                    <MaterialCommunityIcons 
+                                        name={expandedSections.highlights ? "chevron-up" : "chevron-down"} 
+                                        size={22} 
+                                        color={COLORS.textSecondary} 
+                                    />
+                                </View>
+                            </TouchableOpacity>
+                            {expandedSections.highlights && (
+                                <View style={styles.sectionContent}>
+                                    {renderHighlightsList(translatedProduct.highlights)}
+                                </View>
+                            )}
+                            <View style={styles.sectionDivider} />
+                        </>
+                    )}
 
                     {/* Nutritional Information Section */}
                     <TouchableOpacity 
