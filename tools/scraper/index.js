@@ -236,6 +236,7 @@ async function extractProductData(page, url) {
             ItemGroup: '',
             Description: data.description ? data.description.trim() : '',
             Highlights: data.highlights ? data.highlights.trim() : '',
+            Images: (data.images || []).filter(Boolean).join('|'),
             ImageURL1: data.images[0] || '',
             ImageURL2: data.images[1] || '',
             ImageURL3: data.images[2] || '',
@@ -287,7 +288,7 @@ async function main() {
 
     if (results.length > 0) {
         const csv = Papa.unparse(results, {
-            columns: ['Barcode', 'Name', 'Brand', 'Price', 'OriginalPrice', 'Stock', 'Unit', 'Category', 'Subcategory', 'ItemGroup', 'Description', 'Highlights', 'ImageURL1', 'ImageURL2', 'ImageURL3', 'ImageURL4']
+            columns: ['Barcode', 'Name', 'Brand', 'Price', 'OriginalPrice', 'Stock', 'Unit', 'Category', 'Subcategory', 'ItemGroup', 'Description', 'Highlights', 'Images', 'ImageURL1', 'ImageURL2', 'ImageURL3', 'ImageURL4']
         });
         fs.writeFileSync(OUTPUT_FILE, csv);
         console.log(`\nSuccess! Wrote ${results.length} products to ${OUTPUT_FILE}`);

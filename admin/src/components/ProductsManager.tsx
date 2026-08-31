@@ -324,7 +324,7 @@ export default function ProductsManager() {
     }
 
     function downloadCsvTemplate() {
-        const csvContent = "Barcode,Name,Brand,Price,OriginalPrice,Stock,Unit,Category,Subcategory,ItemGroup,ImageURL1,ImageURL2,ImageURL3,ImageURL4\n1234567890123,Sample Product,Brand A,100,120,50,1pc,Category_ID,Subcategory_ID,ItemGroup_ID,https://example.com/img1.jpg,,,";
+        const csvContent = "Barcode,Name,Brand,Price,OriginalPrice,Stock,Unit,Category,Subcategory,ItemGroup,Description,Highlights,Images,ImageURL1,ImageURL2\n1234567890123,Sample Product,Brand A,100,120,50,1pc,Category_ID,Subcategory_ID,ItemGroup_ID,Product Details here,High quality,https://example.com/img1.jpg|https://example.com/img2.jpg,,";
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement("a");
         const url = URL.createObjectURL(blob);
@@ -356,8 +356,13 @@ export default function ProductsManager() {
                 for (let i = 0; i < rows.length; i++) {
                     const row = rows[i];
                     try {
-                        const imagesArray = [row.ImageURL1, row.ImageURL2, row.ImageURL3, row.ImageURL4].filter(Boolean);
-                        
+                        let imagesArray = [];
+                        if (row.Images) {
+                            imagesArray = row.Images.split('|').filter(Boolean);
+                        } else {
+                            imagesArray = [row.ImageURL1, row.ImageURL2, row.ImageURL3, row.ImageURL4].filter(Boolean);
+                        }
+
                         const data: any = {
                             name: row.Name,
                             brand: row.Brand || '',
