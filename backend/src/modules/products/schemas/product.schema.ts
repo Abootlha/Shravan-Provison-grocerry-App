@@ -151,11 +151,11 @@ export class Product {
     @Prop({ type: Types.ObjectId, ref: 'Category', required: true, index: true })
     categoryId!: Types.ObjectId;
 
-    @Prop({ type: Types.ObjectId, ref: 'Subcategory', required: true, index: true })
-    subcategoryId!: Types.ObjectId;
+    @Prop({ type: Types.ObjectId, ref: 'Subcategory', required: false, index: true })
+    subcategoryId?: Types.ObjectId;
 
-    @Prop({ type: Types.ObjectId, ref: 'ItemGroup', required: true, index: true })
-    itemGroupId!: Types.ObjectId;
+    @Prop({ type: Types.ObjectId, ref: 'ItemGroup', required: false, index: true })
+    itemGroupId?: Types.ObjectId;
 
     // Legacy field (kept for backward compatibility)
     @Prop()

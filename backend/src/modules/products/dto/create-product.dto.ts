@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsNumber, IsOptional, IsMongoId, IsBoolean, Min } from 'class-validator';
+import { IsNotEmpty, IsString, IsNumber, IsOptional, IsMongoId, IsBoolean, Min, IsArray } from 'class-validator';
 import { ValidateHierarchy } from '../validators/hierarchy.validator';
 
 export class CreateProductDto {
@@ -18,14 +18,14 @@ export class CreateProductDto {
     @IsMongoId()
     categoryId!: string;
 
-    @IsNotEmpty()
+    @IsOptional()
     @IsMongoId()
     @ValidateHierarchy()
-    subcategoryId!: string;
+    subcategoryId?: string;
 
-    @IsNotEmpty()
+    @IsOptional()
     @IsMongoId()
-    itemGroupId!: string;
+    itemGroupId?: string;
 
     @IsNotEmpty()
     @IsNumber()
@@ -53,6 +53,11 @@ export class CreateProductDto {
     @IsOptional()
     @IsString()
     image?: string;
+
+    @IsOptional()
+    @IsArray()
+    @IsString({ each: true })
+    images?: string[];
 
     @IsOptional()
     @IsNumber()

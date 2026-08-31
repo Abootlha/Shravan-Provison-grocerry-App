@@ -27,9 +27,14 @@ export class HierarchyValidator implements ValidatorConstraintInterface {
 
         console.log('🔍 Hierarchy Validation Started:', { categoryId, subcategoryId, itemGroupId });
 
-        // All three must be present
-        if (!categoryId || !subcategoryId || !itemGroupId) {
-            console.error('❌ Missing required hierarchy fields:', { categoryId, subcategoryId, itemGroupId });
+        // If subcategoryId or itemGroupId is not provided, we consider it valid because they are optional now.
+        if (!subcategoryId || !itemGroupId) {
+            return true;
+        }
+
+        // Category is still required to validate the hierarchy if subcategory is present
+        if (!categoryId) {
+            console.error('❌ Missing required categoryId field for hierarchy validation:', { categoryId, subcategoryId, itemGroupId });
             return false;
         }
 

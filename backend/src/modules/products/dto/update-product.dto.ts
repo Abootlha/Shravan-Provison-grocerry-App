@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsNumber, IsMongoId, IsBoolean, Min } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsMongoId, IsBoolean, Min, IsArray } from 'class-validator';
 import { ValidateHierarchy } from '../validators/hierarchy.validator';
 
 export class UpdateProductDto {
@@ -53,6 +53,11 @@ export class UpdateProductDto {
     @IsOptional()
     @IsString()
     image?: string;
+
+    @IsOptional()
+    @IsArray()
+    @IsString({ each: true })
+    images?: string[];
 
     @IsOptional()
     @IsNumber()
