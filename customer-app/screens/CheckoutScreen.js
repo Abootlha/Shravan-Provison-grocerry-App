@@ -45,7 +45,8 @@ import {
 } from 'hugeicons-react-native';
 import { useSelector, useDispatch } from 'react-redux';
 import { COLORS, SHADOWS } from '../constants';
-import { UserService, OrderService } from '../services';
+import { UserService, OrderService, api } from '../services';
+import { WebView } from 'react-native-webview';
 import { setSavedAddresses, setSelectedAddress } from '../store/slices/locationSlice';
 import { clearCart, incrementQuantity, decrementQuantity, removeFromCart } from '../store/slices/cartSlice';
 import { useTranslation } from '../hooks/useTranslation';
@@ -67,6 +68,8 @@ const CheckoutScreen = ({ navigation }) => {
     const [appliedCoupon, setAppliedCoupon] = useState(null);
     const [isFetchingAddresses, setIsFetchingAddresses] = useState(false);
     const [isPlacing, setIsPlacing] = useState(false);
+    const [payuHtml, setPayuHtml] = useState(null);
+    const [payuWebForm, setPayuWebForm] = useState(null);
 
     // Payment Gateway Processing State
     const [isProcessingPayment, setIsProcessingPayment] = useState(false);
@@ -226,7 +229,26 @@ const CheckoutScreen = ({ navigation }) => {
 
     const mongoIdPattern = /^[a-f\d]{24}$/i;
 
-    const handleInitiatePayment = () => {
+    const getSeamlessParameters = () => {
+        switch(selectedPayment) {
+            case 'phonepe': return { pg: 'UPI', bankcode: 'PHONEPE' };
+            case 'paytm': return { pg: 'UPI', bankcode: 'PAYTM' };
+            case 'gpay': return { pg: 'UPI', bankcode: 'TEZ' };
+            case 'amazon_upi': return { pg: 'UPI', bankcode: 'INTENT' };
+            case 'super_upi': return { pg: 'UPI', bankcode: 'INTENT' };
+            case 'add_upi': return { pg: 'UPI', bankcode: 'INTENT' };
+            case 'card': return { pg: 'CC', bankcode: 'CC' };
+            case 'pluxee': return { pg: 'CC', bankcode: 'SODEXO' };
+            case 'netbanking': return { pg: 'NB', bankcode: 'NB' };
+            case 'wallet': return { pg: 'WALLET', bankcode: 'WALLET' };
+            case 'wallet_sk': return { pg: 'WALLET', bankcode: 'WALLET' };
+            case 'amazon_wallet': return { pg: 'WALLET', bankcode: 'AMAZONPAY' };
+            case 'mobikwik': return { pg: 'WALLET', bankcode: 'MOBIKWIK' };
+            default: return { pg: 'UPI', bankcode: 'INTENT' };
+        }
+    };
+
+    const handleInitiatePayment = async () => {
         const itemsToSubmit = cartItems && cartItems.length > 0 ? cartItems : activeCartItems;
         const invalidCartItem = cartItems.find((item) => {
             const productId = item.productId || item._id || item.id;
@@ -243,24 +265,94 @@ const CheckoutScreen = ({ navigation }) => {
 
         setIsPaymentModalOpen(false);
         clearPaymentTimers();
-        setIsProcessingPayment(true);
-        setPaymentStep(0);
+        
+        if (selectedPayment === 'cod') {
+            setIsProcessingPayment(true);
+            setPaymentStep(0);
 
-        // Step 1 after 1.2 seconds: Verifying transaction with gateway
-        const t1 = setTimeout(() => {
-            setPaymentStep(1);
-        }, 1200);
+            // Step 1 after 1.2 seconds: Verifying transaction with gateway
+            const t1 = setTimeout(() => {
+                setPaymentStep(1);
+            }, 1200);
 
-        // Step 2 after 2.5 seconds: Payment Approved -> Trigger order placement
-        const t2 = setTimeout(() => {
-            setPaymentStep(2);
-            const t3 = setTimeout(async () => {
-                await executeOrderPlacement();
-            }, 900);
-            paymentTimersRef.current.push(t3);
-        }, 2500);
+            // Step 2 after 2.5 seconds: Payment Approved -> Trigger order placement
+            const t2 = setTimeout(() => {
+                setPaymentStep(2);
+                const t3 = setTimeout(async () => {
+                    await executeOrderPlacement();
+                }, 900);
+                paymentTimersRef.current.push(t3);
+            }, 2500);
 
-        paymentTimersRef.current.push(t1, t2);
+            paymentTimersRef.current.push(t1, t2);
+        } else {
+            // PayU Seamless Integration
+            try {
+                setIsProcessingPayment(true);
+                setPaymentStep(0);
+                
+                const { pg, bankcode } = getSeamlessParameters();
+                
+                const payload = {
+                    txnid: 'TXN' + Date.now(),
+                    amount: grandTotal,
+                    productinfo: 'Grocery Order',
+                    firstname: 'Amit',
+                    email: 'test@example.com',
+                    phone: '9999999999',
+                    surl: 'http://localhost:3000/payments/success',
+                    furl: 'http://localhost:3000/payments/failure',
+                    pg,
+                    bankcode
+                };
+
+                const response = await api.post('/payments/seamless-hash', payload);
+                const hashData = response.data?.data;
+                
+                if (hashData) {
+                    setIsProcessingPayment(false);
+                    
+                    if (Platform.OS === 'web') {
+                        setPayuWebForm(hashData);
+                    } else {
+                        const htmlContent = `
+                            <html>
+                            <head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Processing Payment</title></head>
+                            <body onload="document.forms['payuForm'].submit()">
+                                <form action="https://test.payu.in/_payment" method="post" name="payuForm">
+                                    <input type="hidden" name="key" value="${hashData.key}" />
+                                    <input type="hidden" name="txnid" value="${hashData.txnid}" />
+                                    <input type="hidden" name="amount" value="${hashData.amount}" />
+                                    <input type="hidden" name="productinfo" value="${hashData.productinfo}" />
+                                    <input type="hidden" name="firstname" value="${hashData.firstname}" />
+                                    <input type="hidden" name="email" value="${hashData.email}" />
+                                    <input type="hidden" name="phone" value="${hashData.phone}" />
+                                    <input type="hidden" name="surl" value="${hashData.surl}" />
+                                    <input type="hidden" name="furl" value="${hashData.furl}" />
+                                    <input type="hidden" name="hash" value="${hashData.hash}" />
+                                    <input type="hidden" name="pg" value="${hashData.pg}" />
+                                    <input type="hidden" name="bankcode" value="${hashData.bankcode}" />
+                                </form>
+                                <div style="display:flex; justify-content:center; align-items:center; height:100vh; flex-direction:column; font-family:sans-serif;">
+                                    <h3>Redirecting securely to ${PAYMENT_MAP[selectedPayment] || 'Payment Gateway'}...</h3>
+                                    <p>Please do not close this window.</p>
+                                </div>
+                            </body>
+                            </html>
+                        `;
+                        setTimeout(() => {
+                            setPayuHtml(htmlContent);
+                        }, 100);
+                    }
+                } else {
+                    throw new Error("Invalid hash data");
+                }
+            } catch (error) {
+                console.error("PayU Hash Error", error);
+                Alert.alert("Payment Error", "Failed to initialize payment gateway.");
+                setIsProcessingPayment(false);
+            }
+        }
     };
 
     const cancelPaymentProcess = () => {
@@ -1079,6 +1171,112 @@ const CheckoutScreen = ({ navigation }) => {
                     </View>
                 </View>
             </Modal>
+
+            {/* PayU Seamless WebView Modal (Mobile) */}
+            <Modal
+                visible={!!payuHtml}
+                animationType="slide"
+                onRequestClose={() => {
+                    setPayuHtml(null);
+                    cancelPaymentProcess();
+                }}
+            >
+                <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
+                    <View style={styles.header}>
+                        <TouchableOpacity 
+                            onPress={() => {
+                                setPayuHtml(null);
+                                cancelPaymentProcess();
+                            }} 
+                            style={styles.backButton}
+                        >
+                            <ArrowLeft02Icon size={24} color={COLORS.text} />
+                        </TouchableOpacity>
+                        <Text style={styles.headerTitle}>{isHi ? 'सुरक्षित भुगतान' : 'Secure Payment'}</Text>
+                        <View style={{ width: 40 }} />
+                    </View>
+                    {payuHtml && (
+                        <WebView
+                            source={{ html: payuHtml }}
+                            style={{ flex: 1 }}
+                            javaScriptEnabled={true}
+                            domStorageEnabled={true}
+                            onNavigationStateChange={(navState) => {
+                                if (navState.url.includes('payments/success')) {
+                                    setPayuHtml(null);
+                                    setPaymentStep(2);
+                                    executeOrderPlacement();
+                                } else if (navState.url.includes('payments/failure')) {
+                                    setPayuHtml(null);
+                                    cancelPaymentProcess();
+                                }
+                            }}
+                        />
+                    )}
+                </SafeAreaView>
+            </Modal>
+
+            {/* PayU Web Form Modal (Web) */}
+            {Platform.OS === 'web' && !!payuWebForm && (
+                <Modal visible={true} transparent={true} animationType="fade">
+                    <View style={styles.modalOverlay}>
+                        <View style={[styles.modalContent, { alignItems: 'center', padding: 30 }]}>
+                            <Text style={{ fontSize: 20, fontFamily: 'Outfit-Bold', color: COLORS.text, marginBottom: 15, textAlign: 'center' }}>
+                                {isHi ? 'भुगतान के लिए तैयार' : 'Ready for Payment'}
+                            </Text>
+                            <Text style={{ fontSize: 16, fontFamily: 'Outfit-Regular', color: COLORS.textLight, marginBottom: 30, textAlign: 'center' }}>
+                                {isHi ? 'अपने बैंक पेज पर जाने के लिए नीचे क्लिक करें' : 'Click below to securely proceed to your bank page.'}
+                            </Text>
+                            <TouchableOpacity 
+                                style={{
+                                    backgroundColor: COLORS.primary,
+                                    paddingVertical: 16,
+                                    paddingHorizontal: 32,
+                                    borderRadius: 12,
+                                    width: '100%',
+                                    maxWidth: 300,
+                                    alignItems: 'center'
+                                }}
+                                onPress={() => {
+                                    const form = document.createElement('form');
+                                    form.method = 'POST';
+                                    form.action = 'https://test.payu.in/_payment';
+                                    form.style.display = 'none';
+                                    
+                                    const fields = ['key', 'txnid', 'amount', 'productinfo', 'firstname', 'email', 'phone', 'surl', 'furl', 'hash', 'pg', 'bankcode'];
+                                    fields.forEach(fieldName => {
+                                        if (payuWebForm[fieldName] !== undefined && payuWebForm[fieldName] !== null) {
+                                            const input = document.createElement('input');
+                                            input.type = 'hidden';
+                                            input.name = fieldName;
+                                            input.value = payuWebForm[fieldName];
+                                            form.appendChild(input);
+                                        }
+                                    });
+                                    
+                                    document.body.appendChild(form);
+                                    form.submit();
+                                }}
+                            >
+                                <Text style={{ color: '#fff', fontSize: 16, fontFamily: 'Outfit-Bold' }}>
+                                    {isHi ? 'भुगतान करने जाएं' : 'Proceed to Pay'}
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                onPress={() => {
+                                    setPayuWebForm(null);
+                                    cancelPaymentProcess();
+                                }} 
+                                style={{ marginTop: 20 }}
+                            >
+                                <Text style={{ color: COLORS.error, fontSize: 16, fontFamily: 'Outfit-Medium' }}>
+                                    {isHi ? 'रद्द करें' : 'Cancel'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </Modal>
+            )}
         </SafeAreaView>
     );
 };
