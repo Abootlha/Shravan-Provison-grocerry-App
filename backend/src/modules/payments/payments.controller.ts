@@ -28,4 +28,11 @@ export class PaymentsController {
     const payload = this.paymentsService.generateSeamlessPayload(paymentDetails);
     return { success: true, data: payload };
   }
+
+  @Post('webhook')
+  async handleWebhook(@Body() payload: any) {
+    // Webhook/IPN endpoint (no JwtAuthGuard since it is called by PayU server)
+    const result = await this.paymentsService.processWebhook(payload);
+    return { success: true, data: result };
+  }
 }

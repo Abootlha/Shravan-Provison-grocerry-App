@@ -11,6 +11,15 @@ export class PaymentsService {
   private readonly key: string;
   private readonly salt: string;
 
+  private cachedToken: string | null = null;
+  private tokenExpiry: number = 0;
+
+  // Queue state for rate limiting (max 20 requests per minute)
+  private requestQueue: (() => Promise<void>)[] = [];
+  private isProcessingQueue = false;
+  private requestsThisMinute = 0;
+  private minuteStartTime = Date.now();
+
   constructor(private readonly configService: ConfigService) {
     this.clientId = this.configService.get<string>('payu.clientId') || '';
     this.clientSecret =
@@ -22,9 +31,18 @@ export class PaymentsService {
   /**
    * Generates a PayU OAuth access token using Client Credentials
    * Useful for PayU Payment Links APIs and related integrations.
+   * Caches the token to avoid hitting rate limits (valid for ~8 hours).
    */
   async getAccessToken(): Promise<string> {
+    if (this.cachedToken && Date.now() < this.tokenExpiry) {
+      return this.cachedToken;
+    }
+
     try {
+      if (!this.clientId || !this.clientSecret || this.clientId.includes('test')) {
+        this.logger.warn('PayU credentials missing or appear to be test credentials. Please verify your account status is active/live.');
+      }
+
       const params = new URLSearchParams();
       params.append('grant_type', 'client_credentials');
       params.append('client_id', this.clientId);
@@ -42,7 +60,11 @@ export class PaymentsService {
         },
       );
 
-      return response.data.access_token;
+      this.cachedToken = response.data.access_token;
+      const expiresIn = response.data.expires_in || 28800;
+      this.tokenExpiry = Date.now() + (expiresIn - 300) * 1000; // cache until 5 mins before expiry
+
+      return this.cachedToken!;
     } catch (error: any) {
       this.logger.error(
         'Failed to get PayU access token',
@@ -56,32 +78,71 @@ export class PaymentsService {
   }
 
   /**
-   * Example method to create a payment link using the token
+   * Internal queue processor to enforce rate limit (max 20 requests/min).
    */
-  async createPaymentLink(paymentDetails: any) {
-    const token = await this.getAccessToken();
-    try {
-      const response = await axios.post(
-        'https://api.payu.in/payment_links',
-        paymentDetails,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        },
-      );
-      return response.data;
-    } catch (error: any) {
-      this.logger.error(
-        'Failed to create payment link',
-        error.response?.data || error.message,
-      );
-      throw new HttpException(
-        'Payment Link Generation Failed',
-        HttpStatus.BAD_REQUEST,
-      );
+  private async processQueue() {
+    if (this.isProcessingQueue) return;
+    this.isProcessingQueue = true;
+
+    while (this.requestQueue.length > 0) {
+      const now = Date.now();
+      if (now - this.minuteStartTime > 60000) {
+        this.minuteStartTime = now;
+        this.requestsThisMinute = 0;
+      }
+
+      if (this.requestsThisMinute >= 20) {
+        const timeToWait = 60000 - (now - this.minuteStartTime);
+        this.logger.warn(`Rate limit approached. Delaying PayU requests for ${timeToWait}ms`);
+        await new Promise((resolve) => setTimeout(resolve, timeToWait));
+        this.minuteStartTime = Date.now();
+        this.requestsThisMinute = 0;
+      }
+
+      const request = this.requestQueue.shift();
+      if (request) {
+        this.requestsThisMinute++;
+        await request();
+      }
     }
+    this.isProcessingQueue = false;
+  }
+
+  /**
+   * Example method to create a payment link using the token
+   * Executes via queue to ensure rate limit compliance.
+   */
+  async createPaymentLink(paymentDetails: any): Promise<any> {
+    return new Promise((resolve, reject) => {
+      this.requestQueue.push(async () => {
+        try {
+          const token = await this.getAccessToken();
+          const response = await axios.post(
+            'https://api.payu.in/payment_links',
+            paymentDetails,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+            },
+          );
+          resolve(response.data);
+        } catch (error: any) {
+          this.logger.error(
+            'Failed to create payment link',
+            error.response?.data || error.message,
+          );
+          reject(
+            new HttpException(
+              'Payment Link Generation Failed',
+              HttpStatus.BAD_REQUEST,
+            )
+          );
+        }
+      });
+      this.processQueue();
+    });
   }
 
   /**
@@ -111,5 +172,16 @@ export class PaymentsService {
       pg,
       bankcode
     };
+  }
+
+  /**
+   * Handles incoming webhooks / IPN from PayU
+   */
+  async processWebhook(payload: any) {
+    this.logger.log('Received PayU webhook IPN', payload);
+    // Here you would typically verify the hash sent by PayU
+    // and then update the order status in the database accordingly.
+    // Example: verify reverse hash, update database.
+    return { status: 'success' };
   }
 }
