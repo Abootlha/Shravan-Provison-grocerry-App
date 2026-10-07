@@ -5,14 +5,12 @@ import { CreateOrderDto, OrderItemDto, AddressDto } from './create-order.dto';
 import { PaymentMethod, PaymentStatus } from '../schemas/order.schema';
 
 // Custom generator for MongoDB ObjectId (24 hex characters)
-const objectIdArb = fc
-  .string({ minLength: 24, maxLength: 24 })
-  .map((s) =>
-    s
-      .split('')
-      .map((c) => '0123456789abcdef'[c.charCodeAt(0) % 16])
-      .join('')
-  );
+const objectIdArb = fc.string({ minLength: 24, maxLength: 24 }).map((s) =>
+  s
+    .split('')
+    .map((c) => '0123456789abcdef'[c.charCodeAt(0) % 16])
+    .join(''),
+);
 
 describe('CreateOrderDto Property Tests', () => {
   describe('Property 28: Order Creation Validation', () => {
@@ -42,7 +40,7 @@ describe('CreateOrderDto Property Tests', () => {
                   nil: undefined,
                 }),
               }),
-              { minLength: 1, maxLength: 10 }
+              { minLength: 1, maxLength: 10 },
             ),
             itemTotal: fc.float({
               min: Math.fround(0),
@@ -50,16 +48,28 @@ describe('CreateOrderDto Property Tests', () => {
               noNaN: true,
             }),
             deliveryFee: fc.option(
-              fc.float({ min: Math.fround(0), max: Math.fround(1000), noNaN: true }),
-              { nil: undefined }
+              fc.float({
+                min: Math.fround(0),
+                max: Math.fround(1000),
+                noNaN: true,
+              }),
+              { nil: undefined },
             ),
             packagingFee: fc.option(
-              fc.float({ min: Math.fround(0), max: Math.fround(1000), noNaN: true }),
-              { nil: undefined }
+              fc.float({
+                min: Math.fround(0),
+                max: Math.fround(1000),
+                noNaN: true,
+              }),
+              { nil: undefined },
             ),
             discount: fc.option(
-              fc.float({ min: Math.fround(0), max: Math.fround(10000), noNaN: true }),
-              { nil: undefined }
+              fc.float({
+                min: Math.fround(0),
+                max: Math.fround(10000),
+                noNaN: true,
+              }),
+              { nil: undefined },
             ),
             totalAmount: fc.float({
               min: Math.fround(0),
@@ -86,7 +96,7 @@ describe('CreateOrderDto Property Tests', () => {
             paymentStatus: fc.constantFrom(...Object.values(PaymentStatus)),
             deliveryInstructions: fc.option(
               fc.string({ minLength: 1, maxLength: 500 }),
-              { nil: undefined }
+              { nil: undefined },
             ),
           }),
           async (orderData) => {
@@ -95,9 +105,9 @@ describe('CreateOrderDto Property Tests', () => {
 
             // Valid data should have no validation errors
             expect(errors).toHaveLength(0);
-          }
+          },
         ),
-        { numRuns: 100 }
+        { numRuns: 100 },
       );
     });
 
@@ -116,7 +126,7 @@ describe('CreateOrderDto Property Tests', () => {
                   noNaN: true,
                 }),
               }),
-              { minLength: 1, maxLength: 10 }
+              { minLength: 1, maxLength: 10 },
             ),
             itemTotal: fc.float({
               min: Math.fround(0),
@@ -153,11 +163,13 @@ describe('CreateOrderDto Property Tests', () => {
 
             // Should have validation error for negative totalAmount
             expect(errors.length).toBeGreaterThan(0);
-            const totalAmountError = errors.find((e) => e.property === 'totalAmount');
+            const totalAmountError = errors.find(
+              (e) => e.property === 'totalAmount',
+            );
             expect(totalAmountError).toBeDefined();
-          }
+          },
         ),
-        { numRuns: 50 }
+        { numRuns: 50 },
       );
     });
 
@@ -176,7 +188,7 @@ describe('CreateOrderDto Property Tests', () => {
                   noNaN: true,
                 }),
               }),
-              { minLength: 1, maxLength: 10 }
+              { minLength: 1, maxLength: 10 },
             ),
             itemTotal: fc.float({
               min: Math.fround(0),
@@ -194,8 +206,16 @@ describe('CreateOrderDto Property Tests', () => {
               city: fc.string({ minLength: 2, maxLength: 50 }),
               pincode: fc.string({ minLength: 6, maxLength: 6 }),
               latitude: fc.oneof(
-                fc.float({ min: Math.fround(90.01), max: Math.fround(200), noNaN: true }), // > 90
-                fc.float({ min: Math.fround(-200), max: Math.fround(-90.01), noNaN: true }) // < -90
+                fc.float({
+                  min: Math.fround(90.01),
+                  max: Math.fround(200),
+                  noNaN: true,
+                }), // > 90
+                fc.float({
+                  min: Math.fround(-200),
+                  max: Math.fround(-90.01),
+                  noNaN: true,
+                }), // < -90
               ),
               longitude: fc.float({
                 min: Math.fround(-180),
@@ -212,11 +232,13 @@ describe('CreateOrderDto Property Tests', () => {
 
             // Should have validation error for invalid latitude
             expect(errors.length).toBeGreaterThan(0);
-            const addressError = errors.find((e) => e.property === 'deliveryAddress');
+            const addressError = errors.find(
+              (e) => e.property === 'deliveryAddress',
+            );
             expect(addressError).toBeDefined();
-          }
+          },
         ),
-        { numRuns: 50 }
+        { numRuns: 50 },
       );
     });
 
@@ -275,7 +297,9 @@ describe('CreateOrderDto Property Tests', () => {
 
       // Should have validation error for invalid payment status
       expect(errors.length).toBeGreaterThan(0);
-      const paymentStatusError = errors.find((e) => e.property === 'paymentStatus');
+      const paymentStatusError = errors.find(
+        (e) => e.property === 'paymentStatus',
+      );
       expect(paymentStatusError).toBeDefined();
     });
   });

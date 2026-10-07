@@ -11,17 +11,21 @@ export class MapsService {
   private readonly clientSecret: string;
   private readonly googleMapsApiKey: string;
   private readonly atlasBaseUrl = 'https://atlas.mappls.com/api/places';
-  private readonly legacyBaseUrl = 'https://apis.mapmyindia.com/advancedmaps/v1';
-  private readonly oauthUrl = 'https://outpost.mappls.com/api/security/oauth/token';
-  private readonly googlePlacesUrl = 'https://maps.googleapis.com/maps/api/place';
-  private readonly googleGeocodeUrl = 'https://maps.googleapis.com/maps/api/geocode/json';
+  private readonly legacyBaseUrl =
+    'https://apis.mapmyindia.com/advancedmaps/v1';
+  private readonly oauthUrl =
+    'https://outpost.mappls.com/api/security/oauth/token';
+  private readonly googlePlacesUrl =
+    'https://maps.googleapis.com/maps/api/place';
+  private readonly googleGeocodeUrl =
+    'https://maps.googleapis.com/maps/api/geocode/json';
   private readonly CACHE_TTL = 300; // 5 minutes
 
   // Store (delivery) centre — loaded from config dynamically. Used to bound searches so
   // cross-state/irrelevant results are never returned (like Zepto/Blinkit).
   private get storeLocation(): { latitude: number; longitude: number } {
     const lat = this.configService.get<number>('store.latitude') || 26.7588;
-    const lng = this.configService.get<number>('store.longitude') || 83.3700;
+    const lng = this.configService.get<number>('store.longitude') || 83.37;
     return { latitude: lat, longitude: lng };
   }
 
@@ -59,7 +63,9 @@ export class MapsService {
 
   private async getBearerHeaders() {
     if (!this.clientId || !this.clientSecret) {
-      throw new BadRequestException('Mappls OAuth credentials are not configured');
+      throw new BadRequestException(
+        'Mappls OAuth credentials are not configured',
+      );
     }
 
     if (!this.accessToken || Date.now() >= this.accessTokenExpiresAt) {
@@ -78,7 +84,8 @@ export class MapsService {
 
       this.accessToken = response.data?.access_token || null;
       const expiresIn = Number(response.data?.expires_in || 3600);
-      this.accessTokenExpiresAt = Date.now() + Math.max(expiresIn - 60, 60) * 1000;
+      this.accessTokenExpiresAt =
+        Date.now() + Math.max(expiresIn - 60, 60) * 1000;
     }
 
     return {
@@ -97,7 +104,10 @@ export class MapsService {
       params: {
         address: query,
         itemCount: 1,
-        bounds: this.buildBoundingBox(near ?? this.storeLocation, this.deliveryRadiusKm + 10),
+        bounds: this.buildBoundingBox(
+          near ?? this.storeLocation,
+          this.deliveryRadiusKm + 10,
+        ),
       },
       timeout: 10000,
     });
@@ -131,20 +141,23 @@ export class MapsService {
   ) {
     try {
       const centre = near ?? this.storeLocation;
-      const response = await axios.get('https://nominatim.openstreetmap.org/search', {
-        params: {
-          q: query,
-          format: 'jsonv2',
-          countrycodes: 'in',
-          limit: 3,
-          viewbox: this.buildBoundingBox(centre, this.deliveryRadiusKm + 10),
-          bounded: 1,
+      const response = await axios.get(
+        'https://nominatim.openstreetmap.org/search',
+        {
+          params: {
+            q: query,
+            format: 'jsonv2',
+            countrycodes: 'in',
+            limit: 3,
+            viewbox: this.buildBoundingBox(centre, this.deliveryRadiusKm + 10),
+            bounded: 1,
+          },
+          headers: {
+            'User-Agent': 'ShravanKirana/1.0 (maps proxy)',
+          },
+          timeout: 8000,
         },
-        headers: {
-          'User-Agent': 'ShravanKirana/1.0 (maps proxy)',
-        },
-        timeout: 8000,
-      });
+      );
 
       const top = response.data?.[0];
       if (!top?.lat || !top?.lon) {
@@ -165,7 +178,10 @@ export class MapsService {
     }
   }
 
-  async searchPlaces(query: string, near?: { latitude: number; longitude: number }) {
+  async searchPlaces(
+    query: string,
+    near?: { latitude: number; longitude: number },
+  ) {
     if (!query?.trim()) {
       throw new BadRequestException('Query is required');
     }
@@ -188,14 +204,21 @@ export class MapsService {
 
     // Try Google Maps first if API key is available
     let googleResults: any[] = [];
-    if (this.googleMapsApiKey && this.googleMapsApiKey !== 'your-google-maps-api-key-here') {
+    if (
+      this.googleMapsApiKey &&
+      this.googleMapsApiKey !== 'your-google-maps-api-key-here'
+    ) {
       try {
         googleResults = await this.searchGooglePlaces(trimmedQuery, near);
         if (googleResults.length > 0) {
-          this.logger.debug(`Google Maps found ${googleResults.length} results for "${trimmedQuery}"`);
+          this.logger.debug(
+            `Google Maps found ${googleResults.length} results for "${trimmedQuery}"`,
+          );
         }
       } catch (error: any) {
-        this.logger.warn(`Google Maps search failed for "${trimmedQuery}": ${error?.message}`);
+        this.logger.warn(
+          `Google Maps search failed for "${trimmedQuery}": ${error?.message}`,
+        );
       }
     }
 
@@ -207,7 +230,11 @@ export class MapsService {
 
     // Merge results, deduplicate by placeId (Google first, then fallbacks)
     const merged: any[] = [];
-    for (const item of [...googleResults, ...nominatimResults, ...mapplsResults]) {
+    for (const item of [
+      ...googleResults,
+      ...nominatimResults,
+      ...mapplsResults,
+    ]) {
       const key = item.placeId;
       if (!seenKeys.has(key)) {
         seenKeys.add(key);
@@ -218,11 +245,16 @@ export class MapsService {
     // 3. Fallback: If no results found yet, use bounded direct geocode fallback
     if (merged.length === 0) {
       try {
-        const directGeocode = await this.geocodeWithFallback(trimmedQuery, near);
+        const directGeocode = await this.geocodeWithFallback(
+          trimmedQuery,
+          near,
+        );
         if (directGeocode) {
           const coords = this.coordsOf(directGeocode);
           if (coords) {
-            const parts = (directGeocode.formattedAddress || trimmedQuery).split(',').map((s: string) => s.trim());
+            const parts = (directGeocode.formattedAddress || trimmedQuery)
+              .split(',')
+              .map((s: string) => s.trim());
             merged.push({
               ...directGeocode,
               name: parts[0] || trimmedQuery,
@@ -230,7 +262,9 @@ export class MapsService {
           }
         }
       } catch (error: any) {
-        this.logger.warn(`Geocode fallback failed for "${trimmedQuery}": ${error?.message}`);
+        this.logger.warn(
+          `Geocode fallback failed for "${trimmedQuery}": ${error?.message}`,
+        );
       }
     }
 
@@ -258,7 +292,11 @@ export class MapsService {
 
     // Cache the results
     try {
-      await this.redisService.set(cacheKey, JSON.stringify(result), this.CACHE_TTL);
+      await this.redisService.set(
+        cacheKey,
+        JSON.stringify(result),
+        this.CACHE_TTL,
+      );
       this.logger.debug(`Cached results for query: "${trimmedQuery}"`);
     } catch (error) {
       this.logger.warn('Cache write failed');
@@ -276,10 +314,11 @@ export class MapsService {
     return { latitude: lat, longitude: lng };
   }
 
-  private withinDeliveryRadius(coords: { latitude: number; longitude: number }) {
-    return (
-      this.distanceKm(this.storeLocation, coords) <= this.deliveryRadiusKm
-    );
+  private withinDeliveryRadius(coords: {
+    latitude: number;
+    longitude: number;
+  }) {
+    return this.distanceKm(this.storeLocation, coords) <= this.deliveryRadiusKm;
   }
 
   private distanceKm(
@@ -293,7 +332,10 @@ export class MapsService {
     const sLatB = (b.latitude * Math.PI) / 180;
     const h =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(sLatA) * Math.cos(sLatB) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      Math.cos(sLatA) *
+        Math.cos(sLatB) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
     return 2 * R * Math.asin(Math.sqrt(h));
   }
 
@@ -319,21 +361,24 @@ export class MapsService {
       // Geographic bias: restrict results to a box around the user (or store).
       const centre = near ?? this.storeLocation;
       const viewbox = this.buildBoundingBox(centre, this.deliveryRadiusKm + 10);
-      const nomRes = await axios.get('https://nominatim.openstreetmap.org/search', {
-        params: {
-          q: query,
-          format: 'jsonv2',
-          countrycodes: 'in',
-          limit: 15,
-          addressdetails: 1,
-          viewbox,
-          bounded: 0,
+      const nomRes = await axios.get(
+        'https://nominatim.openstreetmap.org/search',
+        {
+          params: {
+            q: query,
+            format: 'jsonv2',
+            countrycodes: 'in',
+            limit: 15,
+            addressdetails: 1,
+            viewbox,
+            bounded: 0,
+          },
+          headers: {
+            'User-Agent': 'ShravanKirana/1.0 (maps proxy)',
+          },
+          timeout: 6000,
         },
-        headers: {
-          'User-Agent': 'ShravanKirana/1.0 (maps proxy)',
-        },
-        timeout: 6000,
-      });
+      );
 
       if (!Array.isArray(nomRes.data)) {
         return [];
@@ -349,7 +394,8 @@ export class MapsService {
 
         const parts = displayName.split(',').map((s: string) => s.trim());
         const placeName = parts[0] || query;
-        const key = item.place_id?.toString() || `${lat.toFixed(4)}_${lon.toFixed(4)}`;
+        const key =
+          item.place_id?.toString() || `${lat.toFixed(4)}_${lon.toFixed(4)}`;
 
         results.push({
           placeId: key,
@@ -371,12 +417,17 @@ export class MapsService {
       }
       return results;
     } catch (error: any) {
-      this.logger.warn(`Nominatim multi-search failed for "${query}": ${error?.message}`);
+      this.logger.warn(
+        `Nominatim multi-search failed for "${query}": ${error?.message}`,
+      );
       return [];
     }
   }
 
-  private async searchGooglePlaces(query: string, near?: { latitude: number; longitude: number }): Promise<any[]> {
+  private async searchGooglePlaces(
+    query: string,
+    near?: { latitude: number; longitude: number },
+  ): Promise<any[]> {
     if (!this.googleMapsApiKey) {
       return [];
     }
@@ -398,10 +449,13 @@ export class MapsService {
       // Restrict to India for better local results
       params.components = 'country:in';
 
-      const response = await axios.get(`${this.googlePlacesUrl}/autocomplete/json`, {
-        params,
-        timeout: 6000,
-      });
+      const response = await axios.get(
+        `${this.googlePlacesUrl}/autocomplete/json`,
+        {
+          params,
+          timeout: 6000,
+        },
+      );
 
       if (response.data.status !== 'OK' || !response.data.predictions) {
         this.logger.warn(`Google Places API returned: ${response.data.status}`);
@@ -412,10 +466,14 @@ export class MapsService {
       const results = await Promise.all(
         response.data.predictions.slice(0, 10).map(async (prediction: any) => {
           try {
-            const placeDetails = await this.getGooglePlaceDetails(prediction.place_id);
+            const placeDetails = await this.getGooglePlaceDetails(
+              prediction.place_id,
+            );
             return {
               placeId: prediction.place_id,
-              name: prediction.structured_formatting?.main_text || prediction.description.split(',')[0],
+              name:
+                prediction.structured_formatting?.main_text ||
+                prediction.description.split(',')[0],
               formattedAddress: prediction.description,
               latitude: placeDetails?.latitude || null,
               longitude: placeDetails?.longitude || null,
@@ -428,7 +486,9 @@ export class MapsService {
             // If details fail, return prediction without coordinates
             return {
               placeId: prediction.place_id,
-              name: prediction.structured_formatting?.main_text || prediction.description.split(',')[0],
+              name:
+                prediction.structured_formatting?.main_text ||
+                prediction.description.split(',')[0],
               formattedAddress: prediction.description,
               latitude: null,
               longitude: null,
@@ -438,12 +498,14 @@ export class MapsService {
               type: prediction.types?.[0] || '',
             };
           }
-        })
+        }),
       );
 
-      return results.filter(result => result.latitude && result.longitude);
+      return results.filter((result) => result.latitude && result.longitude);
     } catch (error: any) {
-      this.logger.warn(`Google Places search failed for "${query}": ${error?.message}`);
+      this.logger.warn(
+        `Google Places search failed for "${query}": ${error?.message}`,
+      );
       return [];
     }
   }
@@ -468,9 +530,13 @@ export class MapsService {
 
       // Extract address components
       const getComponent = (types: string[]) => {
-        return components.find((comp: any) =>
-          comp.types && comp.types.some((type: string) => types.includes(type))
-        )?.long_name || '';
+        return (
+          components.find(
+            (comp: any) =>
+              comp.types &&
+              comp.types.some((type: string) => types.includes(type)),
+          )?.long_name || ''
+        );
       };
 
       return {
@@ -482,7 +548,9 @@ export class MapsService {
         pincode: getComponent(['postal_code']),
       };
     } catch (error: any) {
-      this.logger.warn(`Google Place Details failed for "${placeId}": ${error?.message}`);
+      this.logger.warn(
+        `Google Place Details failed for "${placeId}": ${error?.message}`,
+      );
       return null;
     }
   }
@@ -508,7 +576,9 @@ export class MapsService {
 
       for (const result of suggestions) {
         const placeName = result.placeName || query;
-        const fullAddr = [result.placeName, result.placeAddress].filter(Boolean).join(', ');
+        const fullAddr = [result.placeName, result.placeAddress]
+          .filter(Boolean)
+          .join(', ');
         const key = result.eLoc || placeName;
         const lat = result.latitude ? parseFloat(result.latitude) : null;
         const lon = result.longitude ? parseFloat(result.longitude) : null;
@@ -532,7 +602,9 @@ export class MapsService {
 
       return results;
     } catch (error: any) {
-      this.logger.warn(`Mappls search failed for "${query}": ${error?.message}`);
+      this.logger.warn(
+        `Mappls search failed for "${query}": ${error?.message}`,
+      );
       return [];
     }
   }
@@ -551,17 +623,22 @@ export class MapsService {
 
   async reverseGeocode(latitude: number, longitude: number) {
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-      throw new BadRequestException('Valid latitude and longitude are required');
+      throw new BadRequestException(
+        'Valid latitude and longitude are required',
+      );
     }
 
     this.ensureLegacyKey();
-    const response = await axios.get(`${this.legacyBaseUrl}/${this.apiKey}/rev_geocode`, {
-      params: {
-        lat: latitude,
-        lng: longitude,
+    const response = await axios.get(
+      `${this.legacyBaseUrl}/${this.apiKey}/rev_geocode`,
+      {
+        params: {
+          lat: latitude,
+          lng: longitude,
+        },
+        timeout: 10000,
       },
-      timeout: 10000,
-    });
+    );
 
     return response.data;
   }

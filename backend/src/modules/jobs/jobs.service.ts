@@ -3,7 +3,11 @@ import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Queue, Job } from 'bullmq';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Order, OrderDocument, OrderStatus } from '../orders/schemas/order.schema';
+import {
+  Order,
+  OrderDocument,
+  OrderStatus,
+} from '../orders/schemas/order.schema';
 import { User, UserDocument, UserRole } from '../users/schemas/user.schema';
 import { OrdersService } from '../orders/orders.service';
 import { ETAService } from '../orders/eta.service';
@@ -164,7 +168,10 @@ export class JobsService extends WorkerHost implements OnModuleInit {
 
         this.logger.log(`Cancelled stale order: ${order.orderId}`);
       } catch (error) {
-        this.logger.error(`Failed to cancel stale order ${order.orderId}:`, error);
+        this.logger.error(
+          `Failed to cancel stale order ${order.orderId}:`,
+          error,
+        );
       }
     }
   }
@@ -197,7 +204,10 @@ export class JobsService extends WorkerHost implements OnModuleInit {
         // Notify admins (in production, this would send notifications)
         await this.notifyAdmins(order);
       } catch (error) {
-        this.logger.error(`Failed to process anomalous order ${order.orderId}:`, error);
+        this.logger.error(
+          `Failed to process anomalous order ${order.orderId}:`,
+          error,
+        );
       }
     }
   }
@@ -216,7 +226,9 @@ export class JobsService extends WorkerHost implements OnModuleInit {
       .select('_id orderId riderId')
       .exec();
 
-    this.logger.log(`Found ${activeOrders.length} orders for ETA recalculation`);
+    this.logger.log(
+      `Found ${activeOrders.length} orders for ETA recalculation`,
+    );
 
     for (const order of activeOrders) {
       try {
@@ -225,7 +237,10 @@ export class JobsService extends WorkerHost implements OnModuleInit {
           this.logger.log(`Recalculated ETA for order: ${order.orderId}`);
         }
       } catch (error) {
-        this.logger.error(`Failed to recalculate ETA for order ${order.orderId}:`, error);
+        this.logger.error(
+          `Failed to recalculate ETA for order ${order.orderId}:`,
+          error,
+        );
       }
     }
   }
@@ -257,6 +272,8 @@ export class JobsService extends WorkerHost implements OnModuleInit {
     // 3. Create admin dashboard notifications
     // 4. Log to monitoring system (e.g., Sentry, DataDog)
 
-    this.logger.warn(`ADMIN NOTIFICATION: Anomalous order ${order.orderId} requires attention`);
+    this.logger.warn(
+      `ADMIN NOTIFICATION: Anomalous order ${order.orderId} requires attention`,
+    );
   }
 }

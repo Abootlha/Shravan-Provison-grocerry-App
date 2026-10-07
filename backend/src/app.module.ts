@@ -18,6 +18,7 @@ import { SettingsModule } from './modules/settings/settings.module';
 import { ItemGroupsModule } from './modules/item-groups/item-groups.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { MapsModule } from './modules/maps/maps.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 import { RedisModule } from './common/utils/redis.module';
 
 // Config
@@ -59,10 +60,12 @@ import configuration from './config/configuration';
     }),
 
     // Rate Limiting
-    ThrottlerModule.forRoot([{
-      ttl: 60000,
-      limit: 100,
-    }]),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 100,
+      },
+    ]),
 
     // BullMQ
     BullModule.forRootAsync({
@@ -91,6 +94,7 @@ import configuration from './config/configuration';
     ItemGroupsModule,
     JobsModule,
     MapsModule,
+    PaymentsModule,
   ],
 })
-export class AppModule { }
+export class AppModule {}

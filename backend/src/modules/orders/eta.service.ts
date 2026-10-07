@@ -44,7 +44,8 @@ export class ETAService {
   private readonly ETA_CACHE_TTL = 30; // 30 seconds
   private readonly TRACKING_ROUTE_CACHE_TTL = 15; // 15 seconds
   private readonly mapplsApiKey: string;
-  private readonly directionsUrl = 'https://route.mappls.com/route/direction/route_adv/driving';
+  private readonly directionsUrl =
+    'https://route.mappls.com/route/direction/route_adv/driving';
 
   constructor(
     private readonly configService: ConfigService,
@@ -78,8 +79,10 @@ export class ETAService {
     if (cachedDuration !== null) {
       this.logger.debug(`ETA cache hit for key ${cacheKey}`);
       const durationMinutes = Math.ceil(cachedDuration / 60);
-      const estimatedDeliveryTime = new Date(Date.now() + cachedDuration * 1000);
-      
+      const estimatedDeliveryTime = new Date(
+        Date.now() + cachedDuration * 1000,
+      );
+
       return {
         estimatedDeliveryTime,
         durationMinutes,
@@ -91,16 +94,16 @@ export class ETAService {
     const destination = `${deliveryAddress.latitude},${deliveryAddress.longitude}`;
 
     try {
-      const { durationSeconds, distanceMeters } = await this.callMapplsDirectionsAPI(
-        riderLocation,
-        deliveryAddress,
-      );
+      const { durationSeconds, distanceMeters } =
+        await this.callMapplsDirectionsAPI(riderLocation, deliveryAddress);
 
       // Cache the duration
       await this.setCachedETA(cacheKey, durationSeconds);
 
       const durationMinutes = Math.ceil(durationSeconds / 60);
-      const estimatedDeliveryTime = new Date(Date.now() + durationSeconds * 1000);
+      const estimatedDeliveryTime = new Date(
+        Date.now() + durationSeconds * 1000,
+      );
 
       this.logger.log(
         `Calculated ETA: ${durationMinutes} minutes (${distanceMeters}m) from ${origin} to ${destination}`,
@@ -166,7 +169,11 @@ export class ETAService {
   private async callMapplsDirectionsAPI(
     riderLocation: LocationDto,
     deliveryAddress: AddressDto,
-  ): Promise<{ durationSeconds: number; distanceMeters: number; routeCoordinates: RouteCoordinate[] }> {
+  ): Promise<{
+    durationSeconds: number;
+    distanceMeters: number;
+    routeCoordinates: RouteCoordinate[];
+  }> {
     if (!this.mapplsApiKey) {
       throw new Error('MAPMYINDIA_API_KEY is not configured');
     }
@@ -195,7 +202,9 @@ export class ETAService {
     return {
       durationSeconds: leg.duration || route.duration || 0,
       distanceMeters: leg.distance || route.distance || 0,
-      routeCoordinates: encodedPolyline ? this.decodePolyline(encodedPolyline) : [],
+      routeCoordinates: encodedPolyline
+        ? this.decodePolyline(encodedPolyline)
+        : [],
     };
   }
 
@@ -221,14 +230,19 @@ export class ETAService {
   /**
    * Cache ETA duration in seconds with 2-minute TTL
    */
-  private async setCachedETA(cacheKey: string, durationSeconds: number): Promise<void> {
+  private async setCachedETA(
+    cacheKey: string,
+    durationSeconds: number,
+  ): Promise<void> {
     try {
       await this.redisService.set(
         cacheKey,
         durationSeconds.toString(),
         this.ETA_CACHE_TTL,
       );
-      this.logger.debug(`Cached ETA for key ${cacheKey} with TTL ${this.ETA_CACHE_TTL}s`);
+      this.logger.debug(
+        `Cached ETA for key ${cacheKey} with TTL ${this.ETA_CACHE_TTL}s`,
+      );
     } catch (error) {
       this.logger.error(
         `Redis set error for ETA cache key ${cacheKey}: ${error instanceof Error ? error.message : String(error)}`,
@@ -257,7 +271,9 @@ export class ETAService {
     }
 
     if (!order.riderId) {
-      this.logger.warn(`Order ${orderId} is OUT_FOR_DELIVERY but has no assigned rider`);
+      this.logger.warn(
+        `Order ${orderId} is OUT_FOR_DELIVERY but has no assigned rider`,
+      );
       return null;
     }
 
@@ -328,16 +344,16 @@ export class ETAService {
       if (cached) {
         return {
           routeCoordinates: cached.routeCoordinates,
-          estimatedDeliveryTime: new Date(Date.now() + cached.durationSeconds * 1000),
+          estimatedDeliveryTime: new Date(
+            Date.now() + cached.durationSeconds * 1000,
+          ),
           durationMinutes: Math.ceil(cached.durationSeconds / 60),
           distanceRemaining: cached.distanceRemaining,
         };
       }
 
-      const { durationSeconds, distanceMeters, routeCoordinates } = await this.callMapplsDirectionsAPI(
-        riderLocation,
-        destination,
-      );
+      const { durationSeconds, distanceMeters, routeCoordinates } =
+        await this.callMapplsDirectionsAPI(riderLocation, destination);
 
       const snapshot = {
         routeCoordinates,
@@ -346,12 +362,16 @@ export class ETAService {
         distanceRemaining: distanceMeters,
       };
 
-      await this.redisService.setJSON(cacheKey, {
-        routeCoordinates,
-        durationSeconds,
-        distanceRemaining: distanceMeters,
-        cachedAt: new Date().toISOString(),
-      }, this.TRACKING_ROUTE_CACHE_TTL);
+      await this.redisService.setJSON(
+        cacheKey,
+        {
+          routeCoordinates,
+          durationSeconds,
+          distanceRemaining: distanceMeters,
+          cachedAt: new Date().toISOString(),
+        },
+        this.TRACKING_ROUTE_CACHE_TTL,
+      );
 
       return snapshot;
     } catch (error) {
@@ -376,7 +396,7 @@ export class ETAService {
     const roundedRiderLng = riderLng.toFixed(4);
     const roundedDestLat = destLat.toFixed(4);
     const roundedDestLng = destLng.toFixed(4);
-    
+
     return `eta:${roundedRiderLat}:${roundedRiderLng}:${roundedDestLat}:${roundedDestLng}`;
   }
 

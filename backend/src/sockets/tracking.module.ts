@@ -26,4 +26,4 @@ import { RidersModule } from '../modules/riders/riders.module';
   providers: [TrackingGateway],
   exports: [TrackingGateway],
 })
-export class TrackingModule { }
+export class TrackingModule {}

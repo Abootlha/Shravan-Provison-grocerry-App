@@ -16,16 +16,18 @@ export class CacheService {
     try {
       const cacheKey = this.getOrderCacheKey(orderId);
       const cached = await this.redisService.getJSON<T>(cacheKey);
-      
+
       if (cached) {
         this.logger.debug(`Cache hit for order ${orderId}`);
       } else {
         this.logger.debug(`Cache miss for order ${orderId}`);
       }
-      
+
       return cached;
     } catch (error) {
-      this.logger.error(`Redis get error for order ${orderId}: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.error(
+        `Redis get error for order ${orderId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
       // Fallback: return null to trigger database query
       return null;
     }
@@ -39,9 +41,13 @@ export class CacheService {
     try {
       const cacheKey = this.getOrderCacheKey(orderId);
       await this.redisService.setJSON(cacheKey, order, this.ORDER_CACHE_TTL);
-      this.logger.debug(`Cached order ${orderId} with TTL ${this.ORDER_CACHE_TTL}s`);
+      this.logger.debug(
+        `Cached order ${orderId} with TTL ${this.ORDER_CACHE_TTL}s`,
+      );
     } catch (error) {
-      this.logger.error(`Redis set error for order ${orderId}: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.error(
+        `Redis set error for order ${orderId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
       // Graceful degradation: continue without caching
     }
   }
@@ -56,7 +62,9 @@ export class CacheService {
       await this.redisService.del(cacheKey);
       this.logger.debug(`Invalidated cache for order ${orderId}`);
     } catch (error) {
-      this.logger.error(`Redis delete error for order ${orderId}: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.error(
+        `Redis delete error for order ${orderId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
       // Graceful degradation: continue without invalidation
     }
   }

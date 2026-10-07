@@ -28,6 +28,9 @@ export class MapsController {
     @Query('latitude') latitude: string,
     @Query('longitude') longitude: string,
   ) {
-    return this.mapsService.reverseGeocode(parseFloat(latitude), parseFloat(longitude));
+    return this.mapsService.reverseGeocode(
+      parseFloat(latitude),
+      parseFloat(longitude),
+    );
   }
 }

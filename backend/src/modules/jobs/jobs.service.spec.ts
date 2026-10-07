@@ -4,7 +4,11 @@ import { getQueueToken } from '@nestjs/bullmq';
 import { Model, Types } from 'mongoose';
 import * as fc from 'fast-check';
 import { JobsService } from './jobs.service';
-import { Order, OrderDocument, OrderStatus } from '../orders/schemas/order.schema';
+import {
+  Order,
+  OrderDocument,
+  OrderStatus,
+} from '../orders/schemas/order.schema';
 import { User, UserDocument, UserRole } from '../users/schemas/user.schema';
 import { OrdersService } from '../orders/orders.service';
 import { ETAService } from '../orders/eta.service';
@@ -102,7 +106,7 @@ describe('JobsService', () => {
   /**
    * Property 6: Stale Order Auto-Cancellation
    * **Validates: Requirements 2.1, 2.2**
-   * 
+   *
    * For any order in PENDING status with createdAt timestamp more than 10 minutes in the past,
    * the stale order job processor must cancel the order and set cancellationReason to "AUTO_CANCELLED_STALE".
    */
@@ -260,7 +264,7 @@ describe('JobsService', () => {
   /**
    * Property 7: Anomalous Order Detection
    * **Validates: Requirements 2.3, 2.4**
-   * 
+   *
    * For any order in OUT_FOR_DELIVERY status with status change timestamp more than 2 hours in the past,
    * the anomaly check job must flag the order as anomalous and trigger admin notification.
    */
@@ -300,15 +304,21 @@ describe('JobsService', () => {
             await service.processAnomalies({} as any);
 
             // Verify all anomalous orders were detected and logged
-            expect(loggerWarnSpy).toHaveBeenCalledTimes(expectedAnomalousOrders.length * 2);
+            expect(loggerWarnSpy).toHaveBeenCalledTimes(
+              expectedAnomalousOrders.length * 2,
+            );
             // Each order generates 2 log calls: one for detection, one for admin notification
 
             for (const order of expectedAnomalousOrders) {
               expect(loggerWarnSpy).toHaveBeenCalledWith(
-                expect.stringContaining(`ANOMALY DETECTED: Order ${order.orderId}`),
+                expect.stringContaining(
+                  `ANOMALY DETECTED: Order ${order.orderId}`,
+                ),
               );
               expect(loggerWarnSpy).toHaveBeenCalledWith(
-                expect.stringContaining(`ADMIN NOTIFICATION: Anomalous order ${order.orderId}`),
+                expect.stringContaining(
+                  `ADMIN NOTIFICATION: Anomalous order ${order.orderId}`,
+                ),
               );
             }
 
@@ -392,7 +402,7 @@ describe('JobsService', () => {
   /**
    * Property 41: Job Retry with Exponential Backoff
    * **Validates: Requirements 12.5**
-   * 
+   *
    * For any background job that fails, the system must retry the job up to 3 times
    * with exponential backoff delays (2s, 4s, 8s) before considering it permanently failed.
    */
@@ -427,7 +437,11 @@ describe('JobsService', () => {
     it('should apply exponential backoff configuration to all job types', async () => {
       await fc.assert(
         fc.asyncProperty(
-          fc.constantFrom('stale-order-check', 'anomaly-check', 'eta-recalculation'),
+          fc.constantFrom(
+            'stale-order-check',
+            'anomaly-check',
+            'eta-recalculation',
+          ),
           async (jobType) => {
             mockQueue.add.mockClear();
 
@@ -466,7 +480,7 @@ describe('JobsService', () => {
   /**
    * Property 42: Dead Letter Queue for Failed Jobs
    * **Validates: Requirements 12.6**
-   * 
+   *
    * For any background job that fails after all retry attempts, the system must move the job
    * to the dead letter queue and log the failure with job details and error message.
    */
@@ -474,8 +488,12 @@ describe('JobsService', () => {
     it('should log errors when jobs fail and allow BullMQ to handle dead letter queue', async () => {
       await fc.assert(
         fc.asyncProperty(
-          fc.constantFrom('stale-order-check', 'anomaly-check', 'eta-recalculation'),
-          fc.string().filter(s => s.length > 0), // Non-empty error message
+          fc.constantFrom(
+            'stale-order-check',
+            'anomaly-check',
+            'eta-recalculation',
+          ),
+          fc.string().filter((s) => s.length > 0), // Non-empty error message
           async (queueName, errorMessage) => {
             // Mock job that will fail
             const mockJob = {
@@ -508,7 +526,9 @@ describe('JobsService', () => {
 
             // Verify error was logged with the job details
             expect(loggerErrorSpy).toHaveBeenCalledWith(
-              expect.stringContaining(`Job ${mockJob.id} in queue ${queueName} failed`),
+              expect.stringContaining(
+                `Job ${mockJob.id} in queue ${queueName} failed`,
+              ),
               expect.any(Error),
             );
 
@@ -548,7 +568,10 @@ describe('JobsService', () => {
               _id: fc.string().map(() => new Types.ObjectId()),
               orderId: fc.string(),
               orderStatus: fc.constantFrom(...Object.values(OrderStatus)),
-              riderId: fc.option(fc.string().map(() => new Types.ObjectId()), { nil: undefined }),
+              riderId: fc.option(
+                fc.string().map(() => new Types.ObjectId()),
+                { nil: undefined },
+              ),
             }),
             { minLength: 0, maxLength: 20 },
           ),
@@ -560,7 +583,8 @@ describe('JobsService', () => {
             // Filter to get expected orders for ETA recalculation
             const expectedOrders = orders.filter(
               (order) =>
-                order.orderStatus === OrderStatus.OUT_FOR_DELIVERY && order.riderId,
+                order.orderStatus === OrderStatus.OUT_FOR_DELIVERY &&
+                order.riderId,
             );
 
             mockOrderModel.find.mockReturnValue({

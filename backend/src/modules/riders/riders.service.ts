@@ -1,11 +1,26 @@
-import { Injectable, BadRequestException, NotFoundException, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Rider, RiderDocument, RiderStatus, VehicleType } from './schemas/rider.schema';
+import {
+  Rider,
+  RiderDocument,
+  RiderStatus,
+  VehicleType,
+} from './schemas/rider.schema';
 import { RedisService } from '../../common/utils/redis.service';
 import { TrackingGateway } from '../../sockets/tracking.gateway';
 import { ETAService } from '../orders/eta.service';
-import { Order, OrderDocument, OrderStatus } from '../orders/schemas/order.schema';
+import {
+  Order,
+  OrderDocument,
+  OrderStatus,
+} from '../orders/schemas/order.schema';
 import { OrdersService } from '../orders/orders.service';
 import * as bcrypt from 'bcrypt';
 
@@ -27,7 +42,7 @@ export class RidersService {
     private readonly etaService: ETAService,
     @Inject(forwardRef(() => OrdersService))
     private readonly ordersService: OrdersService,
-  ) { }
+  ) {}
 
   async findAll(status?: string): Promise<Rider[]> {
     const query: Record<string, any> = {};
@@ -58,14 +73,19 @@ export class RidersService {
   }
 
   async findByPhone(phone: string): Promise<Rider | null> {
-    const normalizedPhone = phone.startsWith('+91') ? phone : `+91${phone.replace(/\s/g, '')}`;
-    return this.riderModel.findOne({
-      $or: [
-        { phone: normalizedPhone },
-        { phone: phone.replace(/\s/g, '') },
-        { phone },
-      ],
-    }).lean().exec();
+    const normalizedPhone = phone.startsWith('+91')
+      ? phone
+      : `+91${phone.replace(/\s/g, '')}`;
+    return this.riderModel
+      .findOne({
+        $or: [
+          { phone: normalizedPhone },
+          { phone: phone.replace(/\s/g, '') },
+          { phone },
+        ],
+      })
+      .lean()
+      .exec();
   }
 
   async updatePresence(
@@ -76,14 +96,19 @@ export class RidersService {
 
     if (typeof presence.isOnline === 'boolean') {
       rider.status = presence.isOnline
-        ? (presence.isAvailable ? RiderStatus.AVAILABLE : RiderStatus.BUSY)
+        ? presence.isAvailable
+          ? RiderStatus.AVAILABLE
+          : RiderStatus.BUSY
         : RiderStatus.OFFLINE;
     }
 
     if (typeof presence.isAvailable === 'boolean') {
-      rider.status = rider.status === RiderStatus.OFFLINE
-        ? RiderStatus.OFFLINE
-        : (presence.isAvailable ? RiderStatus.AVAILABLE : RiderStatus.BUSY);
+      rider.status =
+        rider.status === RiderStatus.OFFLINE
+          ? RiderStatus.OFFLINE
+          : presence.isAvailable
+            ? RiderStatus.AVAILABLE
+            : RiderStatus.BUSY;
     }
 
     await rider.save();
@@ -113,7 +138,10 @@ export class RidersService {
     };
   }
 
-  async updateAvailability(riderId: string, isAvailable: boolean): Promise<Rider> {
+  async updateAvailability(
+    riderId: string,
+    isAvailable: boolean,
+  ): Promise<Rider> {
     const rider = await this.findRiderById(riderId);
 
     rider.status = isAvailable ? RiderStatus.AVAILABLE : RiderStatus.BUSY;
@@ -163,16 +191,26 @@ export class RidersService {
   }
 
   async updateLocation(riderId: string, location: LocationDto): Promise<Rider> {
-    if (!Number.isFinite(location.latitude) || location.latitude < -90 || location.latitude > 90) {
+    if (
+      !Number.isFinite(location.latitude) ||
+      location.latitude < -90 ||
+      location.latitude > 90
+    ) {
       throw new BadRequestException('Latitude must be between -90 and 90');
     }
-    if (!Number.isFinite(location.longitude) || location.longitude < -180 || location.longitude > 180) {
+    if (
+      !Number.isFinite(location.longitude) ||
+      location.longitude < -180 ||
+      location.longitude > 180
+    ) {
       throw new BadRequestException('Longitude must be between -180 and 180');
     }
 
     const isAllowed = await this.validateLocationUpdate(riderId);
     if (!isAllowed) {
-      throw new BadRequestException('Location updates are throttled to 5 seconds minimum interval');
+      throw new BadRequestException(
+        'Location updates are throttled to 5 seconds minimum interval',
+      );
     }
 
     const rider = await this.findRiderById(riderId);
@@ -209,11 +247,16 @@ export class RidersService {
         try {
           await this.etaService.recalculateForOrder(order._id.toString());
         } catch (error) {
-          console.error(`Failed to recalculate ETA for order ${order._id}:`, error);
+          console.error(
+            `Failed to recalculate ETA for order ${order._id}:`,
+            error,
+          );
         }
       }
 
-      const trackingOrder = await this.ordersService.buildRealtimeOrderPayload(order._id.toString());
+      const trackingOrder = await this.ordersService.buildRealtimeOrderPayload(
+        order._id.toString(),
+      );
       this.trackingGateway.broadcastRiderLocationUpdate(
         order._id.toString(),
         { latitude: location.latitude, longitude: location.longitude },
@@ -250,7 +293,9 @@ export class RidersService {
   async createRider(data: any): Promise<Rider> {
     const { name, username, password, phone, vehicleType } = data;
 
-    const normalizedPhone = phone.startsWith('+91') ? phone : `+91${phone.replace(/\s/g, '')}`;
+    const normalizedPhone = phone.startsWith('+91')
+      ? phone
+      : `+91${phone.replace(/\s/g, '')}`;
 
     const existingRider = await this.riderModel.findOne({
       $or: [
@@ -261,7 +306,9 @@ export class RidersService {
     });
 
     if (existingRider) {
-      throw new BadRequestException('Username or phone number already registered');
+      throw new BadRequestException(
+        'Username or phone number already registered',
+      );
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -284,7 +331,9 @@ export class RidersService {
   }
 
   async ensureOtpRider(phone: string, name?: string): Promise<RiderDocument> {
-    const normalizedPhone = phone.startsWith('+91') ? phone : `+91${phone.replace(/\s/g, '')}`;
+    const normalizedPhone = phone.startsWith('+91')
+      ? phone
+      : `+91${phone.replace(/\s/g, '')}`;
     const existingRider = await this.riderModel.findOne({
       $or: [
         { phone: normalizedPhone },
@@ -311,7 +360,10 @@ export class RidersService {
       suffix += 1;
     }
 
-    const hashedPassword = await bcrypt.hash(`otp-${phoneDigits}-${Date.now()}`, 10);
+    const hashedPassword = await bcrypt.hash(
+      `otp-${phoneDigits}-${Date.now()}`,
+      10,
+    );
 
     const rider = new this.riderModel({
       name: name || 'Rider',

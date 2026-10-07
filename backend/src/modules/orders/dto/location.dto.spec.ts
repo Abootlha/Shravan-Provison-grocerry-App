@@ -28,8 +28,12 @@ describe('LocationDto Property Tests', () => {
               noNaN: true,
             }),
             accuracy: fc.option(
-              fc.float({ min: Math.fround(0), max: Math.fround(1000), noNaN: true }),
-              { nil: undefined }
+              fc.float({
+                min: Math.fround(0),
+                max: Math.fround(1000),
+                noNaN: true,
+              }),
+              { nil: undefined },
             ),
           }),
           async (locationData) => {
@@ -38,9 +42,9 @@ describe('LocationDto Property Tests', () => {
 
             // Valid coordinates should have no validation errors
             expect(errors).toHaveLength(0);
-          }
+          },
         ),
-        { numRuns: 100 }
+        { numRuns: 100 },
       );
     });
 
@@ -49,8 +53,16 @@ describe('LocationDto Property Tests', () => {
         fc.asyncProperty(
           fc.record({
             latitude: fc.oneof(
-              fc.float({ min: Math.fround(90.01), max: Math.fround(200), noNaN: true }), // > 90
-              fc.float({ min: Math.fround(-200), max: Math.fround(-90.01), noNaN: true }) // < -90
+              fc.float({
+                min: Math.fround(90.01),
+                max: Math.fround(200),
+                noNaN: true,
+              }), // > 90
+              fc.float({
+                min: Math.fround(-200),
+                max: Math.fround(-90.01),
+                noNaN: true,
+              }), // < -90
             ),
             longitude: fc.float({
               min: Math.fround(-180),
@@ -66,9 +78,9 @@ describe('LocationDto Property Tests', () => {
             expect(errors.length).toBeGreaterThan(0);
             const latitudeError = errors.find((e) => e.property === 'latitude');
             expect(latitudeError).toBeDefined();
-          }
+          },
         ),
-        { numRuns: 50 }
+        { numRuns: 50 },
       );
     });
 
@@ -82,8 +94,16 @@ describe('LocationDto Property Tests', () => {
               noNaN: true,
             }),
             longitude: fc.oneof(
-              fc.float({ min: Math.fround(180.01), max: Math.fround(360), noNaN: true }), // > 180
-              fc.float({ min: Math.fround(-360), max: Math.fround(-180.01), noNaN: true }) // < -180
+              fc.float({
+                min: Math.fround(180.01),
+                max: Math.fround(360),
+                noNaN: true,
+              }), // > 180
+              fc.float({
+                min: Math.fround(-360),
+                max: Math.fround(-180.01),
+                noNaN: true,
+              }), // < -180
             ),
           }),
           async (locationData) => {
@@ -92,11 +112,13 @@ describe('LocationDto Property Tests', () => {
 
             // Should have validation error for out-of-range longitude
             expect(errors.length).toBeGreaterThan(0);
-            const longitudeError = errors.find((e) => e.property === 'longitude');
+            const longitudeError = errors.find(
+              (e) => e.property === 'longitude',
+            );
             expect(longitudeError).toBeDefined();
-          }
+          },
         ),
-        { numRuns: 50 }
+        { numRuns: 50 },
       );
     });
 
@@ -144,9 +166,9 @@ describe('LocationDto Property Tests', () => {
 
             // Valid location with accuracy should have no errors
             expect(errors).toHaveLength(0);
-          }
+          },
         ),
-        { numRuns: 50 }
+        { numRuns: 50 },
       );
     });
 

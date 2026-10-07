@@ -19,6 +19,9 @@ import { TrackingModule } from '../../sockets/tracking.module';
   ],
   controllers: [RidersController],
   providers: [RidersService, RedisService],
-  exports: [RidersService, MongooseModule.forFeature([{ name: Rider.name, schema: RiderSchema }])],
+  exports: [
+    RidersService,
+    MongooseModule.forFeature([{ name: Rider.name, schema: RiderSchema }]),
+  ],
 })
 export class RidersModule {}

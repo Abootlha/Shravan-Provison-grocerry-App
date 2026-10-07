@@ -72,10 +72,10 @@ describe('TrackingGateway - Unauthorized Access Logging (Property 38)', () => {
 
   /**
    * Property 38: Unauthorized Room Access Logging
-   * 
-   * For any unauthorized room join attempt, the system must reject the request and log 
+   *
+   * For any unauthorized room join attempt, the system must reject the request and log
    * an entry containing the user ID, requested room, and timestamp.
-   * 
+   *
    * Validates: Requirements 11.6
    */
   describe('Property 38: Unauthorized Room Access Logging', () => {
@@ -122,30 +122,32 @@ describe('TrackingGateway - Unauthorized Access Logging (Property 38)', () => {
 
               // Verify logging occurred
               expect(loggerSpy).toHaveBeenCalled();
-              
+
               const logCall = loggerSpy.mock.calls[0][0];
-              
+
               // Verify log contains required fields
               expect(logCall).toHaveProperty('message');
-              expect(logCall.message).toContain('Unauthorized room access attempt');
-              
+              expect(logCall.message).toContain(
+                'Unauthorized room access attempt',
+              );
+
               expect(logCall).toHaveProperty('userId');
               expect(logCall.userId).toBe(userId);
-              
+
               expect(logCall).toHaveProperty('resource');
               expect(logCall.resource).toContain(orderId);
-              
+
               expect(logCall).toHaveProperty('timestamp');
               expect(new Date(logCall.timestamp).getTime()).toBeGreaterThan(0);
-              
+
               expect(logCall).toHaveProperty('socketId');
               expect(logCall.socketId).toBe('socket-123');
             }
 
             loggerSpy.mockClear();
-          }
+          },
         ),
-        { numRuns: 30 }
+        { numRuns: 30 },
       );
     });
 
@@ -186,16 +188,16 @@ describe('TrackingGateway - Unauthorized Access Logging (Property 38)', () => {
               // Verify logging
               expect(loggerSpy).toHaveBeenCalled();
               const logCall = loggerSpy.mock.calls[0][0];
-              
+
               expect(logCall.userId).toBe(riderId);
               expect(logCall.resource).toContain(orderId);
               expect(logCall.timestamp).toBeDefined();
             }
 
             loggerSpy.mockClear();
-          }
+          },
         ),
-        { numRuns: 20 }
+        { numRuns: 20 },
       );
     });
 
@@ -240,7 +242,7 @@ describe('TrackingGateway - Unauthorized Access Logging (Property 38)', () => {
               // Verify logging
               expect(loggerSpy).toHaveBeenCalled();
               const logCall = loggerSpy.mock.calls[0][0];
-              
+
               expect(logCall.userId).toBe(attemptingRiderId);
               expect(logCall.userRole).toBe('rider');
               expect(logCall.resource).toContain(orderId);
@@ -248,9 +250,9 @@ describe('TrackingGateway - Unauthorized Access Logging (Property 38)', () => {
             }
 
             loggerSpy.mockClear();
-          }
+          },
         ),
-        { numRuns: 20 }
+        { numRuns: 20 },
       );
     });
 
@@ -287,9 +289,9 @@ describe('TrackingGateway - Unauthorized Access Logging (Property 38)', () => {
             expect(loggerSpy).not.toHaveBeenCalled();
 
             loggerSpy.mockClear();
-          }
+          },
         ),
-        { numRuns: 20 }
+        { numRuns: 20 },
       );
     });
 
@@ -329,9 +331,9 @@ describe('TrackingGateway - Unauthorized Access Logging (Property 38)', () => {
             expect(loggerSpy).not.toHaveBeenCalled();
 
             loggerSpy.mockClear();
-          }
+          },
         ),
-        { numRuns: 20 }
+        { numRuns: 20 },
       );
     });
 
@@ -369,9 +371,9 @@ describe('TrackingGateway - Unauthorized Access Logging (Property 38)', () => {
             expect(loggerSpy).not.toHaveBeenCalled();
 
             loggerSpy.mockClear();
-          }
+          },
         ),
-        { numRuns: 20 }
+        { numRuns: 20 },
       );
     });
   });

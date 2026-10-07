@@ -1,4 +1,9 @@
-import { CanActivate, ExecutionContext, Injectable, Logger } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { WsException } from '@nestjs/websockets';
 import { Socket } from 'socket.io';
@@ -25,7 +30,7 @@ export class WsJwtGuard implements CanActivate {
       }
 
       const payload = await this.jwtService.verifyAsync(token);
-      
+
       // Attach user info to socket for later use
       client.data.user = {
         userId: payload.sub,
@@ -61,7 +66,11 @@ export class WsJwtGuard implements CanActivate {
 
     // Fallback: try to get from headers
     const authHeader = client.handshake?.headers?.authorization;
-    if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+    if (
+      authHeader &&
+      typeof authHeader === 'string' &&
+      authHeader.startsWith('Bearer ')
+    ) {
       return authHeader.substring(7);
     }
 

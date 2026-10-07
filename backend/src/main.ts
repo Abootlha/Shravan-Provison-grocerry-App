@@ -59,6 +59,8 @@ async function bootstrap() {
   // Listen on 0.0.0.0 to accept connections from all network interfaces (needed for mobile testing)
   await app.listen(port, '0.0.0.0');
 
-  console.log(`🚀 ShravanKirana Backend running on: http://0.0.0.0:${port}/api/v1`);
+  console.log(
+    `🚀 ShravanKirana Backend running on: http://0.0.0.0:${port}/api/v1`,
+  );
 }
 bootstrap();

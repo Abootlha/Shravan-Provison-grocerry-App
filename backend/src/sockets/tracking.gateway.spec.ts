@@ -85,7 +85,7 @@ describe('TrackingGateway', () => {
   describe('Property 15: Socket Authentication', () => {
     /**
      * **Validates: Requirements 5.1, 5.2, 9.6**
-     * 
+     *
      * For any socket connection attempt, the system must authenticate the JWT token
      * and reject the connection if authentication fails.
      */
@@ -133,7 +133,9 @@ describe('TrackingGateway', () => {
                 role: role,
               });
             } else {
-              mockJwtService.verifyAsync.mockRejectedValue(new Error('Invalid token'));
+              mockJwtService.verifyAsync.mockRejectedValue(
+                new Error('Invalid token'),
+              );
             }
 
             // Test authentication
@@ -175,7 +177,9 @@ describe('TrackingGateway', () => {
                 auth: tokenLocation === 'auth' ? { token } : {},
                 query: tokenLocation === 'query' ? { token } : {},
                 headers:
-                  tokenLocation === 'headers' ? { authorization: `Bearer ${token}` } : {},
+                  tokenLocation === 'headers'
+                    ? { authorization: `Bearer ${token}` }
+                    : {},
               },
               data: {},
             } as unknown as Socket;
@@ -210,7 +214,7 @@ describe('TrackingGateway', () => {
   describe('Property 16: Room Naming Convention', () => {
     /**
      * **Validates: Requirements 5.3**
-     * 
+     *
      * For any socket room created for users, riders, or orders, the room name must
      * follow the format "user_{userId}", "rider_{riderId}", or "order_{orderId}" respectively.
      */
@@ -227,9 +231,15 @@ describe('TrackingGateway', () => {
           }),
           async ({ entityType, entityId }) => {
             // Access private methods via reflection for testing
-            const getOrderRoomName = (gateway as any).getOrderRoomName.bind(gateway);
-            const getUserRoomName = (gateway as any).getUserRoomName.bind(gateway);
-            const getRiderRoomName = (gateway as any).getRiderRoomName.bind(gateway);
+            const getOrderRoomName = (gateway as any).getOrderRoomName.bind(
+              gateway,
+            );
+            const getUserRoomName = (gateway as any).getUserRoomName.bind(
+              gateway,
+            );
+            const getRiderRoomName = (gateway as any).getRiderRoomName.bind(
+              gateway,
+            );
 
             let roomName: string;
             let expectedPrefix: string;
@@ -263,7 +273,7 @@ describe('TrackingGateway', () => {
   describe('Property 17: Order Room Authorization', () => {
     /**
      * **Validates: Requirements 5.4, 9.7**
-     * 
+     *
      * For any user attempting to join an order room, the system must allow access
      * if and only if the user's ID matches the order's userId or the user has admin role.
      */
@@ -312,7 +322,8 @@ describe('TrackingGateway', () => {
             // Determine if access should be granted
             const isOwner = requestingUserId === orderUserId;
             const isAdmin = requestingUserRole === 'admin';
-            const isAssignedRider = orderHasRider && requestingUserId === orderRiderId;
+            const isAssignedRider =
+              orderHasRider && requestingUserId === orderRiderId;
             const shouldBeAuthorized = isOwner || isAdmin || isAssignedRider;
 
             try {
@@ -340,7 +351,7 @@ describe('TrackingGateway', () => {
   describe('Property 18: Rider Room Authorization', () => {
     /**
      * **Validates: Requirements 5.5, 9.7**
-     * 
+     *
      * For any rider attempting to join an order room, the system must allow access
      * if and only if the rider's ID matches the order's riderId.
      */
@@ -354,7 +365,13 @@ describe('TrackingGateway', () => {
             requestingRiderId: fc.string({ minLength: 24, maxLength: 24 }),
             orderHasRider: fc.boolean(),
           }),
-          async ({ orderId, orderUserId, orderRiderId, requestingRiderId, orderHasRider }) => {
+          async ({
+            orderId,
+            orderUserId,
+            orderRiderId,
+            requestingRiderId,
+            orderHasRider,
+          }) => {
             // Create mock order
             const mockOrder = {
               _id: orderId,
@@ -379,7 +396,8 @@ describe('TrackingGateway', () => {
             } as unknown as Socket;
 
             // Determine if access should be granted
-            const isAssignedRider = orderHasRider && requestingRiderId === orderRiderId;
+            const isAssignedRider =
+              orderHasRider && requestingRiderId === orderRiderId;
             const shouldBeAuthorized = isAssignedRider;
 
             try {

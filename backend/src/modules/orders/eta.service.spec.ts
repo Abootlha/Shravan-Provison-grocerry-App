@@ -82,9 +82,9 @@ describe('ETAService', () => {
   describe('Property 24: ETA Calculation Inputs', () => {
     /**
      * **Validates: Requirements 6.3**
-     * 
-     * For any ETA calculation, the system must use the rider's currentLocation 
-     * coordinates as origin and the order's deliveryAddress coordinates as 
+     *
+     * For any ETA calculation, the system must use the rider's currentLocation
+     * coordinates as origin and the order's deliveryAddress coordinates as
      * destination in the Distance Matrix API request.
      */
     it('should use rider location as origin and delivery address as destination', async () => {
@@ -133,7 +133,10 @@ describe('ETAService', () => {
     });
 
     it('should pass driving mode to Distance Matrix API', async () => {
-      const riderLocation: LocationDto = { latitude: 40.7128, longitude: -74.006 };
+      const riderLocation: LocationDto = {
+        latitude: 40.7128,
+        longitude: -74.006,
+      };
       const deliveryAddress: AddressDto = {
         street: '123 Main St',
         city: 'New York',
@@ -165,14 +168,16 @@ describe('ETAService', () => {
   describe('Property 25: ETA Persistence', () => {
     /**
      * **Validates: Requirements 6.4**
-     * 
-     * For any successful ETA calculation, the order's estimatedDeliveryTime 
+     *
+     * For any successful ETA calculation, the order's estimatedDeliveryTime
      * field must be updated with the calculated delivery time.
      */
     it('should update order estimatedDeliveryTime after successful recalculation', async () => {
       // Generate valid MongoDB ObjectId (24 hex characters)
       const hexChars = '0123456789abcdef'.split('');
-      const orderIdArb = fc.array(fc.constantFrom(...hexChars), { minLength: 24, maxLength: 24 }).map(arr => arr.join(''));
+      const orderIdArb = fc
+        .array(fc.constantFrom(...hexChars), { minLength: 24, maxLength: 24 })
+        .map((arr) => arr.join(''));
       const latitudeArb = fc.double({ min: -90, max: 90, noNaN: true });
       const longitudeArb = fc.double({ min: -180, max: 180, noNaN: true });
 
@@ -222,7 +227,9 @@ describe('ETAService', () => {
               populate: jest.fn().mockResolvedValue(mockOrder),
             } as any);
 
-            jest.spyOn(userModel, 'findOne').mockResolvedValue(mockRider as any);
+            jest
+              .spyOn(userModel, 'findOne')
+              .mockResolvedValue(mockRider as any);
 
             // Mock the Distance Matrix API call
             jest
@@ -243,7 +250,10 @@ describe('ETAService', () => {
     });
 
     it('should calculate future delivery time based on duration', async () => {
-      const riderLocation: LocationDto = { latitude: 40.7128, longitude: -74.006 };
+      const riderLocation: LocationDto = {
+        latitude: 40.7128,
+        longitude: -74.006,
+      };
       const deliveryAddress: AddressDto = {
         street: '123 Main St',
         city: 'New York',
@@ -262,27 +272,35 @@ describe('ETAService', () => {
       const afterTime = Date.now();
 
       // The estimated delivery time should be in the future
-      expect(result.estimatedDeliveryTime.getTime()).toBeGreaterThan(beforeTime);
-      
+      expect(result.estimatedDeliveryTime.getTime()).toBeGreaterThan(
+        beforeTime,
+      );
+
       // It should be approximately 20 minutes (1200 seconds) from now
       const expectedTime = beforeTime + 1200 * 1000;
       const tolerance = 5000; // 5 seconds tolerance
-      expect(result.estimatedDeliveryTime.getTime()).toBeGreaterThanOrEqual(expectedTime - tolerance);
-      expect(result.estimatedDeliveryTime.getTime()).toBeLessThanOrEqual(afterTime + 1200 * 1000 + tolerance);
+      expect(result.estimatedDeliveryTime.getTime()).toBeGreaterThanOrEqual(
+        expectedTime - tolerance,
+      );
+      expect(result.estimatedDeliveryTime.getTime()).toBeLessThanOrEqual(
+        afterTime + 1200 * 1000 + tolerance,
+      );
     });
   });
 
   describe('Property 26: ETA Calculation Error Handling', () => {
     /**
      * **Validates: Requirements 6.5, 11.4**
-     * 
-     * For any ETA calculation that fails due to API error, the system must 
-     * log the error and retain the order's previous estimatedDeliveryTime 
+     *
+     * For any ETA calculation that fails due to API error, the system must
+     * log the error and retain the order's previous estimatedDeliveryTime
      * value without modification.
      */
     it('should retain previous ETA when API call fails', async () => {
       const hexChars = '0123456789abcdef'.split('');
-      const orderIdArb = fc.array(fc.constantFrom(...hexChars), { minLength: 24, maxLength: 24 }).map(arr => arr.join(''));
+      const orderIdArb = fc
+        .array(fc.constantFrom(...hexChars), { minLength: 24, maxLength: 24 })
+        .map((arr) => arr.join(''));
       const latitudeArb = fc.double({ min: -90, max: 90, noNaN: true });
       const longitudeArb = fc.double({ min: -180, max: 180, noNaN: true });
 
@@ -334,7 +352,9 @@ describe('ETAService', () => {
               populate: jest.fn().mockResolvedValue(mockOrder),
             } as any);
 
-            jest.spyOn(userModel, 'findOne').mockResolvedValue(mockRider as any);
+            jest
+              .spyOn(userModel, 'findOne')
+              .mockResolvedValue(mockRider as any);
 
             // Mock the Distance Matrix API call to fail
             jest
@@ -354,7 +374,10 @@ describe('ETAService', () => {
     });
 
     it('should log error when Distance Matrix API fails', async () => {
-      const riderLocation: LocationDto = { latitude: 40.7128, longitude: -74.006 };
+      const riderLocation: LocationDto = {
+        latitude: 40.7128,
+        longitude: -74.006,
+      };
       const deliveryAddress: AddressDto = {
         street: '123 Main St',
         city: 'New York',
@@ -370,7 +393,9 @@ describe('ETAService', () => {
 
       const loggerSpy = jest.spyOn((service as any).logger, 'error');
 
-      await expect(service.calculateETA(riderLocation, deliveryAddress)).rejects.toThrow();
+      await expect(
+        service.calculateETA(riderLocation, deliveryAddress),
+      ).rejects.toThrow();
 
       // Verify error was logged
       expect(loggerSpy).toHaveBeenCalledWith(
@@ -379,7 +404,10 @@ describe('ETAService', () => {
     });
 
     it('should handle missing API key gracefully', async () => {
-      const riderLocation: LocationDto = { latitude: 40.7128, longitude: -74.006 };
+      const riderLocation: LocationDto = {
+        latitude: 40.7128,
+        longitude: -74.006,
+      };
       const deliveryAddress: AddressDto = {
         street: '123 Main St',
         city: 'New York',
@@ -391,18 +419,18 @@ describe('ETAService', () => {
       // Mock config service to return null for API key
       jest.spyOn(configService, 'get').mockReturnValue(null);
 
-      await expect(service.calculateETA(riderLocation, deliveryAddress)).rejects.toThrow(
-        'GOOGLE_MAPS_API_KEY is not configured',
-      );
+      await expect(
+        service.calculateETA(riderLocation, deliveryAddress),
+      ).rejects.toThrow('GOOGLE_MAPS_API_KEY is not configured');
     });
   });
 
   describe('Property 34: ETA Response Caching', () => {
     /**
      * **Validates: Requirements 10.8**
-     * 
-     * For any Distance Matrix API request, if a cached response exists for 
-     * the same origin-destination pair and is less than 2 minutes old, the 
+     *
+     * For any Distance Matrix API request, if a cached response exists for
+     * the same origin-destination pair and is less than 2 minutes old, the
      * system must use the cached duration value instead of making a new API call.
      */
     it('should use cached ETA when available and not expired', async () => {
@@ -435,12 +463,17 @@ describe('ETAService', () => {
 
             // Mock Redis to return cached duration (1800 seconds = 30 minutes)
             const cachedDuration = 1800;
-            jest.spyOn(redisService, 'get').mockResolvedValue(cachedDuration.toString());
+            jest
+              .spyOn(redisService, 'get')
+              .mockResolvedValue(cachedDuration.toString());
 
             // Spy on the Distance Matrix API call
             const apiSpy = jest.spyOn(service as any, 'callDistanceMatrixAPI');
 
-            const result = await service.calculateETA(riderLocation, deliveryAddress);
+            const result = await service.calculateETA(
+              riderLocation,
+              deliveryAddress,
+            );
 
             // Verify the API was NOT called (cache was used)
             expect(apiSpy).not.toHaveBeenCalled();
@@ -455,7 +488,10 @@ describe('ETAService', () => {
     });
 
     it('should call API and cache result when cache miss', async () => {
-      const riderLocation: LocationDto = { latitude: 40.7128, longitude: -74.006 };
+      const riderLocation: LocationDto = {
+        latitude: 40.7128,
+        longitude: -74.006,
+      };
       const deliveryAddress: AddressDto = {
         street: '123 Main St',
         city: 'New York',
@@ -484,7 +520,10 @@ describe('ETAService', () => {
     });
 
     it('should generate consistent cache keys for same coordinates', async () => {
-      const riderLocation: LocationDto = { latitude: 40.7128, longitude: -74.006 };
+      const riderLocation: LocationDto = {
+        latitude: 40.7128,
+        longitude: -74.006,
+      };
       const deliveryAddress: AddressDto = {
         street: '123 Main St',
         city: 'New York',
@@ -522,8 +561,14 @@ describe('ETAService', () => {
 
     it('should round coordinates in cache key for better cache hits', async () => {
       // Coordinates that are very close (within 11 meters)
-      const riderLocation1: LocationDto = { latitude: 40.71280001, longitude: -74.00600001 };
-      const riderLocation2: LocationDto = { latitude: 40.71280002, longitude: -74.00600002 };
+      const riderLocation1: LocationDto = {
+        latitude: 40.71280001,
+        longitude: -74.00600001,
+      };
+      const riderLocation2: LocationDto = {
+        latitude: 40.71280002,
+        longitude: -74.00600002,
+      };
       const deliveryAddress: AddressDto = {
         street: '123 Main St',
         city: 'New York',
