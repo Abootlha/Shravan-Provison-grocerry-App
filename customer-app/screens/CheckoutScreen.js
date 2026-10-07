@@ -319,7 +319,7 @@ const CheckoutScreen = ({ navigation }) => {
                             <html>
                             <head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Processing Payment</title></head>
                             <body onload="document.forms['payuForm'].submit()">
-                                <form action="https://test.payu.in/_payment" method="post" name="payuForm">
+                                <form action="https://secure.payu.in/_payment" method="post" name="payuForm">
                                     <input type="hidden" name="key" value="${hashData.key}" />
                                     <input type="hidden" name="txnid" value="${hashData.txnid}" />
                                     <input type="hidden" name="amount" value="${hashData.amount}" />
@@ -1240,7 +1240,7 @@ const CheckoutScreen = ({ navigation }) => {
                                 onPress={() => {
                                     const form = document.createElement('form');
                                     form.method = 'POST';
-                                    form.action = 'https://test.payu.in/_payment';
+                                    form.action = 'https://secure.payu.in/_payment';
                                     form.style.display = 'none';
                                     
                                     const fields = ['key', 'txnid', 'amount', 'productinfo', 'firstname', 'email', 'phone', 'surl', 'furl', 'hash', 'pg', 'bankcode'];
