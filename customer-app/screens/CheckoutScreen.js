@@ -69,7 +69,7 @@ const CheckoutScreen = ({ navigation }) => {
     const [isFetchingAddresses, setIsFetchingAddresses] = useState(false);
     const [isPlacing, setIsPlacing] = useState(false);
     const [payuHtml, setPayuHtml] = useState(null);
-    const [payuWebForm, setPayuWebForm] = useState(null);
+
 
     // Payment Gateway Processing State
     const [isProcessingPayment, setIsProcessingPayment] = useState(false);
@@ -313,7 +313,24 @@ const CheckoutScreen = ({ navigation }) => {
                     setIsProcessingPayment(false);
                     
                     if (Platform.OS === 'web') {
-                        setPayuWebForm(hashData);
+                        const form = document.createElement('form');
+                        form.method = 'POST';
+                        form.action = 'https://secure.payu.in/_payment';
+                        form.style.display = 'none';
+                        
+                        const fields = ['key', 'txnid', 'amount', 'productinfo', 'firstname', 'email', 'phone', 'surl', 'furl', 'hash', 'pg', 'bankcode'];
+                        fields.forEach(fieldName => {
+                            if (hashData[fieldName] !== undefined && hashData[fieldName] !== null) {
+                                const input = document.createElement('input');
+                                input.type = 'hidden';
+                                input.name = fieldName;
+                                input.value = hashData[fieldName];
+                                form.appendChild(input);
+                            }
+                        });
+                        
+                        document.body.appendChild(form);
+                        form.submit();
                     } else {
                         const htmlContent = `
                             <html>
@@ -1216,67 +1233,7 @@ const CheckoutScreen = ({ navigation }) => {
                 </SafeAreaView>
             </Modal>
 
-            {/* PayU Web Form Modal (Web) */}
-            {Platform.OS === 'web' && !!payuWebForm && (
-                <Modal visible={true} transparent={true} animationType="fade">
-                    <View style={styles.modalOverlay}>
-                        <View style={[styles.modalContent, { alignItems: 'center', padding: 30 }]}>
-                            <Text style={{ fontSize: 20, fontFamily: 'Outfit-Bold', color: COLORS.text, marginBottom: 15, textAlign: 'center' }}>
-                                {isHi ? 'भुगतान के लिए तैयार' : 'Ready for Payment'}
-                            </Text>
-                            <Text style={{ fontSize: 16, fontFamily: 'Outfit-Regular', color: COLORS.textLight, marginBottom: 30, textAlign: 'center' }}>
-                                {isHi ? 'अपने बैंक पेज पर जाने के लिए नीचे क्लिक करें' : 'Click below to securely proceed to your bank page.'}
-                            </Text>
-                            <TouchableOpacity 
-                                style={{
-                                    backgroundColor: COLORS.primary,
-                                    paddingVertical: 16,
-                                    paddingHorizontal: 32,
-                                    borderRadius: 12,
-                                    width: '100%',
-                                    maxWidth: 300,
-                                    alignItems: 'center'
-                                }}
-                                onPress={() => {
-                                    const form = document.createElement('form');
-                                    form.method = 'POST';
-                                    form.action = 'https://secure.payu.in/_payment';
-                                    form.style.display = 'none';
-                                    
-                                    const fields = ['key', 'txnid', 'amount', 'productinfo', 'firstname', 'email', 'phone', 'surl', 'furl', 'hash', 'pg', 'bankcode'];
-                                    fields.forEach(fieldName => {
-                                        if (payuWebForm[fieldName] !== undefined && payuWebForm[fieldName] !== null) {
-                                            const input = document.createElement('input');
-                                            input.type = 'hidden';
-                                            input.name = fieldName;
-                                            input.value = payuWebForm[fieldName];
-                                            form.appendChild(input);
-                                        }
-                                    });
-                                    
-                                    document.body.appendChild(form);
-                                    form.submit();
-                                }}
-                            >
-                                <Text style={{ color: '#fff', fontSize: 16, fontFamily: 'Outfit-Bold' }}>
-                                    {isHi ? 'भुगतान करने जाएं' : 'Proceed to Pay'}
-                                </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity 
-                                onPress={() => {
-                                    setPayuWebForm(null);
-                                    cancelPaymentProcess();
-                                }} 
-                                style={{ marginTop: 20 }}
-                            >
-                                <Text style={{ color: COLORS.error, fontSize: 16, fontFamily: 'Outfit-Medium' }}>
-                                    {isHi ? 'रद्द करें' : 'Cancel'}
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </Modal>
-            )}
+
         </SafeAreaView>
     );
 };
