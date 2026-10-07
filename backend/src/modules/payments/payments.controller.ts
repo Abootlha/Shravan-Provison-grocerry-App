@@ -21,4 +21,11 @@ export class PaymentsController {
     const link = await this.paymentsService.createPaymentLink(paymentDetails);
     return { success: true, data: link };
   }
+
+  @Post('seamless-hash')
+  @UseGuards(JwtAuthGuard)
+  generateSeamlessHash(@Body() paymentDetails: any) {
+    const payload = this.paymentsService.generateSeamlessPayload(paymentDetails);
+    return { success: true, data: payload };
+  }
 }

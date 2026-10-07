@@ -48,5 +48,7 @@ export default () => ({
     clientSecret:
       process.env.PAYU_CLIENT_SECRET ||
       'bc4ef4e4a5bb72c75bb6a1c61fc7cf5cd1039a79e521bd0d77d3fd0e2516dbc2',
+    key: process.env.PAYU_KEY || 'mt6Mcu',
+    salt: process.env.PAYU_SALT || '0tXhVBGALxkGeh6Pu6eZ5zU0jMAiAQ7J',
   },
 });
