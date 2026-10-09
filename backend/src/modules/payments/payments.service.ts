@@ -1,165 +1,309 @@
-import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import axios from 'axios';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
 import * as crypto from 'crypto';
+import {
+  Order,
+  OrderDocument,
+  OrderStatus,
+  PaymentMethod,
+  PaymentStatus,
+} from '../orders/schemas/order.schema';
+import { User, UserDocument } from '../users/schemas/user.schema';
+import { OrdersService } from '../orders/orders.service';
+import { SeamlessHashDto } from './dto/seamless-hash.dto';
+
+// PayU limits txnid to 25 characters.
+const PAYU_TXNID_MAX_LENGTH = 25;
+const DEFAULT_FALLBACK_EMAIL_DOMAIN = 'customers.shravankirana.in';
+
+export type PayuCallbackResult =
+  | { status: 'success'; orderId: string; changed: boolean }
+  | { status: 'failed'; orderId: string; changed: boolean }
+  | { status: 'pending'; orderId: string }
+  | { status: 'invalid'; reason: string; orderId?: string };
 
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
-  private readonly clientId: string;
-  private readonly clientSecret: string;
-  private readonly key: string;
-  private readonly salt: string;
 
-  private cachedToken: string | null = null;
-  private tokenExpiry: number = 0;
-
-  // Queue state for rate limiting (max 20 requests per minute)
-  private requestQueue: (() => Promise<void>)[] = [];
-  private isProcessingQueue = false;
-  private requestsThisMinute = 0;
-  private minuteStartTime = Date.now();
-
-  constructor(private readonly configService: ConfigService) {
-    this.clientId = this.configService.get<string>('payu.clientId') || '';
-    this.clientSecret =
-      this.configService.get<string>('payu.clientSecret') || '';
-    this.key = this.configService.get<string>('payu.key') || '';
-    this.salt = this.configService.get<string>('payu.salt') || '';
-  }
-
-  /**
-   * Generates a PayU OAuth access token using Client Credentials
-   * Useful for PayU Payment Links APIs and related integrations.
-   * Caches the token to avoid hitting rate limits (valid for ~8 hours).
-   */
-  async getAccessToken(): Promise<string> {
-    if (this.cachedToken && Date.now() < this.tokenExpiry) {
-      return this.cachedToken;
-    }
-
-    try {
-      if (!this.clientId || !this.clientSecret || this.clientId.includes('test')) {
-        this.logger.warn('PayU credentials missing or appear to be test credentials. Please verify your account status is active/live.');
-      }
-
-      const params = new URLSearchParams();
-      params.append('grant_type', 'client_credentials');
-      params.append('client_id', this.clientId);
-      params.append('client_secret', this.clientSecret);
-      // 'scope' might be needed depending on the specific PayU API
-      // params.append('scope', 'payment_links');
-
-      const response = await axios.post(
-        'https://accounts.payu.in/oauth/token',
-        params,
-        {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        },
-      );
-
-      this.cachedToken = response.data.access_token;
-      const expiresIn = response.data.expires_in || 28800;
-      this.tokenExpiry = Date.now() + (expiresIn - 300) * 1000; // cache until 5 mins before expiry
-
-      return this.cachedToken!;
-    } catch (error: any) {
+  constructor(
+    private readonly configService: ConfigService,
+    @InjectModel(Order.name) private readonly orderModel: Model<OrderDocument>,
+    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    private readonly ordersService: OrdersService,
+  ) {
+    if (this.isProduction() && !this.configService.get('PAYMENT_RETURN_URL')) {
       this.logger.error(
-        'Failed to get PayU access token',
-        error.response?.data || error.message,
-      );
-      throw new HttpException(
-        'Payment Gateway Configuration Error',
-        HttpStatus.INTERNAL_SERVER_ERROR,
+        'PAYMENT_RETURN_URL is not set; PayU success/failure redirects will fail in production',
       );
     }
   }
 
-  /**
-   * Internal queue processor to enforce rate limit (max 20 requests/min).
-   */
-  private async processQueue() {
-    if (this.isProcessingQueue) return;
-    this.isProcessingQueue = true;
+  private isProduction(): boolean {
+    return this.configService.get<string>('NODE_ENV') === 'production';
+  }
 
-    while (this.requestQueue.length > 0) {
-      const now = Date.now();
-      if (now - this.minuteStartTime > 60000) {
-        this.minuteStartTime = now;
-        this.requestsThisMinute = 0;
-      }
+  private get key(): string {
+    return this.configService.get<string>('payu.key') || '';
+  }
 
-      if (this.requestsThisMinute >= 20) {
-        const timeToWait = 60000 - (now - this.minuteStartTime);
-        this.logger.warn(`Rate limit approached. Delaying PayU requests for ${timeToWait}ms`);
-        await new Promise((resolve) => setTimeout(resolve, timeToWait));
-        this.minuteStartTime = Date.now();
-        this.requestsThisMinute = 0;
-      }
+  private get salt(): string {
+    return this.configService.get<string>('payu.salt') || '';
+  }
 
-      const request = this.requestQueue.shift();
-      if (request) {
-        this.requestsThisMinute++;
-        await request();
-      }
+  private requireCredentials(): { key: string; salt: string } {
+    const key = this.key;
+    const salt = this.salt;
+    if (!key || !salt) {
+      throw new ServiceUnavailableException(
+        'Payment gateway is not configured',
+      );
     }
-    this.isProcessingQueue = false;
+    return { key, salt };
+  }
+
+  /** '0' = PayU production, '1' = PayU test. */
+  getPayuEnvironment(): '0' | '1' {
+    const raw = (this.configService.get<string>('PAYU_ENV') || '')
+      .toString()
+      .trim()
+      .toLowerCase();
+    if (!raw) {
+      return this.isProduction() ? '0' : '1';
+    }
+    return ['0', 'prod', 'production', 'live'].includes(raw) ? '0' : '1';
+  }
+
+  private getPublicApiUrl(): string {
+    const url = this.configService.get<string>('PUBLIC_API_URL');
+    if (url) return url.replace(/\/+$/, '');
+    if (this.isProduction()) {
+      throw new ServiceUnavailableException('PUBLIC_API_URL is not configured');
+    }
+    const port = this.configService.get<number>('port') || 3000;
+    return `http://localhost:${port}`;
+  }
+
+  getPaymentReturnUrl(): string {
+    const url = this.configService.get<string>('PAYMENT_RETURN_URL');
+    if (url) return url;
+    if (this.isProduction()) {
+      throw new ServiceUnavailableException(
+        'PAYMENT_RETURN_URL is not configured',
+      );
+    }
+    return 'http://localhost:8081/Checkout';
+  }
+
+  buildReturnRedirect(payment: 'success' | 'failed', orderId?: string): string {
+    const base = this.getPaymentReturnUrl();
+    const separator = base.includes('?') ? '&' : '?';
+    const params = new URLSearchParams({ payment });
+    if (orderId) params.set('orderId', orderId);
+    return `${base}${separator}${params.toString()}`;
+  }
+
+  /** PayU fields are pipe-delimited in the hash; strip anything that could break it. */
+  private sanitize(value: string, maxLength = 100): string {
+    return String(value ?? '')
+      .replace(/[|\r\n]/g, ' ')
+      .trim()
+      .slice(0, maxLength);
+  }
+
+  sha512(input: string): string {
+    return crypto.createHash('sha512').update(input).digest('hex');
   }
 
   /**
-   * Example method to create a payment link using the token
-   * Executes via queue to ensure rate limit compliance.
+   * Request hash: sha512(key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5||||||salt)
    */
-  async createPaymentLink(paymentDetails: any): Promise<any> {
-    return new Promise((resolve, reject) => {
-      this.requestQueue.push(async () => {
-        try {
-          const token = await this.getAccessToken();
-          const response = await axios.post(
-            'https://api.payu.in/payment_links',
-            paymentDetails,
-            {
-              headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'application/json',
-              },
-            },
-          );
-          resolve(response.data);
-        } catch (error: any) {
-          this.logger.error(
-            'Failed to create payment link',
-            error.response?.data || error.message,
-          );
-          reject(
-            new HttpException(
-              'Payment Link Generation Failed',
-              HttpStatus.BAD_REQUEST,
-            )
-          );
-        }
-      });
-      this.processQueue();
+  computeRequestHash(params: {
+    key: string;
+    txnid: string;
+    amount: string;
+    productinfo: string;
+    firstname: string;
+    email: string;
+    salt: string;
+  }): string {
+    const { key, txnid, amount, productinfo, firstname, email, salt } = params;
+    return this.sha512(
+      `${key}|${txnid}|${amount}|${productinfo}|${firstname}|${email}|||||||||||${salt}`,
+    );
+  }
+
+  /**
+   * Reverse (response) hash:
+   * [additionalCharges|]salt|status||||||udf5|udf4|udf3|udf2|udf1|email|firstname|productinfo|amount|txnid|key
+   */
+  computeResponseHash(
+    payload: Record<string, any>,
+    key: string,
+    salt: string,
+  ): string {
+    const f = (name: string) =>
+      payload[name] === undefined || payload[name] === null
+        ? ''
+        : String(payload[name]);
+    const sequence = [
+      salt,
+      f('status'),
+      '',
+      '',
+      '',
+      '',
+      '',
+      f('udf5'),
+      f('udf4'),
+      f('udf3'),
+      f('udf2'),
+      f('udf1'),
+      f('email'),
+      f('firstname'),
+      f('productinfo'),
+      f('amount'),
+      f('txnid'),
+      key,
+    ].join('|');
+    const additionalCharges = f('additionalCharges');
+    return this.sha512(
+      additionalCharges ? `${additionalCharges}|${sequence}` : sequence,
+    );
+  }
+
+  verifyResponseHash(payload: Record<string, any>): boolean {
+    const key = this.key;
+    const salt = this.salt;
+    if (!key || !salt || !payload || typeof payload.hash !== 'string') {
+      return false;
+    }
+    if (payload.key !== undefined && String(payload.key) !== key) {
+      return false;
+    }
+
+    const expected = Buffer.from(
+      this.computeResponseHash(payload, key, salt),
+      'utf8',
+    );
+    const received = Buffer.from(payload.hash.trim().toLowerCase(), 'utf8');
+    if (expected.length !== received.length) {
+      return false;
+    }
+    return crypto.timingSafeEqual(expected, received);
+  }
+
+  private async findOrderForUser(
+    orderRef: string,
+  ): Promise<OrderDocument | null> {
+    if (Types.ObjectId.isValid(orderRef) && /^[a-f0-9]{24}$/i.test(orderRef)) {
+      const byId = await this.orderModel.findById(orderRef).exec();
+      if (byId) return byId;
+    }
+    return this.orderModel.findOne({ orderId: orderRef }).exec();
+  }
+
+  private async resolveTxnId(order: OrderDocument): Promise<string> {
+    if (order.payuTxnId) return order.payuTxnId;
+    if (order.orderId.length <= PAYU_TXNID_MAX_LENGTH) return order.orderId;
+
+    const txnid = `T${crypto.randomBytes(12).toString('hex')}`.slice(
+      0,
+      PAYU_TXNID_MAX_LENGTH,
+    );
+    const updated = await this.orderModel
+      .findOneAndUpdate(
+        { _id: order._id, payuTxnId: { $exists: false } },
+        { $set: { payuTxnId: txnid } },
+        { new: true },
+      )
+      .exec();
+    if (updated?.payuTxnId) return updated.payuTxnId;
+
+    // Another request set it first.
+    const current = await this.orderModel
+      .findById(order._id)
+      .select('payuTxnId')
+      .lean()
+      .exec();
+    return current?.payuTxnId || txnid;
+  }
+
+  /**
+   * Builds the PayU seamless payload entirely from server-side data. The
+   * client only says which order it wants to pay for.
+   */
+  async generateSeamlessPayload(userId: string, dto: SeamlessHashDto) {
+    const { key, salt } = this.requireCredentials();
+
+    const order = await this.findOrderForUser(dto.orderId);
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+    if (order.userId?.toString() !== userId) {
+      throw new ForbiddenException('You can only pay for your own orders');
+    }
+    if (order.paymentMethod === PaymentMethod.COD) {
+      throw new BadRequestException(
+        'Cash on delivery orders are not paid online',
+      );
+    }
+    if (order.orderStatus === OrderStatus.CANCELLED) {
+      throw new BadRequestException('Order has been cancelled');
+    }
+    if (order.paymentStatus !== PaymentStatus.PENDING) {
+      throw new BadRequestException(
+        `Payment for this order is already ${order.paymentStatus}`,
+      );
+    }
+
+    const user = await this.userModel
+      .findById(userId)
+      .select('name email phone')
+      .lean()
+      .exec();
+
+    const phoneDigits = String(user?.phone || '')
+      .replace(/\D/g, '')
+      .slice(-10);
+    const fallbackDomain =
+      this.configService.get<string>('PAYU_FALLBACK_EMAIL_DOMAIN') ||
+      DEFAULT_FALLBACK_EMAIL_DOMAIN;
+
+    const txnid = await this.resolveTxnId(order);
+    const amount = Number(order.totalAmount).toFixed(2);
+    const productinfo = this.sanitize(`Order ${order.orderId}`);
+    const firstname = this.sanitize(user?.name || '') || 'Customer';
+    const email =
+      this.sanitize(user?.email || '') ||
+      `${phoneDigits || 'customer'}@${fallbackDomain}`;
+    const phone = phoneDigits;
+
+    const apiUrl = this.getPublicApiUrl();
+    const surl = `${apiUrl}/api/v1/payments/success`;
+    const furl = `${apiUrl}/api/v1/payments/failure`;
+
+    const hash = this.computeRequestHash({
+      key,
+      txnid,
+      amount,
+      productinfo,
+      firstname,
+      email,
+      salt,
     });
-  }
-
-  /**
-   * Generates Payload and Hash for Seamless Web Integration
-   * (Direct to PhonePe, Paytm, Card, etc.)
-   */
-  generateSeamlessPayload(paymentDetails: any) {
-    const { txnid, amount, productinfo, firstname, email, phone, surl, furl, pg, bankcode } = paymentDetails;
-    
-    // Hash sequence: key|txnid|amount|productinfo|firstname|email|||||||||||salt
-    const hashString = `${this.key}|${txnid}|${amount}|${productinfo}|${firstname}|${email}|||||||||||${this.salt}`;
-    
-    // Create SHA-512 hash
-    const hash = crypto.createHash('sha512').update(hashString).digest('hex');
 
     return {
-      key: this.key,
+      key,
       txnid,
       amount,
       productinfo,
@@ -169,19 +313,95 @@ export class PaymentsService {
       surl,
       furl,
       hash,
-      pg,
-      bankcode
+      pg: dto.pg,
+      bankcode: dto.bankcode,
+      environment: this.getPayuEnvironment(),
     };
   }
 
   /**
-   * Handles incoming webhooks / IPN from PayU
+   * Handles a PayU callback (browser form post to surl/furl, or server-to-
+   * server webhook). Only acts on payloads with a valid reverse hash and a
+   * matching amount; all state changes are idempotent.
    */
-  async processWebhook(payload: any) {
-    this.logger.log('Received PayU webhook IPN', payload);
-    // Here you would typically verify the hash sent by PayU
-    // and then update the order status in the database accordingly.
-    // Example: verify reverse hash, update database.
-    return { status: 'success' };
+  async handlePayuCallback(
+    payload: Record<string, any>,
+    source: 'success' | 'failure' | 'webhook',
+  ): Promise<PayuCallbackResult> {
+    const txnid = typeof payload?.txnid === 'string' ? payload.txnid : '';
+
+    if (!this.verifyResponseHash(payload || {})) {
+      this.logger.warn(
+        `Rejected PayU ${source} callback with invalid hash (txnid=${txnid || 'n/a'})`,
+      );
+      return { status: 'invalid', reason: 'INVALID_HASH' };
+    }
+
+    const order = txnid
+      ? await this.orderModel
+          .findOne({ $or: [{ payuTxnId: txnid }, { orderId: txnid }] })
+          .exec()
+      : null;
+
+    if (!order) {
+      this.logger.warn(`PayU ${source} callback for unknown txnid ${txnid}`);
+      return { status: 'invalid', reason: 'ORDER_NOT_FOUND' };
+    }
+
+    const paidAmount = Number(payload.amount);
+    if (
+      !Number.isFinite(paidAmount) ||
+      paidAmount.toFixed(2) !== Number(order.totalAmount).toFixed(2)
+    ) {
+      this.logger.error(
+        `PayU ${source} amount mismatch for ${order.orderId}: got ${payload.amount}, expected ${Number(order.totalAmount).toFixed(2)}`,
+      );
+      return {
+        status: 'invalid',
+        reason: 'AMOUNT_MISMATCH',
+        orderId: order.orderId,
+      };
+    }
+
+    const status = String(payload.status || '').toLowerCase();
+    const mihpayid =
+      payload.mihpayid !== undefined ? String(payload.mihpayid) : undefined;
+
+    if (status === 'success') {
+      const result = await this.ordersService.markPaymentCompleted(
+        order._id.toString(),
+        mihpayid,
+      );
+      this.logger.log(
+        `PayU ${source}: payment success for ${order.orderId} (changed=${result.changed})`,
+      );
+      if (result.requiresRefund) {
+        // Order was already cancelled; it is flagged for a refund.
+        return { status: 'failed', orderId: order.orderId, changed: false };
+      }
+      return {
+        status: 'success',
+        orderId: order.orderId,
+        changed: result.changed,
+      };
+    }
+
+    if (status === 'pending') {
+      return { status: 'pending', orderId: order.orderId };
+    }
+
+    const result = await this.ordersService.markPaymentFailed(
+      order._id.toString(),
+      'PAYMENT_FAILED',
+      mihpayid,
+    );
+    this.logger.log(
+      `PayU ${source}: payment ${status || 'failure'} for ${order.orderId} (changed=${result.changed})`,
+    );
+    return {
+      status: 'failed',
+      orderId: order.orderId,
+      changed: result.changed,
+    };
   }
 }

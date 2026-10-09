@@ -9,10 +9,10 @@ import { WsException } from '@nestjs/websockets';
 import { Types } from 'mongoose';
 import { WsJwtGuard } from '../modules/auth/guards/ws-jwt.guard';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 
 describe('TrackingGateway - Unauthorized Access Logging (Property 38)', () => {
   let gateway: TrackingGateway;
-  let ordersService: OrdersService;
   let loggerSpy: jest.SpyInstance;
 
   const mockOrderModel = {
@@ -52,12 +52,15 @@ describe('TrackingGateway - Unauthorized Access Logging (Property 38)', () => {
           provide: JwtService,
           useValue: mockJwtService,
         },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn() },
+        },
         WsJwtGuard,
       ],
     }).compile();
 
     gateway = module.get<TrackingGateway>(TrackingGateway);
-    ordersService = module.get<OrdersService>(OrdersService);
 
     // Spy on logger
     loggerSpy = jest.spyOn(gateway['logger'], 'warn');

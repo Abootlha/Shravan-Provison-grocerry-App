@@ -7,15 +7,13 @@ import { TrackingGateway } from './tracking.gateway';
 import { OrdersService } from '../modules/orders/orders.service';
 import { RidersService } from '../modules/riders/riders.service';
 import { WsJwtGuard } from '../modules/auth/guards/ws-jwt.guard';
-import { Order, OrderStatus } from '../modules/orders/schemas/order.schema';
+import { Order } from '../modules/orders/schemas/order.schema';
 import { WsException } from '@nestjs/websockets';
 import { Socket } from 'socket.io';
 
 describe('TrackingGateway', () => {
   let gateway: TrackingGateway;
   let jwtService: JwtService;
-  let ordersService: OrdersService;
-  let ridersService: RidersService;
   let wsJwtGuard: WsJwtGuard;
 
   const mockOrderModel = {
@@ -73,8 +71,6 @@ describe('TrackingGateway', () => {
 
     gateway = module.get<TrackingGateway>(TrackingGateway);
     jwtService = module.get<JwtService>(JwtService);
-    ordersService = module.get<OrdersService>(OrdersService);
-    ridersService = module.get<RidersService>(RidersService);
     wsJwtGuard = new WsJwtGuard(jwtService);
   });
 
@@ -218,9 +214,9 @@ describe('TrackingGateway', () => {
      * For any socket room created for users, riders, or orders, the room name must
      * follow the format "user_{userId}", "rider_{riderId}", or "order_{orderId}" respectively.
      */
-    it('should generate room names in correct format for all entity types', async () => {
-      await fc.assert(
-        fc.asyncProperty(
+    it('should generate room names in correct format for all entity types', () => {
+      fc.assert(
+        fc.property(
           fc.record({
             entityType: fc.constantFrom('user', 'rider', 'order'),
             entityId: fc.oneof(
@@ -229,7 +225,7 @@ describe('TrackingGateway', () => {
               fc.string({ minLength: 10, maxLength: 50 }),
             ),
           }),
-          async ({ entityType, entityId }) => {
+          ({ entityType, entityId }) => {
             // Access private methods via reflection for testing
             const getOrderRoomName = (gateway as any).getOrderRoomName.bind(
               gateway,
@@ -331,7 +327,9 @@ describe('TrackingGateway', () => {
 
               // If we get here, access was granted
               expect(shouldBeAuthorized).toBe(true);
+              // eslint-disable-next-line @typescript-eslint/unbound-method -- asserting on a jest mock, not invoking it
               expect(mockSocket.join).toHaveBeenCalledWith(`order_${orderId}`);
+              // eslint-disable-next-line @typescript-eslint/unbound-method -- asserting on a jest mock, not invoking it
               expect(mockSocket.emit).toHaveBeenCalledWith('joinedOrderRoom', {
                 orderId,
                 roomName: `order_${orderId}`,
@@ -405,6 +403,7 @@ describe('TrackingGateway', () => {
 
               // If we get here, access was granted
               expect(shouldBeAuthorized).toBe(true);
+              // eslint-disable-next-line @typescript-eslint/unbound-method -- asserting on a jest mock, not invoking it
               expect(mockSocket.join).toHaveBeenCalledWith(`order_${orderId}`);
             } catch (error) {
               // Access was denied

@@ -152,8 +152,35 @@ export class Order {
   @Prop()
   cancellationReason?: string;
 
-  @Prop({ required: true })
+  // Never returned by default queries: only the owning customer may see it.
+  @Prop({ required: true, select: false })
   deliveryOtp!: string;
+
+  @Prop({ default: 0 })
+  deliveryOtpAttempts!: number;
+
+  // Set atomically by the request that releases reserved stock, so a
+  // double-cancel can never return the same stock twice.
+  @Prop({ default: false })
+  stockReleased!: boolean;
+
+  // PayU transaction id, only set when orderId exceeds PayU's 25-char limit.
+  @Prop({ index: true, sparse: true })
+  payuTxnId?: string;
+
+  @Prop()
+  mihpayid?: string;
+
+  @Prop()
+  paymentConfirmedAt?: Date;
+
+  // Flags orders that need a human (refund for a paid-then-cancelled order,
+  // goods cancelled after leaving the store, etc.).
+  @Prop({ default: false })
+  requiresManualReview!: boolean;
+
+  @Prop()
+  manualReviewReason?: string;
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);
@@ -175,7 +202,7 @@ OrderSchema.pre('save', async function () {
     } | null;
     if (!user) {
       throw new Error(
-        `Invalid userId: User with ID ${order.userId} does not exist`,
+        `Invalid userId: User with ID ${String(order.userId)} does not exist`,
       );
     }
   }
@@ -188,7 +215,7 @@ OrderSchema.pre('save', async function () {
     } | null;
     if (!rider) {
       throw new Error(
-        `Invalid riderId: Rider with ID ${order.riderId} does not exist`,
+        `Invalid riderId: Rider with ID ${String(order.riderId)} does not exist`,
       );
     }
   }

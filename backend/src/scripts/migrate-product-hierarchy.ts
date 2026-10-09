@@ -43,7 +43,7 @@ async function migrateProductHierarchy() {
 
     for (const product of productsToMigrate) {
       try {
-        console.log(`Processing: ${product.name} (${product._id})`);
+        console.log(`Processing: ${product.name} (${String(product._id)})`);
 
         // Get the category
         const category = await categoryModel

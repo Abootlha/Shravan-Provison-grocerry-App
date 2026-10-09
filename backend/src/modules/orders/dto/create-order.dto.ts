@@ -11,7 +11,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { PaymentMethod, PaymentStatus } from '../schemas/order.schema';
+import { PaymentMethod } from '../schemas/order.schema';
 
 export class OrderItemDto {
   @IsMongoId()
@@ -94,8 +94,8 @@ export class CreateOrderDto {
   @IsEnum(PaymentMethod)
   paymentMethod!: PaymentMethod;
 
-  @IsEnum(PaymentStatus)
-  paymentStatus!: PaymentStatus;
+  // paymentStatus is intentionally not accepted: it is set server-side
+  // (PENDING on create; COMPLETED only via verified PayU callback or COD delivery).
 
   @IsOptional()
   @IsString()

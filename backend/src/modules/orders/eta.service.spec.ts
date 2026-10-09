@@ -1,102 +1,127 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
 import * as fc from 'fast-check';
+import axios from 'axios';
 import { ETAService, LocationDto, AddressDto } from './eta.service';
 import { RedisService } from '../../common/utils/redis.service';
-import { Order, OrderDocument, OrderStatus } from './schemas/order.schema';
-import { User, UserDocument, UserRole } from '../users/schemas/user.schema';
+import { Order, OrderStatus } from './schemas/order.schema';
+import { Rider } from '../riders/schemas/rider.schema';
+
+jest.mock('axios');
+const mockedAxios = axios as jest.Mocked<typeof axios>;
+
+const DIRECTIONS_URL =
+  'https://route.mappls.com/route/direction/route_adv/driving';
+
+// Mappls directions response: 20 minutes, 5km
+const directionsResponse = {
+  data: {
+    routes: [
+      {
+        geometry: '',
+        duration: 1200,
+        distance: 5000,
+        legs: [{ duration: 1200, distance: 5000 }],
+      },
+    ],
+  },
+};
+
+const latitudeArb = fc.double({ min: -90, max: 90, noNaN: true });
+const longitudeArb = fc.double({ min: -180, max: 180, noNaN: true });
+const orderIdArb = fc
+  .array(fc.constantFrom(...'0123456789abcdef'.split('')), {
+    minLength: 24,
+    maxLength: 24,
+  })
+  .map((arr) => arr.join(''));
+
+const riderLocation: LocationDto = { latitude: 28.6139, longitude: 77.209 };
+const deliveryAddress: AddressDto = {
+  street: '123 Main St',
+  city: 'New Delhi',
+  postalCode: '110001',
+  latitude: 28.6304,
+  longitude: 77.2177,
+};
 
 describe('ETAService', () => {
   let service: ETAService;
-  let configService: ConfigService;
-  let redisService: RedisService;
-  let orderModel: Model<OrderDocument>;
-  let userModel: Model<UserDocument>;
-
-  // Mock Google Maps client
-  const mockDistanceMatrixResponse = {
-    data: {
-      status: 'OK',
-      rows: [
-        {
-          elements: [
-            {
-              status: 'OK',
-              duration: { value: 1200 }, // 20 minutes
-              distance: { value: 5000 }, // 5km
-            },
-          ],
-        },
-      ],
-    },
+  let redisService: {
+    get: jest.Mock;
+    set: jest.Mock;
+    getJSON: jest.Mock;
+    setJSON: jest.Mock;
   };
+  let orderModel: { findById: jest.Mock };
+  let riderModel: { findById: jest.Mock };
+  let configGet: jest.Mock;
 
   beforeEach(async () => {
+    configGet = jest.fn((key: string) =>
+      key === 'MAPMYINDIA_API_KEY' ? 'test-api-key' : undefined,
+    );
+    redisService = {
+      get: jest.fn().mockResolvedValue(null),
+      set: jest.fn().mockResolvedValue('OK'),
+      getJSON: jest.fn().mockResolvedValue(null),
+      setJSON: jest.fn().mockResolvedValue('OK'),
+    };
+    orderModel = { findById: jest.fn() };
+    riderModel = { findById: jest.fn() };
+    mockedAxios.get.mockResolvedValue(directionsResponse);
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ETAService,
-        {
-          provide: ConfigService,
-          useValue: {
-            get: jest.fn((key: string) => {
-              if (key === 'GOOGLE_MAPS_API_KEY') return 'test-api-key';
-              return null;
-            }),
-          },
-        },
-        {
-          provide: RedisService,
-          useValue: {
-            get: jest.fn().mockResolvedValue(null),
-            set: jest.fn().mockResolvedValue('OK'),
-          },
-        },
-        {
-          provide: getModelToken(Order.name),
-          useValue: {
-            findById: jest.fn(),
-          },
-        },
-        {
-          provide: getModelToken(User.name),
-          useValue: {
-            findOne: jest.fn(),
-          },
-        },
+        { provide: ConfigService, useValue: { get: configGet } },
+        { provide: RedisService, useValue: redisService },
+        { provide: getModelToken(Order.name), useValue: orderModel },
+        { provide: getModelToken(Rider.name), useValue: riderModel },
       ],
     }).compile();
 
     service = module.get<ETAService>(ETAService);
-    configService = module.get<ConfigService>(ConfigService);
-    redisService = module.get<RedisService>(RedisService);
-    orderModel = module.get<Model<OrderDocument>>(getModelToken(Order.name));
-    userModel = module.get<Model<UserDocument>>(getModelToken(User.name));
   });
 
   afterEach(() => {
     jest.clearAllMocks();
   });
 
+  const mockOrderAndRider = (
+    orderId: string,
+    riderLat: number,
+    riderLng: number,
+    destLat: number,
+    destLng: number,
+    previousETA: Date | null,
+  ) => {
+    const order = {
+      _id: orderId,
+      orderStatus: OrderStatus.OUT_FOR_DELIVERY,
+      riderId: '507f1f77bcf86cd799439011',
+      deliveryAddress: {
+        address: '123 Main St',
+        city: 'Test City',
+        pincode: '12345',
+        coordinates: { type: 'Point', coordinates: [destLng, destLat] },
+      },
+      estimatedDeliveryTime: previousETA,
+      save: jest.fn().mockResolvedValue(true),
+    };
+    orderModel.findById.mockReturnValue({
+      populate: jest.fn().mockResolvedValue(order),
+    });
+    riderModel.findById.mockResolvedValue({
+      _id: '507f1f77bcf86cd799439011',
+      currentLocation: { type: 'Point', coordinates: [riderLng, riderLat] },
+    });
+    return order;
+  };
+
   describe('Property 24: ETA Calculation Inputs', () => {
-    /**
-     * **Validates: Requirements 6.3**
-     *
-     * For any ETA calculation, the system must use the rider's currentLocation
-     * coordinates as origin and the order's deliveryAddress coordinates as
-     * destination in the Distance Matrix API request.
-     */
-    it('should use rider location as origin and delivery address as destination', async () => {
-      // Custom generators for valid coordinates
-      const latitudeArb = fc.double({ min: -90, max: 90, noNaN: true });
-      const longitudeArb = fc.double({ min: -180, max: 180, noNaN: true });
-
-      const locationArb = fc.record({
-        latitude: latitudeArb,
-        longitude: longitudeArb,
-      });
-
+    it('uses rider location as origin and delivery address as destination', async () => {
       const addressArb = fc.record({
         street: fc.string({ minLength: 1, maxLength: 100 }),
         city: fc.string({ minLength: 1, maxLength: 50 }),
@@ -107,80 +132,40 @@ describe('ETAService', () => {
 
       await fc.assert(
         fc.asyncProperty(
-          locationArb,
+          fc.record({ latitude: latitudeArb, longitude: longitudeArb }),
           addressArb,
-          async (riderLocation: LocationDto, deliveryAddress: AddressDto) => {
-            // Mock the Distance Matrix API call
-            const distanceMatrixSpy = jest
-              .spyOn(service as any, 'callDistanceMatrixAPI')
-              .mockResolvedValue(mockDistanceMatrixResponse.data);
+          async (origin: LocationDto, destination: AddressDto) => {
+            mockedAxios.get.mockClear();
+            await service.calculateETA(origin, destination);
 
-            try {
-              await service.calculateETA(riderLocation, deliveryAddress);
-
-              // Verify the API was called with correct origin and destination
-              expect(distanceMatrixSpy).toHaveBeenCalledWith(
-                `${riderLocation.latitude},${riderLocation.longitude}`,
-                `${deliveryAddress.latitude},${deliveryAddress.longitude}`,
-              );
-            } finally {
-              distanceMatrixSpy.mockRestore();
-            }
+            // Mappls expects "lng,lat;lng,lat" with origin first
+            // eslint-disable-next-line @typescript-eslint/unbound-method -- asserting on a jest mock, not invoking it
+            expect(mockedAxios.get).toHaveBeenCalledTimes(1);
+            expect(mockedAxios.get.mock.calls[0][0]).toBe(
+              `${DIRECTIONS_URL}/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}`,
+            );
           },
         ),
         { numRuns: 100 },
       );
     });
 
-    it('should pass driving mode to Distance Matrix API', async () => {
-      const riderLocation: LocationDto = {
-        latitude: 40.7128,
-        longitude: -74.006,
-      };
-      const deliveryAddress: AddressDto = {
-        street: '123 Main St',
-        city: 'New York',
-        postalCode: '10001',
-        latitude: 40.7589,
-        longitude: -73.9851,
-      };
-
-      // Spy on the actual Google Maps client call
-      const googleMapsClientSpy = jest
-        .spyOn((service as any).googleMapsClient, 'distancematrix')
-        .mockResolvedValue(mockDistanceMatrixResponse);
-
+    it('uses the driving directions profile with the configured key', async () => {
       await service.calculateETA(riderLocation, deliveryAddress);
 
-      // Verify the API was called with driving mode
-      expect(googleMapsClientSpy).toHaveBeenCalledWith(
+      const [url, config] = mockedAxios.get.mock.calls[0];
+      expect(url.startsWith(`${DIRECTIONS_URL}/`)).toBe(true);
+      expect(url).toContain('/driving/');
+      expect(config).toEqual(
         expect.objectContaining({
-          params: expect.objectContaining({
-            mode: 'driving',
-          }),
+          params: expect.objectContaining({ access_token: 'test-api-key' }),
         }),
       );
-
-      googleMapsClientSpy.mockRestore();
     });
   });
 
   describe('Property 25: ETA Persistence', () => {
-    /**
-     * **Validates: Requirements 6.4**
-     *
-     * For any successful ETA calculation, the order's estimatedDeliveryTime
-     * field must be updated with the calculated delivery time.
-     */
-    it('should update order estimatedDeliveryTime after successful recalculation', async () => {
-      // Generate valid MongoDB ObjectId (24 hex characters)
-      const hexChars = '0123456789abcdef'.split('');
-      const orderIdArb = fc
-        .array(fc.constantFrom(...hexChars), { minLength: 24, maxLength: 24 })
-        .map((arr) => arr.join(''));
-      const latitudeArb = fc.double({ min: -90, max: 90, noNaN: true });
-      const longitudeArb = fc.double({ min: -180, max: 180, noNaN: true });
-
+    it('updates order estimatedDeliveryTime after successful recalculation', async () => {
       await fc.assert(
         fc.asyncProperty(
           orderIdArb,
@@ -188,122 +173,45 @@ describe('ETAService', () => {
           longitudeArb,
           latitudeArb,
           longitudeArb,
-          async (
-            orderId: string,
-            riderLat: number,
-            riderLng: number,
-            destLat: number,
-            destLng: number,
-          ) => {
-            // Create mock order
-            const mockOrder = {
-              _id: orderId,
-              orderStatus: OrderStatus.OUT_FOR_DELIVERY,
-              riderId: '507f1f77bcf86cd799439011',
-              deliveryAddress: {
-                address: '123 Main St',
-                city: 'Test City',
-                pincode: '12345',
-                coordinates: {
-                  type: 'Point',
-                  coordinates: [destLng, destLat],
-                },
-              },
-              estimatedDeliveryTime: null,
-              save: jest.fn().mockResolvedValue(true),
-            };
-
-            // Create mock rider
-            const mockRider = {
-              _id: '507f1f77bcf86cd799439011',
-              role: UserRole.RIDER,
-              currentLocation: {
-                type: 'Point',
-                coordinates: [riderLng, riderLat],
-              },
-            };
-
-            jest.spyOn(orderModel, 'findById').mockReturnValue({
-              populate: jest.fn().mockResolvedValue(mockOrder),
-            } as any);
-
-            jest
-              .spyOn(userModel, 'findOne')
-              .mockResolvedValue(mockRider as any);
-
-            // Mock the Distance Matrix API call
-            jest
-              .spyOn(service as any, 'callDistanceMatrixAPI')
-              .mockResolvedValue(mockDistanceMatrixResponse.data);
+          async (orderId, riderLat, riderLng, destLat, destLng) => {
+            const order = mockOrderAndRider(
+              orderId,
+              riderLat,
+              riderLng,
+              destLat,
+              destLng,
+              null,
+            );
 
             const result = await service.recalculateForOrder(orderId);
 
-            // Verify the order's estimatedDeliveryTime was updated
-            expect(mockOrder.estimatedDeliveryTime).not.toBeNull();
-            expect(mockOrder.estimatedDeliveryTime).toBeInstanceOf(Date);
-            expect(mockOrder.save).toHaveBeenCalled();
-            expect(result).toBeInstanceOf(Date);
+            expect(order.estimatedDeliveryTime).toBeInstanceOf(Date);
+            expect(order.save).toHaveBeenCalled();
+            expect(result).toBe(order.estimatedDeliveryTime);
           },
         ),
         { numRuns: 50 },
       );
     });
 
-    it('should calculate future delivery time based on duration', async () => {
-      const riderLocation: LocationDto = {
-        latitude: 40.7128,
-        longitude: -74.006,
-      };
-      const deliveryAddress: AddressDto = {
-        street: '123 Main St',
-        city: 'New York',
-        postalCode: '10001',
-        latitude: 40.7589,
-        longitude: -73.9851,
-      };
-
-      // Mock the Distance Matrix API call with specific duration
-      jest
-        .spyOn(service as any, 'callDistanceMatrixAPI')
-        .mockResolvedValue(mockDistanceMatrixResponse.data);
-
-      const beforeTime = Date.now();
+    it('calculates future delivery time based on route duration', async () => {
+      const before = Date.now();
       const result = await service.calculateETA(riderLocation, deliveryAddress);
-      const afterTime = Date.now();
+      const after = Date.now();
 
-      // The estimated delivery time should be in the future
-      expect(result.estimatedDeliveryTime.getTime()).toBeGreaterThan(
-        beforeTime,
-      );
-
-      // It should be approximately 20 minutes (1200 seconds) from now
-      const expectedTime = beforeTime + 1200 * 1000;
-      const tolerance = 5000; // 5 seconds tolerance
+      expect(result.durationMinutes).toBe(20);
+      expect(result.distanceMeters).toBe(5000);
       expect(result.estimatedDeliveryTime.getTime()).toBeGreaterThanOrEqual(
-        expectedTime - tolerance,
+        before + 1200 * 1000,
       );
       expect(result.estimatedDeliveryTime.getTime()).toBeLessThanOrEqual(
-        afterTime + 1200 * 1000 + tolerance,
+        after + 1200 * 1000,
       );
     });
   });
 
   describe('Property 26: ETA Calculation Error Handling', () => {
-    /**
-     * **Validates: Requirements 6.5, 11.4**
-     *
-     * For any ETA calculation that fails due to API error, the system must
-     * log the error and retain the order's previous estimatedDeliveryTime
-     * value without modification.
-     */
-    it('should retain previous ETA when API call fails', async () => {
-      const hexChars = '0123456789abcdef'.split('');
-      const orderIdArb = fc
-        .array(fc.constantFrom(...hexChars), { minLength: 24, maxLength: 24 })
-        .map((arr) => arr.join(''));
-      const latitudeArb = fc.double({ min: -90, max: 90, noNaN: true });
-      const longitudeArb = fc.double({ min: -180, max: 180, noNaN: true });
-
+    it('retains previous ETA when the directions API fails', async () => {
       await fc.assert(
         fc.asyncProperty(
           orderIdArb,
@@ -311,61 +219,22 @@ describe('ETAService', () => {
           longitudeArb,
           latitudeArb,
           longitudeArb,
-          async (
-            orderId: string,
-            riderLat: number,
-            riderLng: number,
-            destLat: number,
-            destLng: number,
-          ) => {
-            const previousETA = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes from now
-
-            // Create mock order with existing ETA
-            const mockOrder = {
-              _id: orderId,
-              orderStatus: OrderStatus.OUT_FOR_DELIVERY,
-              riderId: '507f1f77bcf86cd799439011',
-              deliveryAddress: {
-                address: '123 Main St',
-                city: 'Test City',
-                pincode: '12345',
-                coordinates: {
-                  type: 'Point',
-                  coordinates: [destLng, destLat],
-                },
-              },
-              estimatedDeliveryTime: previousETA,
-              save: jest.fn().mockResolvedValue(true),
-            };
-
-            // Create mock rider
-            const mockRider = {
-              _id: '507f1f77bcf86cd799439011',
-              role: UserRole.RIDER,
-              currentLocation: {
-                type: 'Point',
-                coordinates: [riderLng, riderLat],
-              },
-            };
-
-            jest.spyOn(orderModel, 'findById').mockReturnValue({
-              populate: jest.fn().mockResolvedValue(mockOrder),
-            } as any);
-
-            jest
-              .spyOn(userModel, 'findOne')
-              .mockResolvedValue(mockRider as any);
-
-            // Mock the Distance Matrix API call to fail
-            jest
-              .spyOn(service as any, 'callDistanceMatrixAPI')
-              .mockRejectedValue(new Error('API Error'));
+          async (orderId, riderLat, riderLng, destLat, destLng) => {
+            const previousETA = new Date(Date.now() + 30 * 60 * 1000);
+            const order = mockOrderAndRider(
+              orderId,
+              riderLat,
+              riderLng,
+              destLat,
+              destLng,
+              previousETA,
+            );
+            mockedAxios.get.mockRejectedValueOnce(new Error('API Error'));
 
             const result = await service.recalculateForOrder(orderId);
 
-            // Verify the order's estimatedDeliveryTime was NOT modified
-            expect(mockOrder.estimatedDeliveryTime).toEqual(previousETA);
-            expect(mockOrder.save).not.toHaveBeenCalled();
+            expect(order.estimatedDeliveryTime).toBe(previousETA);
+            expect(order.save).not.toHaveBeenCalled();
             expect(result).toBeNull();
           },
         ),
@@ -373,113 +242,120 @@ describe('ETAService', () => {
       );
     });
 
-    it('should log error when Distance Matrix API fails', async () => {
-      const riderLocation: LocationDto = {
-        latitude: 40.7128,
-        longitude: -74.006,
-      };
-      const deliveryAddress: AddressDto = {
-        street: '123 Main St',
-        city: 'New York',
-        postalCode: '10001',
-        latitude: 40.7589,
-        longitude: -73.9851,
-      };
+    it('retains previous ETA when the response has no route', async () => {
+      const previousETA = new Date(Date.now() + 30 * 60 * 1000);
+      const order = mockOrderAndRider(
+        'a'.repeat(24),
+        28.6,
+        77.2,
+        28.7,
+        77.3,
+        previousETA,
+      );
+      mockedAxios.get.mockResolvedValueOnce({ data: { routes: [] } });
 
-      // Mock the Distance Matrix API call to fail
-      jest
-        .spyOn(service as any, 'callDistanceMatrixAPI')
-        .mockRejectedValue(new Error('API rate limit exceeded'));
+      await expect(
+        service.recalculateForOrder('a'.repeat(24)),
+      ).resolves.toBeNull();
+      expect(order.estimatedDeliveryTime).toBe(previousETA);
+      expect(order.save).not.toHaveBeenCalled();
+    });
 
+    it('logs and rethrows when the directions API fails', async () => {
+      mockedAxios.get.mockRejectedValueOnce(
+        new Error('API rate limit exceeded'),
+      );
       const loggerSpy = jest.spyOn((service as any).logger, 'error');
 
       await expect(
         service.calculateETA(riderLocation, deliveryAddress),
-      ).rejects.toThrow();
+      ).rejects.toThrow('API rate limit exceeded');
 
-      // Verify error was logged
       expect(loggerSpy).toHaveBeenCalledWith(
         expect.stringContaining('Failed to calculate ETA'),
       );
+      expect(redisService.set).not.toHaveBeenCalled();
     });
 
-    it('should handle missing API key gracefully', async () => {
-      const riderLocation: LocationDto = {
-        latitude: 40.7128,
-        longitude: -74.006,
-      };
-      const deliveryAddress: AddressDto = {
-        street: '123 Main St',
-        city: 'New York',
-        postalCode: '10001',
-        latitude: 40.7589,
-        longitude: -73.9851,
-      };
+    describe('missing API key', () => {
+      let keylessService: ETAService;
 
-      // Mock config service to return null for API key
-      jest.spyOn(configService, 'get').mockReturnValue(null);
+      beforeEach(() => {
+        keylessService = new ETAService(
+          { get: jest.fn().mockReturnValue(undefined) } as any,
+          redisService as any,
+          orderModel as any,
+          riderModel as any,
+        );
+      });
 
-      await expect(
-        service.calculateETA(riderLocation, deliveryAddress),
-      ).rejects.toThrow('GOOGLE_MAPS_API_KEY is not configured');
+      it('rejects calculateETA without calling the API', async () => {
+        await expect(
+          keylessService.calculateETA(riderLocation, deliveryAddress),
+        ).rejects.toThrow('MAPMYINDIA_API_KEY is not configured');
+        // eslint-disable-next-line @typescript-eslint/unbound-method -- asserting on a jest mock, not invoking it
+        expect(mockedAxios.get).not.toHaveBeenCalled();
+      });
+
+      it('recalculateForOrder returns null and keeps previous ETA', async () => {
+        const previousETA = new Date(Date.now() + 30 * 60 * 1000);
+        const order = mockOrderAndRider(
+          'b'.repeat(24),
+          28.6,
+          77.2,
+          28.7,
+          77.3,
+          previousETA,
+        );
+
+        await expect(
+          keylessService.recalculateForOrder('b'.repeat(24)),
+        ).resolves.toBeNull();
+        expect(order.estimatedDeliveryTime).toBe(previousETA);
+        expect(order.save).not.toHaveBeenCalled();
+      });
+
+      it('falls back to MAPPLS_API_KEY', async () => {
+        const fallbackService = new ETAService(
+          {
+            get: jest.fn((key: string) =>
+              key === 'MAPPLS_API_KEY' ? 'fallback-key' : undefined,
+            ),
+          } as any,
+          redisService as any,
+          orderModel as any,
+          riderModel as any,
+        );
+
+        await fallbackService.calculateETA(riderLocation, deliveryAddress);
+        expect(mockedAxios.get.mock.calls[0][1]?.params.access_token).toBe(
+          'fallback-key',
+        );
+      });
     });
   });
 
   describe('Property 34: ETA Response Caching', () => {
-    /**
-     * **Validates: Requirements 10.8**
-     *
-     * For any Distance Matrix API request, if a cached response exists for
-     * the same origin-destination pair and is less than 2 minutes old, the
-     * system must use the cached duration value instead of making a new API call.
-     */
-    it('should use cached ETA when available and not expired', async () => {
-      const latitudeArb = fc.double({ min: -90, max: 90, noNaN: true });
-      const longitudeArb = fc.double({ min: -180, max: 180, noNaN: true });
-
+    it('uses cached ETA when available instead of calling the API', async () => {
       await fc.assert(
         fc.asyncProperty(
           latitudeArb,
           longitudeArb,
           latitudeArb,
           longitudeArb,
-          async (
-            riderLat: number,
-            riderLng: number,
-            destLat: number,
-            destLng: number,
-          ) => {
-            const riderLocation: LocationDto = {
-              latitude: riderLat,
-              longitude: riderLng,
-            };
-            const deliveryAddress: AddressDto = {
-              street: '123 Main St',
-              city: 'Test City',
-              postalCode: '12345',
-              latitude: destLat,
-              longitude: destLng,
-            };
-
-            // Mock Redis to return cached duration (1800 seconds = 30 minutes)
+          async (riderLat, riderLng, destLat, destLng) => {
+            mockedAxios.get.mockClear();
             const cachedDuration = 1800;
-            jest
-              .spyOn(redisService, 'get')
-              .mockResolvedValue(cachedDuration.toString());
-
-            // Spy on the Distance Matrix API call
-            const apiSpy = jest.spyOn(service as any, 'callDistanceMatrixAPI');
+            redisService.get.mockResolvedValueOnce(cachedDuration.toString());
 
             const result = await service.calculateETA(
-              riderLocation,
-              deliveryAddress,
+              { latitude: riderLat, longitude: riderLng },
+              { ...deliveryAddress, latitude: destLat, longitude: destLng },
             );
 
-            // Verify the API was NOT called (cache was used)
-            expect(apiSpy).not.toHaveBeenCalled();
-
-            // Verify the result uses the cached duration
-            expect(result.durationMinutes).toBe(Math.ceil(cachedDuration / 60));
+            // eslint-disable-next-line @typescript-eslint/unbound-method -- asserting on a jest mock, not invoking it
+            expect(mockedAxios.get).not.toHaveBeenCalled();
+            expect(result.durationMinutes).toBe(30);
             expect(result.estimatedDeliveryTime).toBeInstanceOf(Date);
           },
         ),
@@ -487,120 +363,59 @@ describe('ETAService', () => {
       );
     });
 
-    it('should call API and cache result when cache miss', async () => {
-      const riderLocation: LocationDto = {
-        latitude: 40.7128,
-        longitude: -74.006,
-      };
-      const deliveryAddress: AddressDto = {
-        street: '123 Main St',
-        city: 'New York',
-        postalCode: '10001',
-        latitude: 40.7589,
-        longitude: -73.9851,
-      };
-
-      // Mock Redis to return null (cache miss)
-      jest.spyOn(redisService, 'get').mockResolvedValue(null);
-      const redisSetSpy = jest.spyOn(redisService, 'set');
-
-      // Mock the Distance Matrix API call
-      jest
-        .spyOn(service as any, 'callDistanceMatrixAPI')
-        .mockResolvedValue(mockDistanceMatrixResponse.data);
-
+    it('calls API and caches duration on cache miss', async () => {
       await service.calculateETA(riderLocation, deliveryAddress);
 
-      // Verify the result was cached with 2-minute TTL
-      expect(redisSetSpy).toHaveBeenCalledWith(
-        expect.stringContaining('eta:'),
-        '1200', // Duration from mock response
-        120, // 2-minute TTL
+      expect(redisService.set).toHaveBeenCalledWith(
+        'eta:28.6139:77.2090:28.6304:77.2177',
+        '1200',
+        30,
       );
     });
 
-    it('should generate consistent cache keys for same coordinates', async () => {
-      const riderLocation: LocationDto = {
-        latitude: 40.7128,
-        longitude: -74.006,
-      };
-      const deliveryAddress: AddressDto = {
-        street: '123 Main St',
-        city: 'New York',
-        postalCode: '10001',
-        latitude: 40.7589,
-        longitude: -73.9851,
-      };
+    it('continues without caching when Redis fails', async () => {
+      redisService.get.mockRejectedValueOnce(new Error('redis down'));
+      redisService.set.mockRejectedValueOnce(new Error('redis down'));
 
-      // Mock Redis
-      jest.spyOn(redisService, 'get').mockResolvedValue(null);
-      const redisSetSpy = jest.spyOn(redisService, 'set');
-
-      // Mock the Distance Matrix API call
-      jest
-        .spyOn(service as any, 'callDistanceMatrixAPI')
-        .mockResolvedValue(mockDistanceMatrixResponse.data);
-
-      // Call twice with same coordinates
-      await service.calculateETA(riderLocation, deliveryAddress);
-      const firstCacheKey = redisSetSpy.mock.calls[0][0];
-
-      jest.clearAllMocks();
-      jest.spyOn(redisService, 'get').mockResolvedValue(null);
-      jest.spyOn(redisService, 'set');
-      jest
-        .spyOn(service as any, 'callDistanceMatrixAPI')
-        .mockResolvedValue(mockDistanceMatrixResponse.data);
-
-      await service.calculateETA(riderLocation, deliveryAddress);
-      const secondCacheKey = redisSetSpy.mock.calls[0][0];
-
-      // Verify both calls used the same cache key
-      expect(firstCacheKey).toBe(secondCacheKey);
+      const result = await service.calculateETA(riderLocation, deliveryAddress);
+      expect(result.durationMinutes).toBe(20);
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- asserting on a jest mock, not invoking it
+      expect(mockedAxios.get).toHaveBeenCalledTimes(1);
     });
 
-    it('should round coordinates in cache key for better cache hits', async () => {
-      // Coordinates that are very close (within 11 meters)
-      const riderLocation1: LocationDto = {
-        latitude: 40.71280001,
-        longitude: -74.00600001,
-      };
-      const riderLocation2: LocationDto = {
-        latitude: 40.71280002,
-        longitude: -74.00600002,
-      };
-      const deliveryAddress: AddressDto = {
-        street: '123 Main St',
-        city: 'New York',
-        postalCode: '10001',
-        latitude: 40.7589,
-        longitude: -73.9851,
-      };
+    it('uses the same cache key for coordinates equal to 4 decimal places', async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          latitudeArb,
+          longitudeArb,
+          fc.double({ min: -0.00004, max: 0.00004, noNaN: true }),
+          async (lat, lng, jitter) => {
+            redisService.get.mockClear();
+            const base = Number(lat.toFixed(4));
+            const nudged = base + jitter;
+            // Only meaningful when both round to the same 4-dp value
+            fc.pre(nudged.toFixed(4) === base.toFixed(4));
 
-      // Mock Redis
-      jest.spyOn(redisService, 'get').mockResolvedValue(null);
-      const redisSetSpy = jest.spyOn(redisService, 'set');
+            await service.calculateETA(
+              { latitude: base, longitude: lng },
+              deliveryAddress,
+            );
+            await service.calculateETA(
+              { latitude: nudged, longitude: lng },
+              deliveryAddress,
+            );
 
-      // Mock the Distance Matrix API call
-      jest
-        .spyOn(service as any, 'callDistanceMatrixAPI')
-        .mockResolvedValue(mockDistanceMatrixResponse.data);
-
-      await service.calculateETA(riderLocation1, deliveryAddress);
-      const firstCacheKey = redisSetSpy.mock.calls[0][0];
-
-      jest.clearAllMocks();
-      jest.spyOn(redisService, 'get').mockResolvedValue(null);
-      jest.spyOn(redisService, 'set');
-      jest
-        .spyOn(service as any, 'callDistanceMatrixAPI')
-        .mockResolvedValue(mockDistanceMatrixResponse.data);
-
-      await service.calculateETA(riderLocation2, deliveryAddress);
-      const secondCacheKey = redisSetSpy.mock.calls[0][0];
-
-      // Verify both calls used the same cache key (due to rounding to 4 decimal places)
-      expect(firstCacheKey).toBe(secondCacheKey);
+            const [first, second] = redisService.get.mock.calls.map(
+              (call) => call[0],
+            );
+            expect(first).toBe(second);
+            expect(first).toMatch(
+              /^eta:-?\d+\.\d{4}:-?\d+\.\d{4}:-?\d+\.\d{4}:-?\d+\.\d{4}$/,
+            );
+          },
+        ),
+        { numRuns: 50 },
+      );
     });
   });
 });

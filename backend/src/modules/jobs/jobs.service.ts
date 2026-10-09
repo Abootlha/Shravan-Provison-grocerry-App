@@ -1,47 +1,57 @@
 import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
-import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
+import { InjectQueue } from '@nestjs/bullmq';
+import { ConfigService } from '@nestjs/config';
 import { Queue, Job } from 'bullmq';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model } from 'mongoose';
 import {
   Order,
   OrderDocument,
   OrderStatus,
+  PaymentMethod,
+  PaymentStatus,
 } from '../orders/schemas/order.schema';
 import { User, UserDocument, UserRole } from '../users/schemas/user.schema';
 import { OrdersService } from '../orders/orders.service';
 import { ETAService } from '../orders/eta.service';
 
+export const STALE_ORDER_QUEUE = 'stale-order-check';
+export const ANOMALY_QUEUE = 'anomaly-check';
+export const ETA_QUEUE = 'eta-recalculation';
+
+const DEFAULT_PAYMENT_TIMEOUT_MINUTES = 15;
+
+/**
+ * Schedules the recurring jobs and holds their logic. The BullMQ workers live
+ * in jobs.processors.ts (one processor class per queue) and delegate here.
+ */
 @Injectable()
-@Processor('stale-order-check', {
-  concurrency: 5,
-})
-@Processor('anomaly-check', {
-  concurrency: 5,
-})
-@Processor('eta-recalculation', {
-  concurrency: 5,
-})
-export class JobsService extends WorkerHost implements OnModuleInit {
+export class JobsService implements OnModuleInit {
   private readonly logger = new Logger(JobsService.name);
 
   constructor(
-    @InjectQueue('stale-order-check') private staleOrderQueue: Queue,
-    @InjectQueue('anomaly-check') private anomalyQueue: Queue,
-    @InjectQueue('eta-recalculation') private etaQueue: Queue,
+    @InjectQueue(STALE_ORDER_QUEUE) private staleOrderQueue: Queue,
+    @InjectQueue(ANOMALY_QUEUE) private anomalyQueue: Queue,
+    @InjectQueue(ETA_QUEUE) private etaQueue: Queue,
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     private ordersService: OrdersService,
     private etaService: ETAService,
-  ) {
-    super();
-  }
+    private configService: ConfigService,
+  ) {}
 
   async onModuleInit() {
     // Register recurring jobs
     await this.registerStaleOrderCheck();
     await this.registerAnomalyCheck();
     await this.registerETARecalculation();
+  }
+
+  private getPaymentTimeoutMinutes(): number {
+    const raw = Number(this.configService?.get('PAYMENT_TIMEOUT_MINUTES'));
+    return Number.isFinite(raw) && raw > 0
+      ? raw
+      : DEFAULT_PAYMENT_TIMEOUT_MINUTES;
   }
 
   /**
@@ -108,19 +118,22 @@ export class JobsService extends WorkerHost implements OnModuleInit {
   }
 
   /**
-   * Process jobs from all queues
+   * Process a job from any of the queues (called by the per-queue processors)
    */
   async process(job: Job): Promise<any> {
     const queueName = job.queueName;
 
     try {
       switch (queueName) {
-        case 'stale-order-check':
-          return await this.processStaleOrders(job);
-        case 'anomaly-check':
-          return await this.processAnomalies(job);
-        case 'eta-recalculation':
-          return await this.processETAUpdates(job);
+        case STALE_ORDER_QUEUE:
+          await this.processPaymentTimeouts();
+          await this.processStaleOrders();
+          await this.retryUnassignedOrders();
+          return;
+        case ANOMALY_QUEUE:
+          return await this.processAnomalies();
+        case ETA_QUEUE:
+          return await this.processETAUpdates();
         default:
           this.logger.warn(`Unknown queue: ${queueName}`);
       }
@@ -131,9 +144,11 @@ export class JobsService extends WorkerHost implements OnModuleInit {
   }
 
   /**
-   * Process stale orders - cancel PENDING orders older than 24 hours
+   * Process stale orders - cancel PENDING orders older than 24 hours.
+   * Cancellation goes through OrdersService so it logs the status change,
+   * releases stock once, invalidates caches and broadcasts over sockets.
    */
-  async processStaleOrders(job: Job): Promise<void> {
+  async processStaleOrders(): Promise<void> {
     this.logger.log('Processing stale orders...');
 
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -147,24 +162,18 @@ export class JobsService extends WorkerHost implements OnModuleInit {
       .exec();
 
     this.logger.log(`Found ${staleOrders.length} stale orders`);
+    if (staleOrders.length === 0) return;
 
     // Get system user ID for automated actions
     const systemUser = await this.getSystemUser();
 
     for (const order of staleOrders) {
       try {
-        // Update to CANCELLED status
-        order.orderStatus = OrderStatus.CANCELLED;
-        order.cancellationReason = 'AUTO_CANCELLED_STALE';
-
-        // Add timeline entry
-        this.ordersService.addTimelineEntry(
-          order,
-          OrderStatus.CANCELLED,
+        await this.ordersService.cancelOrder(
+          order._id.toString(),
           systemUser._id.toString(),
+          'AUTO_CANCELLED_STALE',
         );
-
-        await order.save();
 
         this.logger.log(`Cancelled stale order: ${order.orderId}`);
       } catch (error) {
@@ -177,9 +186,76 @@ export class JobsService extends WorkerHost implements OnModuleInit {
   }
 
   /**
+   * Cancel online-payment orders whose payment is still PENDING after
+   * PAYMENT_TIMEOUT_MINUTES (default 15). Marks payment FAILED, cancels the
+   * order and releases stock. A late PayU success for such an order is
+   * flagged for refund instead of reviving it.
+   */
+  async processPaymentTimeouts(): Promise<void> {
+    const timeoutMinutes = this.getPaymentTimeoutMinutes();
+    const cutoff = new Date(Date.now() - timeoutMinutes * 60 * 1000);
+
+    const unpaidOrders = await this.orderModel
+      .find({
+        paymentMethod: { $ne: PaymentMethod.COD },
+        paymentStatus: PaymentStatus.PENDING,
+        orderStatus: OrderStatus.PENDING,
+        createdAt: { $lt: cutoff },
+      })
+      .exec();
+
+    if (unpaidOrders.length > 0) {
+      this.logger.log(
+        `Found ${unpaidOrders.length} online orders unpaid after ${timeoutMinutes} minutes`,
+      );
+    }
+
+    for (const order of unpaidOrders) {
+      try {
+        await this.ordersService.markPaymentFailed(
+          order._id.toString(),
+          'PAYMENT_TIMEOUT',
+        );
+        this.logger.log(`Cancelled unpaid order: ${order.orderId}`);
+      } catch (error) {
+        this.logger.error(
+          `Failed to cancel unpaid order ${order.orderId}:`,
+          error,
+        );
+      }
+    }
+  }
+
+  /**
+   * Retry rider assignment for CONFIRMED orders that were left unassigned
+   * because no rider was available at confirmation time.
+   */
+  async retryUnassignedOrders(): Promise<void> {
+    const unassigned = await this.orderModel
+      .find({ orderStatus: OrderStatus.CONFIRMED, riderId: null })
+      .exec();
+
+    for (const order of unassigned) {
+      try {
+        const assigned = await this.ordersService.autoAssignNearestRider(
+          order._id.toString(),
+        );
+        if (assigned) {
+          this.logger.log(`Assigned rider to waiting order ${order.orderId}`);
+        }
+      } catch (error) {
+        this.logger.error(
+          `Failed to assign rider to order ${order.orderId}:`,
+          error,
+        );
+      }
+    }
+  }
+
+  /**
    * Process anomalous orders - flag OUT_FOR_DELIVERY orders older than 2 hours
    */
-  async processAnomalies(job: Job): Promise<void> {
+  async processAnomalies(): Promise<void> {
     this.logger.log('Processing anomalous orders...');
 
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
@@ -202,7 +278,7 @@ export class JobsService extends WorkerHost implements OnModuleInit {
         );
 
         // Notify admins (in production, this would send notifications)
-        await this.notifyAdmins(order);
+        this.notifyAdmins(order);
       } catch (error) {
         this.logger.error(
           `Failed to process anomalous order ${order.orderId}:`,
@@ -215,7 +291,7 @@ export class JobsService extends WorkerHost implements OnModuleInit {
   /**
    * Process ETA recalculation - update ETA for all OUT_FOR_DELIVERY orders
    */
-  async processETAUpdates(job: Job): Promise<void> {
+  async processETAUpdates(): Promise<void> {
     this.logger.log('Processing ETA recalculations...');
 
     // Find all OUT_FOR_DELIVERY orders
@@ -265,7 +341,7 @@ export class JobsService extends WorkerHost implements OnModuleInit {
   /**
    * Notify administrators about anomalous orders
    */
-  private async notifyAdmins(order: OrderDocument): Promise<void> {
+  private notifyAdmins(order: OrderDocument): void {
     // In production, this would:
     // 1. Send push notifications to admin devices
     // 2. Send email alerts
