@@ -17,5 +17,6 @@ export { default as ProfileSettingsScreen } from './ProfileSettingsScreen';
 export { default as OrdersHistoryScreen } from './OrdersHistoryScreen';
 export { default as LocationScreen } from './LocationScreen';
 export { default as AddAddressScreen } from './AddAddressScreen';
+export { default as WishlistScreen } from './WishlistScreen';
 
 

@@ -4,6 +4,7 @@ import authReducer from './slices/authSlice';
 import locationReducer from './slices/locationSlice';
 import languageReducer from './slices/languageSlice';
 import orderTrackingReducer from './slices/orderTrackingSlice';
+import wishlistReducer from './slices/wishlistSlice';
 
 export const store = configureStore({
     reducer: {
@@ -12,6 +13,7 @@ export const store = configureStore({
         location: locationReducer,
         language: languageReducer,
         orderTracking: orderTrackingReducer,
+        wishlist: wishlistReducer,
     },
     middleware: (getDefaultMiddleware) =>
         getDefaultMiddleware({

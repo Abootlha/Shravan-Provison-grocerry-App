@@ -113,8 +113,8 @@ const CategoriesScreen = ({ navigation }) => {
     };
 
     const renderCategoryItem = (category, index) => {
-        const displayName = currentLanguage === 'hi' && category.translatedName 
-            ? category.translatedName 
+        const displayName = currentLanguage === 'hi' && category.translatedName
+            ? category.translatedName
             : category.name;
 
         const imageUrl = category.icon || category.image;

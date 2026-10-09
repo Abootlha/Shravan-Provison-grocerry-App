@@ -23,6 +23,7 @@ import {
     CheckmarkBadge01Icon,
     ShoppingBasket01Icon,
 } from 'hugeicons-react-native';
+import Svg, { Line } from 'react-native-svg';
 import { useSelector } from 'react-redux';
 import {
     Header,
@@ -30,6 +31,8 @@ import {
     CategoryCard,
     ProductCard,
     FloatingCartBar,
+    CategoryTabBar,
+    ProductCardSkeleton,
 } from '../components';
 import { COLORS, SHADOWS } from '../constants';
 import { ProductService } from '../services';
@@ -46,7 +49,7 @@ const BANNER_DATA = [
 const HomeScreen = ({ navigation }) => {
     const { t, currentLanguage } = useTranslation();
     const { width: screenWidth } = useWindowDimensions();
-    
+
     // Responsive width for feature cards (Always 4 in a row on large screens, scrollable on mobile)
     const featureCardWidth = Math.max(105, (screenWidth - 32 - 30) / 4);
     const cartItems = useSelector((state) => state.cart.totalItems);
@@ -72,6 +75,24 @@ const HomeScreen = ({ navigation }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [activeQuickCat, setActiveQuickCat] = useState('all');
+    const [activeSubcats, setActiveSubcats] = useState({});
+    const [visibleCounts, setVisibleCounts] = useState({});
+    const [loadingMoreSections, setLoadingMoreSections] = useState({});
+
+    const handleLoadMore = (sectionId, totalCount) => {
+        const currentVisible = visibleCounts[sectionId] || 12;
+        if (currentVisible >= totalCount || loadingMoreSections[sectionId]) return;
+
+        setLoadingMoreSections((prev) => ({ ...prev, [sectionId]: true }));
+
+        setTimeout(() => {
+            setVisibleCounts((prev) => ({
+                ...prev,
+                [sectionId]: Math.min(currentVisible + 8, totalCount),
+            }));
+            setLoadingMoreSections((prev) => ({ ...prev, [sectionId]: false }));
+        }, 500);
+    };
 
     const carouselRef = useRef(null);
     const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
@@ -119,7 +140,7 @@ const HomeScreen = ({ navigation }) => {
             // Fetch categories and products in parallel
             const [categoriesData, productsData] = await Promise.all([
                 ProductService.getCategories(),
-                ProductService.getProducts({ limit: 20 })
+                ProductService.getProducts({ limit: 100 })
             ]);
 
             let finalCategories = categoriesData || [];
@@ -160,6 +181,97 @@ const HomeScreen = ({ navigation }) => {
         } finally {
             setLoading(false);
         }
+    };
+
+    // Helper to group products category-wise
+    const getCategorySections = () => {
+        if (!products || products.length === 0) return [];
+
+        const sectionMap = {};
+
+        products.forEach((prod) => {
+            const catId = prod.categoryId?._id || prod.categoryId?.id || (typeof prod.categoryId === 'string' ? prod.categoryId : 'uncategorized');
+            const matchedCat = categories.find((c) => String(c._id || c.id) === String(catId));
+
+            const catName = matchedCat
+                ? (currentLanguage === 'hi' && matchedCat.translatedName ? matchedCat.translatedName : matchedCat.name)
+                : (prod.categoryName || 'Daily Essentials');
+
+            if (!sectionMap[catId]) {
+                sectionMap[catId] = {
+                    id: catId,
+                    categoryObj: matchedCat || { _id: catId, name: catName },
+                    title: catName,
+                    icon: matchedCat?.icon || 'store-outline',
+                    products: [],
+                };
+            }
+            sectionMap[catId].products.push(prod);
+        });
+
+        return Object.values(sectionMap);
+    };
+
+    // Helper to get subcategory filter tabs dynamically from section products
+    const getSubcategoryTabsForSection = (sec) => {
+        const subcatMap = new Map();
+
+        // 1. Extract dynamic subcategories present in this section's products
+        (sec.products || []).forEach((prod) => {
+            const subObj = prod.subcategoryId;
+            const subId = subObj?._id || subObj?.id || (typeof subObj === 'string' ? subObj : null);
+            let subName = subObj?.name || prod.subCategoryName || prod.subcategoryName;
+
+            if (subName && typeof subName === 'string' && subName.trim()) {
+                const cleanName = subName.trim();
+                const key = cleanName.toLowerCase();
+                if (!subcatMap.has(key)) {
+                    subcatMap.set(key, {
+                        id: subId ? String(subId) : `sub_${key}`,
+                        name: cleanName,
+                        subcategoryId: subId ? String(subId) : null,
+                    });
+                }
+            }
+        });
+
+        const dynamicTabs = Array.from(subcatMap.values());
+
+        return [
+            { id: 'all', name: 'All Items', subcategoryId: null },
+            ...dynamicTabs
+        ];
+    };
+
+    // Helper to get filtered products for a category section dynamically
+    const getFilteredProductsForSection = (sec) => {
+        const selectedTabId = activeSubcats[sec.id] || 'all';
+        if (selectedTabId === 'all') return sec.products;
+
+        const tabs = getSubcategoryTabsForSection(sec);
+        const selectedTab = tabs.find(t => t.id === selectedTabId);
+        if (!selectedTab) return sec.products;
+
+        const targetName = (selectedTab.name || '').toLowerCase();
+        const targetId = selectedTab.subcategoryId || selectedTab.id;
+
+        const filtered = sec.products.filter((prod) => {
+            const subObj = prod.subcategoryId;
+            const pSubId = subObj?._id || subObj?.id || (typeof subObj === 'string' ? subObj : null);
+            let pSubName = (subObj?.name || prod.subCategoryName || prod.subcategoryName || '').toLowerCase();
+
+            // Direct ID match
+            if (pSubId && String(pSubId) === String(targetId)) return true;
+
+            // Direct name match
+            if (pSubName && (pSubName === targetName || pSubName.includes(targetName) || targetName.includes(pSubName))) {
+                return true;
+            }
+
+            return false;
+        });
+
+        return filtered.length > 0 ? filtered : sec.products;
     };
 
     const handleCategoryPress = (category) => navigation.navigate('Category', { category });
@@ -271,15 +383,18 @@ const HomeScreen = ({ navigation }) => {
         <View style={styles.container}>
             <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
-            {/* Subtle Gradient & Ambient Glow Blobs Background */}
-            <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
-                <View style={styles.ambientBlobTopRight} />
-                <View style={styles.ambientBlobMidLeft} />
-                <View style={styles.ambientBlobBottomRight} />
-            </View>
-
             {/* ===== STICKY HEADER (Location, SearchBar, Popular Tags & Quick Categories Sticky) ===== */}
-            <View style={styles.stickyHeaderWrapper}>
+            <Animated.View style={[
+                styles.stickyHeaderWrapper,
+                {
+                    zIndex: 999,
+                    elevation: 12,
+                    shadowColor: '#7C3AED',
+                    shadowOffset: { width: 0, height: 8 },
+                    shadowOpacity: 0.12,
+                    shadowRadius: 15,
+                }
+            ]}>
                 <Header
                     showLocation
                     location={selectedAddress?.type || 'Home'}
@@ -329,7 +444,7 @@ const HomeScreen = ({ navigation }) => {
                         </ScrollView>
                     </View>
                 </Header>
-            </View>
+            </Animated.View>
 
             {/* ===== SCROLLABLE CONTENT (NON-STICKY) ===== */}
             <Animated.ScrollView
@@ -387,9 +502,9 @@ const HomeScreen = ({ navigation }) => {
                 </View>
 
                 {/* 4 Feature Grid Cards (Blinkit / Quick-Commerce Style with Hugeicons) */}
-                <ScrollView 
-                    horizontal 
-                    showsHorizontalScrollIndicator={false} 
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
                     contentContainerStyle={styles.featureGridContainer}
                 >
                     {[
@@ -444,67 +559,149 @@ const HomeScreen = ({ navigation }) => {
                     )}
                 </View>
 
-                {/* Flash Deals Section (with Timer Badge) */}
-                <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <View style={styles.sectionTitleRow}>
-                            <MaterialCommunityIcons name="lightning-bolt" size={20} color="#7C3AED" />
-                            <Text style={styles.sectionTitle}>Flash Deals</Text>
-                            <View style={styles.timerBadge}>
-                                <MaterialCommunityIcons name="clock-outline" size={12} color="#7C3AED" />
-                                <Text style={styles.timerText}>08 : 45 : 12</Text>
-                            </View>
-                        </View>
-                        <TouchableOpacity style={styles.seeAllButton}>
-                            <Text style={styles.seeAllText}>{t('viewAll')}</Text>
-                            <MaterialCommunityIcons name="chevron-right" size={16} color={COLORS.secondary} />
-                        </TouchableOpacity>
-                    </View>
-                    {products.length > 0 ? (
-                        <FlatList
-                            data={products.slice(0, 6)}
-                            renderItem={renderProduct}
-                            keyExtractor={(item) => item._id}
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.productList}
-                        />
-                    ) : (
-                        <View style={styles.emptySection}>
-                            <Text style={styles.emptyText}>{t('noProducts')}</Text>
-                        </View>
-                    )}
-                </View>
+                {/* Category-Wise Product Sections */}
+                {getCategorySections().map((sec) => {
+                    const filteredProducts = getFilteredProductsForSection(sec);
+                    if (!filteredProducts || filteredProducts.length === 0) return null;
 
-                {/* Best Sellers */}
-                <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <View style={styles.sectionTitleRow}>
-                            <View style={[styles.sectionBadge, { backgroundColor: '#E8F5E9' }]}>
-                                <MaterialCommunityIcons name="trending-up" size={12} color={COLORS.secondary} />
+                    const tabs = getSubcategoryTabsForSection(sec);
+                    const currentActiveTab = activeSubcats[sec.id] || 'all';
+
+                    const totalFilteredCount = filteredProducts.length;
+                    // Dynamic Layout Rule: < 12 items -> Single Row (1 row); >= 12 items -> 2 Rows
+                    const isSingleRow = totalFilteredCount < 12;
+
+                    const currentVisible = visibleCounts[sec.id] || 12;
+                    const itemsToShow = filteredProducts.slice(0, currentVisible);
+                    const isLoadingMore = !!loadingMoreSections[sec.id];
+                    const hasMore = currentVisible < totalFilteredCount;
+
+                    return (
+                        <View key={sec.id} style={styles.section}>
+                            <View style={styles.sectionHeader}>
+                                <View style={{ flex: 1, paddingRight: 8 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <Text style={styles.sectionTitle}>{sec.title}</Text>
+                                        <View style={{ flex: 1, height: 2, marginLeft: 10, justifyContent: 'center' }}>
+                                            <Svg height="2" width="100%">
+                                                <Line
+                                                    x1="0"
+                                                    y1="1"
+                                                    x2="100%"
+                                                    y2="1"
+                                                    stroke="#CBD5E1"
+                                                    strokeWidth="2"
+                                                    strokeDasharray="6, 4"
+                                                />
+                                            </Svg>
+                                        </View>
+                                    </View>
+                                    <Text style={styles.sectionSubtitle}>{totalFilteredCount} items available</Text>
+                                </View>
+                                <TouchableOpacity
+                                    style={styles.seeAllButton}
+                                    onPress={() => handleCategoryPress(sec.categoryObj)}
+                                >
+                                    <Text style={styles.seeAllText}>{t('viewAll')}</Text>
+                                    <MaterialCommunityIcons name="chevron-right" size={16} color="#7C3AED" />
+                                </TouchableOpacity>
                             </View>
-                            <Text style={styles.sectionTitle}>{t('bestSellers')}</Text>
+
+                            {/* Premium Connected Outlined Category Tab Navigation */}
+                            {tabs.length > 1 && (
+                                <CategoryTabBar
+                                    tabs={tabs}
+                                    activeTabId={currentActiveTab}
+                                    onTabSelect={(tabId) => {
+                                        setActiveSubcats((prev) => ({ ...prev, [sec.id]: tabId }));
+                                        setVisibleCounts((prev) => ({ ...prev, [sec.id]: 12 }));
+                                    }}
+                                    brandColor="#7C3AED"
+                                    activeBgColor="#F3E8FF"
+                                    inactiveTextColor="#1E293B"
+                                />
+                            )}
+
+                            {/* Product List: 1-Row for <12 items, 2-Rows for >=12 items with Skeleton Loading */}
+                            {isSingleRow ? (() => {
+                                let singleRowData = [...itemsToShow];
+                                if (isLoadingMore) {
+                                    singleRowData.push(
+                                        { _id: `skel-${sec.id}-1`, isSkeleton: true },
+                                        { _id: `skel-${sec.id}-2`, isSkeleton: true }
+                                    );
+                                }
+                                return (
+                                    <FlatList
+                                        data={singleRowData}
+                                        keyExtractor={(item, index) => item._id || item.id || `skel-${index}`}
+                                        horizontal
+                                        showsHorizontalScrollIndicator={false}
+                                        contentContainerStyle={styles.productList2Rows}
+                                        onEndReached={() => {
+                                            if (hasMore && !isLoadingMore) {
+                                                handleLoadMore(sec.id, totalFilteredCount);
+                                            }
+                                        }}
+                                        onEndReachedThreshold={0.5}
+                                        renderItem={({ item }) => {
+                                            if (item.isSkeleton) {
+                                                return <ProductCardSkeleton />;
+                                            }
+                                            return renderProduct({ item });
+                                        }}
+                                    />
+                                );
+                            })() : (() => {
+                                const pairedProducts = [];
+                                for (let i = 0; i < itemsToShow.length; i += 2) {
+                                    pairedProducts.push({
+                                        id: `pair-${sec.id}-${i}`,
+                                        items: itemsToShow.slice(i, i + 2)
+                                    });
+                                }
+                                if (isLoadingMore) {
+                                    pairedProducts.push(
+                                        { id: `skel-pair-${sec.id}-1`, isSkeletonPair: true },
+                                        { id: `skel-pair-${sec.id}-2`, isSkeletonPair: true }
+                                    );
+                                }
+                                return (
+                                    <FlatList
+                                        data={pairedProducts}
+                                        keyExtractor={(item) => item.id}
+                                        horizontal
+                                        showsHorizontalScrollIndicator={false}
+                                        contentContainerStyle={styles.productList2Rows}
+                                        onEndReached={() => {
+                                            if (hasMore && !isLoadingMore) {
+                                                handleLoadMore(sec.id, totalFilteredCount);
+                                            }
+                                        }}
+                                        onEndReachedThreshold={0.5}
+                                        renderItem={({ item }) => {
+                                            if (item.isSkeletonPair) {
+                                                return (
+                                                    <View style={styles.twoRowColumnContainer}>
+                                                        <ProductCardSkeleton />
+                                                        <ProductCardSkeleton />
+                                                    </View>
+                                                );
+                                            }
+                                            const pair = item.items;
+                                            return (
+                                                <View style={styles.twoRowColumnContainer}>
+                                                    {renderProduct({ item: pair[0] })}
+                                                    {pair[1] ? renderProduct({ item: pair[1] }) : <View style={{ width: 155 }} />}
+                                                </View>
+                                            );
+                                        }}
+                                    />
+                                );
+                            })()}
                         </View>
-                        <TouchableOpacity style={styles.seeAllButton}>
-                            <Text style={styles.seeAllText}>{t('viewAll')}</Text>
-                            <MaterialCommunityIcons name="chevron-right" size={16} color={COLORS.secondary} />
-                        </TouchableOpacity>
-                    </View>
-                    {products.length > 6 ? (
-                        <FlatList
-                            data={products.slice(6, 12)}
-                            renderItem={renderProduct}
-                            keyExtractor={(item) => item._id}
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.productList}
-                        />
-                    ) : (
-                        <View style={styles.emptySection}>
-                            <Text style={styles.emptyText}>{t('noProducts')}</Text>
-                        </View>
-                    )}
-                </View>
+                    );
+                })}
 
                 <View style={styles.bottomPadding} />
             </Animated.ScrollView>
@@ -521,36 +718,6 @@ const styles = StyleSheet.create({
         flexDirection: 'column',
         backgroundColor: '#FAFAFC', // Subtle soft tint background
         position: 'relative',
-    },
-    ambientBlobTopRight: {
-        position: 'absolute',
-        top: 160,
-        right: -70,
-        width: 240,
-        height: 240,
-        borderRadius: 120,
-        backgroundColor: '#FFE0B2',
-        opacity: 0.28,
-    },
-    ambientBlobMidLeft: {
-        position: 'absolute',
-        top: 420,
-        left: -90,
-        width: 260,
-        height: 260,
-        borderRadius: 130,
-        backgroundColor: '#C8E6C9',
-        opacity: 0.25,
-    },
-    ambientBlobBottomRight: {
-        position: 'absolute',
-        top: 750,
-        right: -80,
-        width: 250,
-        height: 250,
-        borderRadius: 125,
-        backgroundColor: '#F8BBD0',
-        opacity: 0.22,
     },
     heroBannerWrapper: {
         marginTop: 4,
@@ -634,7 +801,8 @@ const styles = StyleSheet.create({
         top: 0,
         left: 0,
         right: 0,
-        zIndex: 100,
+        zIndex: 999,
+        elevation: 100,
         backgroundColor: 'transparent',
     },
     featureGridContainer: {
@@ -693,14 +861,77 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     section: {
-        marginTop: 14,
+        marginTop: 26,
+        marginBottom: 6,
     },
     sectionHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         paddingHorizontal: 16,
-        marginBottom: 14,
+        marginBottom: 12,
+    },
+    dashedHeaderLine: {
+        flex: 1,
+        height: 1,
+        borderTopWidth: 1.5,
+        borderColor: '#CBD5E1',
+        borderStyle: 'dashed',
+        marginHorizontal: 12,
+    },
+    subcatTabWrapper: {
+        marginTop: 6,
+        marginBottom: 16,
+        position: 'relative',
+        height: 38,
+        justifyContent: 'flex-end',
+    },
+    subcatTabUnderline: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: 2,
+        backgroundColor: '#E11D48',
+        zIndex: 1,
+    },
+    subcatTabScroll: {
+        paddingHorizontal: 16,
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        gap: 16,
+        zIndex: 2,
+    },
+    subcatTabItem: {
+        paddingHorizontal: 16,
+        paddingTop: 7,
+        paddingBottom: 7,
+        borderTopLeftRadius: 14,
+        borderTopRightRadius: 14,
+        borderBottomLeftRadius: 0,
+        borderBottomRightRadius: 0,
+        borderWidth: 2,
+        borderColor: 'transparent',
+        backgroundColor: 'transparent',
+        marginBottom: -1,
+    },
+    subcatTabItemActive: {
+        backgroundColor: '#FFF0F4',
+        borderTopColor: '#E11D48',
+        borderLeftColor: '#E11D48',
+        borderRightColor: '#E11D48',
+        borderBottomColor: '#FFF0F4',
+        borderBottomWidth: 2,
+    },
+    subcatTabText: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#1E293B',
+        letterSpacing: -0.2,
+    },
+    subcatTabTextActive: {
+        color: '#E11D48',
+        fontWeight: '800',
     },
     sectionTitleRow: {
         flexDirection: 'row',
@@ -832,6 +1063,47 @@ const styles = StyleSheet.create({
     emptyText: {
         fontSize: 13,
         color: COLORS.textSecondary,
+    },
+    categoryHeaderIconBadge: {
+        width: 30,
+        height: 30,
+        borderRadius: 8,
+        backgroundColor: '#F3E8FF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 10,
+    },
+    categorySectionWrapper: {
+        marginBottom: 16,
+    },
+    categorySectionCard: {
+        marginHorizontal: 12,
+        backgroundColor: '#FAF8FE',
+        borderRadius: 20,
+        paddingVertical: 14,
+        paddingHorizontal: 4,
+        borderWidth: 1,
+        borderColor: '#EFE8FB',
+        shadowColor: '#7C3AED',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.04,
+        shadowRadius: 10,
+        elevation: 2,
+    },
+    categorySectionHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        marginBottom: 12,
+    },
+    twoRowColumnContainer: {
+        flexDirection: 'column',
+    },
+    productList2Rows: {
+        paddingHorizontal: 16,
+        paddingTop: 6,
+        paddingBottom: 4,
     },
     embeddedSearchWrapper: {
         marginTop: 6,

@@ -186,26 +186,12 @@ const Header = ({
                         />
                     ) : (
                         <LinearGradient
-                            colors={['#EAE0FF', '#F5EFFF', '#FAFAFC']}
+                            colors={['#F3E8FF', '#FAF5FF', '#FFFFFF']}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 0, y: 1 }}
                             style={StyleSheet.absoluteFillObject}
                         />
                     )
-                )}
-
-                {/* White background overlay that fades in when sticky */}
-                {scrollY && (
-                    <Animated.View
-                        style={[
-                            StyleSheet.absoluteFillObject,
-                            {
-                                backgroundColor: COLORS.white,
-                                opacity: whiteOverlayOpacity,
-                            }
-                        ]}
-                        pointerEvents="none"
-                    />
                 )}
 
                 {/* Content layer — sits above the background */}
@@ -258,7 +244,7 @@ const Header = ({
                                     <Text style={styles.locationHomeBold}>{location.toUpperCase()} - </Text>
                                     <Text style={styles.locationAddressText}>{addressDetail || subtitle}</Text>
                                 </Text>
-                                <ArrowDown01Icon size={16} color={COLORS.text} strokeWidth={2} />
+                                <ArrowDown01Icon size={16} color="#111111" strokeWidth={2} />
                             </TouchableOpacity>
 
                             <View style={styles.topActionsContainer}>
@@ -351,6 +337,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         position: 'relative',
         paddingBottom: 12,
+        backgroundColor: '#F3E8FF',
     },
     topContentCollapsible: {
         overflow: 'hidden',
@@ -404,7 +391,6 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: '700',
         color: '#444444',
-        opacity: 0.9,
     },
     backIconButton: {
         width: 34,

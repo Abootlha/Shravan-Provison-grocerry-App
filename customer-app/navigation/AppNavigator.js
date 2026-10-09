@@ -13,6 +13,7 @@ import {
 } from 'hugeicons-react-native';
 import { useSelector } from 'react-redux';
 import { useTranslation } from '../hooks/useTranslation';
+import { HomeSvgIcon, SearchSvgIcon, CategoriesSvgIcon, ProfileSvgIcon } from '../components/BottomTabsIcons';
 
 import {
     SplashScreen,
@@ -33,6 +34,7 @@ import {
     OrdersHistoryScreen,
     LocationScreen,
     AddAddressScreen,
+    WishlistScreen,
 } from '../screens';
 import LanguageSelectionScreen from '../screens/LanguageSelectionScreen';
 import { COLORS } from '../constants';
@@ -95,11 +97,11 @@ const CustomTabBar = ({ state, descriptors, navigation }) => {
                     const isFocused = state.index === index;
 
                     const tabIconMap = {
-                        Home: Home01Icon,
-                        Categories: GridViewIcon,
-                        Search: Search01Icon,
+                        Home: HomeSvgIcon,
+                        Categories: CategoriesSvgIcon,
+                        Search: SearchSvgIcon,
                         Cart: ShoppingCart01Icon,
-                        Account: UserIcon,
+                        Account: ProfileSvgIcon,
                     };
 
                     const IconComponent = tabIconMap[route.name];
@@ -120,26 +122,23 @@ const CustomTabBar = ({ state, descriptors, navigation }) => {
                             style={styles.tabItem}
                             activeOpacity={0.8}
                         >
-                            <View style={[styles.tabContentPill, isFocused && styles.tabContentPillActive]}>
-                                <View style={styles.iconContainer}>
-                                    {IconComponent && (
-                                        <IconComponent
-                                            size={22}
-                                            color={isFocused ? '#6C3CF4' : COLORS.textSecondary}
-                                            strokeWidth={isFocused ? 2.5 : 1.8}
-                                        />
-                                    )}
-                                    {route.name === 'Cart' && totalItems > 0 && (
-                                        <View style={styles.badge}>
-                                            <Text style={styles.badgeText}>{totalItems}</Text>
-                                        </View>
-                                    )}
-                                </View>
-                                <Text style={[styles.tabLabel, isFocused && styles.tabLabelActive]}>
-                                    {tabLabels[route.name]}
-                                </Text>
+                            <View style={[styles.iconContainer, isFocused && styles.tabContentPillActive]}>
+                                {IconComponent && (
+                                    <IconComponent
+                                        size={24}
+                                        color={isFocused ? '#6C3CF4' : COLORS.textSecondary}
+                                        strokeWidth={isFocused ? 2.5 : 2}
+                                    />
+                                )}
+                                {route.name === 'Cart' && totalItems > 0 && (
+                                    <View style={styles.badge}>
+                                        <Text style={styles.badgeText}>{totalItems}</Text>
+                                    </View>
+                                )}
                             </View>
-                            {isFocused && <View style={styles.activeDot} />}
+                            <Text style={[styles.tabLabel, isFocused && styles.tabLabelActive]}>
+                                {tabLabels[route.name]}
+                            </Text>
                         </TouchableOpacity>
                     );
                 })}
@@ -183,6 +182,7 @@ const AppNavigator = () => {
             <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} />
             <Stack.Screen name="Location" component={LocationScreen} />
             <Stack.Screen name="AddAddress" component={AddAddressScreen} />
+            <Stack.Screen name="Wishlist" component={WishlistScreen} />
         </Stack.Navigator>
     );
 };
@@ -219,27 +219,22 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         paddingVertical: 2,
     },
-    tabContentPill: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 16,
-        minWidth: 58,
-    },
-    tabContentPillActive: {
-        backgroundColor: '#F3E8FF',
-    },
     iconContainer: {
         position: 'relative',
         alignItems: 'center',
         justifyContent: 'center',
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+    },
+    tabContentPillActive: {
+        backgroundColor: '#F3E8FF',
     },
     badge: {
         position: 'absolute',
         top: -6,
         right: -10,
-        backgroundColor: '#6C3CF4',
+        backgroundColor: '#FF3B30',
         borderRadius: 10,
         minWidth: 18,
         height: 18,
@@ -263,13 +258,6 @@ const styles = StyleSheet.create({
     tabLabelActive: {
         color: '#6C3CF4',
         fontWeight: '800',
-    },
-    activeDot: {
-        width: 4,
-        height: 4,
-        borderRadius: 2,
-        backgroundColor: '#6C3CF4',
-        marginTop: 3,
     },
 });
 

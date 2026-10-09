@@ -7,24 +7,36 @@ const getMonolithBaseUrl = () => {
     if (IS_PRODUCTION) {
         return 'https://api.lumioui.com/api/v1';
     }
-
     return 'http://localhost:3000/api/v1';
 };
 
-export const API_BASE_URL = Constants.expoConfig?.extra?.API_BASE_URL || getMonolithBaseUrl();
-export const AUTH_URL = Constants.expoConfig?.extra?.AUTH_SERVICE_URL || API_BASE_URL;
-export const USER_URL = Constants.expoConfig?.extra?.USER_SERVICE_URL || API_BASE_URL;
-export const RIDER_URL = Constants.expoConfig?.extra?.RIDER_SERVICE_URL || API_BASE_URL;
-export const ORDER_URL = Constants.expoConfig?.extra?.ORDER_SERVICE_URL || API_BASE_URL;
-export const PRODUCT_URL = Constants.expoConfig?.extra?.PRODUCT_SERVICE_URL || API_BASE_URL;
-export const CART_URL = Constants.expoConfig?.extra?.CART_SERVICE_URL || API_BASE_URL;
-export const LOCATION_URL = Constants.expoConfig?.extra?.LOCATION_SERVICE_URL || API_BASE_URL;
+const resolveLocalhost = (url) => {
+    if (IS_PRODUCTION || !url || !url.includes('localhost')) return url;
+    
+    let host = 'localhost';
+    if (Constants.expoConfig?.hostUri) {
+        host = Constants.expoConfig.hostUri.split(':')[0];
+    } else if (typeof window !== 'undefined' && window.location?.hostname) {
+        host = window.location.hostname;
+    }
+    
+    return url.replace('localhost', host);
+};
 
-export const TRACKING_URL = Constants.expoConfig?.extra?.TRACKING_URL || (
+export const API_BASE_URL = resolveLocalhost(Constants.expoConfig?.extra?.API_BASE_URL || getMonolithBaseUrl());
+export const AUTH_URL = resolveLocalhost(Constants.expoConfig?.extra?.AUTH_SERVICE_URL) || API_BASE_URL;
+export const USER_URL = resolveLocalhost(Constants.expoConfig?.extra?.USER_SERVICE_URL) || API_BASE_URL;
+export const RIDER_URL = resolveLocalhost(Constants.expoConfig?.extra?.RIDER_SERVICE_URL) || API_BASE_URL;
+export const ORDER_URL = resolveLocalhost(Constants.expoConfig?.extra?.ORDER_SERVICE_URL) || API_BASE_URL;
+export const PRODUCT_URL = resolveLocalhost(Constants.expoConfig?.extra?.PRODUCT_SERVICE_URL) || API_BASE_URL;
+export const CART_URL = resolveLocalhost(Constants.expoConfig?.extra?.CART_SERVICE_URL) || API_BASE_URL;
+export const LOCATION_URL = resolveLocalhost(Constants.expoConfig?.extra?.LOCATION_SERVICE_URL) || API_BASE_URL;
+
+export const TRACKING_URL = resolveLocalhost(Constants.expoConfig?.extra?.TRACKING_URL || (
     IS_PRODUCTION
         ? 'https://api.lumioui.com/tracking'
         : 'http://localhost:3000/tracking'
-);
+));
 
 export const API_URL = ORDER_URL;
 

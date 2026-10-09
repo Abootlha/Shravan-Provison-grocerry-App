@@ -357,8 +357,8 @@ export default function ProductsManager() {
                     const row = rows[i];
                     try {
                         let imagesArray = [];
-                        if (row.Images) {
-                            imagesArray = row.Images.split('|').filter(Boolean);
+                        if (row.Images && row.Images.trim() !== '') {
+                            imagesArray = row.Images.split('|').map((img: string) => img.trim()).filter(Boolean);
                         } else {
                             imagesArray = [row.ImageURL1, row.ImageURL2, row.ImageURL3, row.ImageURL4].filter(Boolean);
                         }
@@ -384,7 +384,7 @@ export default function ProductsManager() {
                             data.barcode = row.Barcode.trim();
                         }
                         
-                        if (!data.name || !data.price) {
+                        if (!data.name || data.price === undefined || data.price === null || isNaN(data.price)) {
                             throw new Error("Missing required fields (Name, Price)");
                         }
                         if (!data.categoryId) {

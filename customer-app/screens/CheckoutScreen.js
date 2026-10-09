@@ -13,7 +13,9 @@ import {
     TextInput,
     Platform,
     Modal,
+    DeviceEventEmitter,
 } from 'react-native';
+import CBWrapper from 'payu-core-pg-react';
 import {
     ArrowLeft02Icon,
     ShoppingCart01Icon,
@@ -51,7 +53,7 @@ import { setSavedAddresses, setSelectedAddress } from '../store/slices/locationS
 import { clearCart, incrementQuantity, decrementQuantity, removeFromCart } from '../store/slices/cartSlice';
 import { useTranslation } from '../hooks/useTranslation';
 
-const CheckoutScreen = ({ navigation }) => {
+const CheckoutScreen = ({ navigation, route }) => {
     const dispatch = useDispatch();
     const { currentLanguage } = useTranslation();
     const isHi = currentLanguage === 'hi';
@@ -80,6 +82,30 @@ const CheckoutScreen = ({ navigation }) => {
         return () => {
             paymentTimersRef.current.forEach(t => clearTimeout(t));
         };
+    }, []);
+
+    useEffect(() => {
+        if (route?.params?.payment === 'failed') {
+            Alert.alert('Payment Failed', 'Your transaction could not be processed. Please try another payment method or try again.');
+            // Clear param to avoid showing alert multiple times if re-rendered
+            navigation.setParams({ payment: undefined });
+        } else if (route?.params?.payment === 'success') {
+            // Wait a brief moment to ensure states are initialized, then place order
+            setTimeout(() => {
+                executeOrderPlacement();
+            }, 500);
+            navigation.setParams({ payment: undefined });
+        }
+    }, [route?.params?.payment]);
+
+    useEffect(() => {
+        const cbListener = DeviceEventEmitter.addListener("CBListener", (event) => {
+            console.log("CBListener event:", event);
+            if (event.eveneType === "onPaymentSuccess") {
+                // Custom handling if needed, though startPayment callback should suffice
+            }
+        });
+        return () => cbListener.remove();
     }, []);
 
     const clearPaymentTimers = () => {
@@ -332,34 +358,55 @@ const CheckoutScreen = ({ navigation }) => {
                         document.body.appendChild(form);
                         form.submit();
                     } else {
-                        const htmlContent = `
-                            <html>
-                            <head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Processing Payment</title></head>
-                            <body onload="document.forms['payuForm'].submit()">
-                                <form action="https://secure.payu.in/_payment" method="post" name="payuForm">
-                                    <input type="hidden" name="key" value="${hashData.key}" />
-                                    <input type="hidden" name="txnid" value="${hashData.txnid}" />
-                                    <input type="hidden" name="amount" value="${hashData.amount}" />
-                                    <input type="hidden" name="productinfo" value="${hashData.productinfo}" />
-                                    <input type="hidden" name="firstname" value="${hashData.firstname}" />
-                                    <input type="hidden" name="email" value="${hashData.email}" />
-                                    <input type="hidden" name="phone" value="${hashData.phone}" />
-                                    <input type="hidden" name="surl" value="${hashData.surl}" />
-                                    <input type="hidden" name="furl" value="${hashData.furl}" />
-                                    <input type="hidden" name="hash" value="${hashData.hash}" />
-                                    <input type="hidden" name="pg" value="${hashData.pg}" />
-                                    <input type="hidden" name="bankcode" value="${hashData.bankcode}" />
-                                </form>
-                                <div style="display:flex; justify-content:center; align-items:center; height:100vh; flex-direction:column; font-family:sans-serif;">
-                                    <h3>Redirecting securely to ${PAYMENT_MAP[selectedPayment] || 'Payment Gateway'}...</h3>
-                                    <p>Please do not close this window.</p>
-                                </div>
-                            </body>
-                            </html>
-                        `;
-                        setTimeout(() => {
-                            setPayuHtml(htmlContent);
-                        }, 100);
+                        // React Native SDK for Android/iOS
+                        const payUPaymentParams = {
+                            payUPaymentParams: {
+                                key: hashData.key,
+                                transaction_id: hashData.txnid,
+                                amount: String(hashData.amount),
+                                product_info: hashData.productinfo,
+                                first_name: hashData.firstname,
+                                email: hashData.email,
+                                phone: hashData.phone,
+                                ios_surl: hashData.surl,
+                                ios_furl: hashData.furl,
+                                android_surl: hashData.surl,
+                                android_furl: hashData.furl,
+                                environment: "0", // "1" for Stage, "0" for production
+                                user_credentials: `${hashData.email}:${hashData.phone}`,
+                                hashes: {
+                                    payment: hashData.hash,
+                                },
+                                bankcode: hashData.bankcode,
+                            }
+                        };
+                        
+                        let paymentMode = hashData.pg === 'UPI' ? 'NB' : hashData.pg === 'CC' ? 'CC' : 'CASH'; // NB stands for Netbanking/UPI in some SDKs, check mapping
+
+                        if (!CBWrapper || typeof CBWrapper.startPayment !== 'function') {
+                            Alert.alert("Not Supported", "PayU SDK requires a Native Build (APK/IPA). It does not work inside Expo Go.");
+                            setIsProcessingPayment(false);
+                            return;
+                        }
+
+                        CBWrapper.startPayment(
+                            payUPaymentParams,
+                            paymentMode,
+                            (error) => {
+                                console.log("-----------Error Callback---------");
+                                console.log(error);
+                                console.log("------------------------------------");
+                                Alert.alert("Payment Error", "Transaction failed or cancelled");
+                                setIsProcessingPayment(false);
+                            },
+                            (payuResponse) => {
+                                console.log("-----------Success Callback---------");
+                                console.log(payuResponse);
+                                console.log("--------------------------------------");
+                                // On success, process order
+                                executeOrderPlacement();
+                            }
+                        );
                     }
                 } else {
                     throw new Error("Invalid hash data");

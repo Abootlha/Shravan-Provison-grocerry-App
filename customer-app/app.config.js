@@ -85,6 +85,9 @@ module.exports = () => ({
       MAPMYINDIA_API_KEY: loadEnvValue('MAPMYINDIA_API_KEY', loadEnvValue('MAPPLS_API_KEY')),
       MAPMYINDIA_CLIENT_ID: loadEnvValue('MAPMYINDIA_CLIENT_ID'),
       MAPMYINDIA_CLIENT_SECRET: loadEnvValue('MAPMYINDIA_CLIENT_SECRET'),
+      eas: {
+        projectId: '81680cdd-a244-4757-943a-2b8b95cb6285',
+      },
     },
   },
 });
