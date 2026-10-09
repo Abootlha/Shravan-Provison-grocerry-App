@@ -1,12 +1,16 @@
 /**
  * Script to identify and fix subcategories with large base64 images
- * Run with: node fix-large-images.js
+ * Read-only: reports offenders, does not modify data.
+ * Run from backend/: MONGODB_URI=<uri> node scripts/fix-large-images.js
  */
 
 const mongoose = require('mongoose');
 
-// MongoDB connection string
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/grocery-app';
+const MONGODB_URI = process.env.MONGODB_URI;
+if (!MONGODB_URI) {
+    console.error('MONGODB_URI is not set. Example: MONGODB_URI=mongodb://localhost:27017/shravankirana node scripts/fix-large-images.js');
+    process.exit(1);
+}
 
 // Connect to MongoDB
 mongoose.connect(MONGODB_URI)
@@ -56,7 +60,7 @@ async function fixLargeImages() {
         } else {
             console.log(`\n📋 Summary: Found ${foundIssues} subcategory(ies) with large images\n`);
             console.log('🔧 To fix:');
-            console.log('   1. Go to admin panel: http://192.168.1.7:4321/subcategories');
+            console.log('   1. Open the admin panel > Subcategories');
             console.log('   2. Edit the subcategory listed above');
             console.log('   3. Either:');
             console.log('      - Switch to "Image URL" tab and paste a URL');

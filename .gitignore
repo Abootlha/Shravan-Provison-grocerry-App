@@ -25,10 +25,15 @@ out/
 # Test coverage
 coverage/
 
-# IDE
+# IDE / AI-tool workspaces
 .DS_Store
 .idea/
-.vscode/
+# Keep shared editor settings (.vscode/settings.json, extensions.json); ignore the rest
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.kiro/
+.opencode/
 *.swp
 *.swo
 
@@ -51,3 +56,20 @@ Thumbs.db
 .cache/
 .expo/
 **/.expo/
+
+# Redis / database dumps
+*.rdb
+dump.rdb
+
+# Scraper output dumps (tools/scraper keeps only source files)
+tools/scraper/*.html
+tools/scraper/*.png
+tools/scraper/body.txt
+tools/scraper/output.csv
+tools/scraper/img_log.json
+tools/scraper/links.txt
+
+# TLS material for infrastructure/nginx (mounted at runtime, never committed)
+infrastructure/nginx/ssl/
+*.pem
+*.key

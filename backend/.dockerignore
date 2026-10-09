@@ -1,0 +1,33 @@
+node_modules
+dist
+coverage
+*.tsbuildinfo
+*.log
+
+# Secrets: pass config via environment, never bake it into the image
+.env
+.env.*
+!.env.example
+
+# Data dumps
+*.rdb
+
+# Tests and one-off scripts are not needed in the image
+test
+**/*.spec.ts
+scripts
+check_orders.js
+create-admin.js
+restore_order.js
+test-*.js
+test_*.js
+verify-*.js
+
+# Tooling / docs
+.expo
+.git
+.vscode
+.idea
+*.md
+Dockerfile
+.dockerignore
