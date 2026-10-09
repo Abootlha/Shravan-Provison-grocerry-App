@@ -1,55 +1,62 @@
-const ENV_DEFAULTS = {
-    production: {
-        apiBaseUrl: 'https://api.lumioui.com/api/v1',
-        trackingUrl: 'https://api.lumioui.com/tracking',
-    },
-    development: {
-        apiBaseUrl: 'http://localhost:3000/api/v1',
-        trackingUrl: 'http://localhost:3000/tracking',
-    },
+// Runtime URLs are baked in at build time from PUBLIC_* env vars (see admin/.env.example).
+// Dev falls back to the local NestJS backend; production builds fail if the URLs are missing
+// so a misconfigured build can never silently point at the wrong API.
+
+const DEV_DEFAULTS = {
+    apiBaseUrl: 'http://localhost:3000/api/v1',
+    trackingUrl: 'http://localhost:3000/tracking',
 } as const;
 
 function trimTrailingSlash(value: string) {
     return value.replace(/\/+$/, '');
 }
 
-function readEnvValue(value: string | undefined, fallback: string) {
-    const normalized = value?.trim();
-    return normalized ? trimTrailingSlash(normalized) : fallback;
+function readEnv(...values: (string | undefined)[]): string | undefined {
+    for (const value of values) {
+        const normalized = value?.trim();
+        if (normalized) return trimTrailingSlash(normalized);
+    }
+    return undefined;
 }
 
-function getNodeEnv(): 'production' | 'development' {
-    const requestedEnv = (import.meta.env.PUBLIC_NODE_ENV || '').trim().toLowerCase();
-    return requestedEnv === 'production' ? 'production' : 'development';
+function requireEnv(name: string, value: string | undefined, devFallback: string): string {
+    if (value) return value;
+    if (import.meta.env.PROD) {
+        throw new Error(
+            `[admin config] ${name} must be set for production builds (see admin/.env.example).`
+        );
+    }
+    return devFallback;
 }
 
-function selectServiceUrl(value: string | undefined, fallback: string) {
-    return nodeEnv === 'production' ? fallback : readEnvValue(value, fallback);
-}
+const apiBaseUrl = requireEnv(
+    'PUBLIC_API_URL',
+    // PUBLIC_API_BASE_URL is the legacy name; still honoured.
+    readEnv(import.meta.env.PUBLIC_API_URL, import.meta.env.PUBLIC_API_BASE_URL),
+    DEV_DEFAULTS.apiBaseUrl,
+);
 
-const nodeEnv = getNodeEnv();
-const envDefaults = ENV_DEFAULTS[nodeEnv];
-const configuredApiBaseUrl = readEnvValue(import.meta.env.PUBLIC_API_BASE_URL, envDefaults.apiBaseUrl);
-const configuredTrackingUrl = readEnvValue(import.meta.env.PUBLIC_TRACKING_SERVICE_URL, envDefaults.trackingUrl);
-const configuredSocketUrl = readEnvValue(import.meta.env.PUBLIC_SOCKET_URL, configuredTrackingUrl);
+const trackingServiceUrl = requireEnv(
+    'PUBLIC_TRACKING_URL',
+    readEnv(import.meta.env.PUBLIC_TRACKING_URL, import.meta.env.PUBLIC_TRACKING_SERVICE_URL),
+    DEV_DEFAULTS.trackingUrl,
+);
 
-const apiBaseUrl = nodeEnv === 'production' ? envDefaults.apiBaseUrl : configuredApiBaseUrl;
-const trackingServiceUrl = nodeEnv === 'production' ? envDefaults.trackingUrl : configuredTrackingUrl;
-const socketUrl = nodeEnv === 'production' ? envDefaults.trackingUrl : configuredSocketUrl;
+const socketUrl = readEnv(import.meta.env.PUBLIC_SOCKET_URL) || trackingServiceUrl;
 
 export const appConfig = {
     mode: import.meta.env.MODE,
-    nodeEnv,
     isProduction: import.meta.env.PROD,
     apiBaseUrl,
-    authServiceUrl: selectServiceUrl(import.meta.env.PUBLIC_AUTH_SERVICE_URL, apiBaseUrl),
-    productServiceUrl: selectServiceUrl(import.meta.env.PUBLIC_PRODUCT_SERVICE_URL, apiBaseUrl),
-    orderServiceUrl: selectServiceUrl(import.meta.env.PUBLIC_ORDER_SERVICE_URL, apiBaseUrl),
-    riderServiceUrl: selectServiceUrl(import.meta.env.PUBLIC_RIDER_SERVICE_URL, apiBaseUrl),
-    analyticsServiceUrl: selectServiceUrl(import.meta.env.PUBLIC_ANALYTICS_SERVICE_URL, apiBaseUrl),
-    settingsServiceUrl: selectServiceUrl(import.meta.env.PUBLIC_SETTINGS_SERVICE_URL, apiBaseUrl),
-    subcategoryServiceUrl: selectServiceUrl(import.meta.env.PUBLIC_SUBCATEGORY_SERVICE_URL, apiBaseUrl),
-    itemGroupServiceUrl: selectServiceUrl(import.meta.env.PUBLIC_ITEM_GROUP_SERVICE_URL, apiBaseUrl),
+    // All admin traffic goes to the single NestJS backend.
+    authServiceUrl: apiBaseUrl,
+    productServiceUrl: apiBaseUrl,
+    orderServiceUrl: apiBaseUrl,
+    riderServiceUrl: apiBaseUrl,
+    analyticsServiceUrl: apiBaseUrl,
+    settingsServiceUrl: apiBaseUrl,
+    subcategoryServiceUrl: apiBaseUrl,
+    itemGroupServiceUrl: apiBaseUrl,
     trackingServiceUrl,
     socketUrl,
 };

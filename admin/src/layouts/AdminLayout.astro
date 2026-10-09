@@ -1,5 +1,8 @@
 ---
 import "../styles/global.css";
+import { getApiBaseUrl } from "../lib/config";
+
+const apiBase = getApiBaseUrl();
 
 interface Props {
   title: string;
@@ -84,6 +87,85 @@ function isActive(item: any): boolean {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{title} | ShravanKirana Admin</title>
     <link rel="preconnect" href="https://api.fontshare.com" />
+    <style is:inline>
+      html.auth-pending body { visibility: hidden; }
+    </style>
+    <!--
+      Auth guard: runs before the body renders so protected pages never flash for
+      signed-out users. Valid access token -> show page. Expired access token with a
+      refresh token -> refresh once, then show. Otherwise -> /login.
+      The API still enforces auth on every request; this only gates the UI.
+    -->
+    <script is:inline define:vars={{ apiBase }}>
+      (function () {
+        var root = document.documentElement;
+        root.classList.add("auth-pending");
+
+        function clearSession() {
+          ["adminToken", "adminRefreshToken", "adminUser", "adminLoginTime"].forEach(function (k) {
+            localStorage.removeItem(k);
+          });
+        }
+        function toLogin() {
+          try { clearSession(); } catch (e) {}
+          window.location.replace("/login");
+        }
+        function reveal() {
+          root.classList.remove("auth-pending");
+        }
+        function isExpired(token) {
+          try {
+            var part = token.split(".")[1];
+            if (part) {
+              var b64 = part.replace(/-/g, "+").replace(/_/g, "/");
+              b64 += "===".slice((b64.length + 3) % 4);
+              var claims = JSON.parse(atob(b64));
+              if (typeof claims.exp === "number") {
+                return Date.now() >= claims.exp * 1000 - 5000;
+              }
+            }
+          } catch (e) {}
+          var loginTime = parseInt(localStorage.getItem("adminLoginTime") || "", 10);
+          return !isFinite(loginTime) || Date.now() - loginTime > 2 * 60 * 60 * 1000;
+        }
+
+        try {
+          var token = localStorage.getItem("adminToken");
+          var refreshToken = localStorage.getItem("adminRefreshToken");
+
+          if (token && !isExpired(token)) {
+            reveal();
+            return;
+          }
+          if (!refreshToken) {
+            toLogin();
+            return;
+          }
+
+          fetch(apiBase + "/auth/refresh", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refreshToken: refreshToken }),
+          })
+            .then(function (res) {
+              return res.ok ? res.json() : null;
+            })
+            .then(function (data) {
+              if (!data || !data.accessToken) {
+                toLogin();
+                return;
+              }
+              localStorage.setItem("adminToken", data.accessToken);
+              if (data.refreshToken) localStorage.setItem("adminRefreshToken", data.refreshToken);
+              localStorage.setItem("adminLoginTime", String(Date.now()));
+              reveal();
+            })
+            .catch(toLogin);
+        } catch (e) {
+          toLogin();
+        }
+      })();
+    </script>
   </head>
   <body
     class="h-full"
@@ -475,7 +557,7 @@ function isActive(item: any): boolean {
                 </a>
                 <a
                   href="/login"
-                  onclick="localStorage.removeItem('adminToken'); localStorage.removeItem('adminUser');"
+                  id="logout-link"
                   class="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors"
                   style="color: var(--danger);"
                 >
@@ -513,6 +595,13 @@ function isActive(item: any): boolean {
     </div>
 
     <script>
+      import { api } from "../lib/api";
+
+      document.getElementById("logout-link")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        void api.logout();
+      });
+
       const iconPaths: Record<string, string> = {
         LayoutDashboard:
           '<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',
