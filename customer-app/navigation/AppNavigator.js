@@ -25,7 +25,6 @@ import {
     CategoriesScreen,
     ProductDetailScreen,
     SearchScreen,
-    CartScreen,
     CheckoutScreen,
     OrderTrackingScreen,
     OrderDetailsScreen,

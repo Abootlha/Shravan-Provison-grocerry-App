@@ -6,10 +6,13 @@ import {
     StatusBar,
     Animated,
     Dimensions,
+    Platform,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getAccessToken, getRefreshToken } from '../services/tokenStorage';
+import { parsePaymentReturnUrl } from '../services/paymentService';
 import { loginSuccess } from '../store/slices/authSlice';
 import { loadLanguage } from '../store/slices/languageSlice';
 
@@ -116,8 +119,8 @@ const SplashScreen = ({ navigation }) => {
 
             try {
                 const userJson = await AsyncStorage.getItem('customerUser');
-                const token = await AsyncStorage.getItem('customerAccessToken');
-                const refreshToken = await AsyncStorage.getItem('customerRefreshToken');
+                const token = await getAccessToken();
+                const refreshToken = await getRefreshToken();
 
                 if (!userJson || !token) {
                     throw new Error('No saved session');
@@ -129,6 +132,23 @@ const SplashScreen = ({ navigation }) => {
                     token,
                     refreshToken,
                 }));
+
+                // Web: back from PayU (PAYMENT_RETURN_URL?payment=...&orderId=...).
+                // Hand off to Checkout, which verifies the payment with the server.
+                const paymentReturn = Platform.OS === 'web' && typeof window !== 'undefined'
+                    ? parsePaymentReturnUrl(window.location.href)
+                    : null;
+                if (paymentReturn) {
+                    window.history.replaceState(null, '', window.location.pathname);
+                    navigation.reset({
+                        index: 1,
+                        routes: [
+                            { name: 'Main' },
+                            { name: 'Checkout', params: paymentReturn },
+                        ],
+                    });
+                    return;
+                }
 
                 navigation.replace('Main');
                 return;

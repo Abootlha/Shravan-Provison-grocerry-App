@@ -1,14 +1,13 @@
 import Constants from 'expo-constants';
 
-const PUBLIC_NODE_ENV = Constants.expoConfig?.extra?.PUBLIC_NODE_ENV || 'development';
+const extra = Constants.expoConfig?.extra || {};
+const PUBLIC_NODE_ENV = extra.PUBLIC_NODE_ENV || 'development';
 const IS_PRODUCTION = PUBLIC_NODE_ENV === 'production';
 
-const getMonolithBaseUrl = () => {
-    if (IS_PRODUCTION) {
-        return 'https://api.lumioui.com/api/v1';
-    }
-    return 'http://localhost:3000/api/v1';
-};
+// Development-only defaults. Production URLs must come from the build env
+// (eas.json profile env -> app.config.js -> extra); there is no silent fallback.
+const DEV_API_BASE_URL = 'http://localhost:3000/api/v1';
+const DEV_TRACKING_URL = 'http://localhost:3000/tracking';
 
 const resolveLocalhost = (url) => {
     if (IS_PRODUCTION || !url || !url.includes('localhost')) return url;
@@ -23,20 +22,28 @@ const resolveLocalhost = (url) => {
     return url.replace('localhost', host);
 };
 
-export const API_BASE_URL = resolveLocalhost(Constants.expoConfig?.extra?.API_BASE_URL || getMonolithBaseUrl());
-export const AUTH_URL = resolveLocalhost(Constants.expoConfig?.extra?.AUTH_SERVICE_URL) || API_BASE_URL;
-export const USER_URL = resolveLocalhost(Constants.expoConfig?.extra?.USER_SERVICE_URL) || API_BASE_URL;
-export const RIDER_URL = resolveLocalhost(Constants.expoConfig?.extra?.RIDER_SERVICE_URL) || API_BASE_URL;
-export const ORDER_URL = resolveLocalhost(Constants.expoConfig?.extra?.ORDER_SERVICE_URL) || API_BASE_URL;
-export const PRODUCT_URL = resolveLocalhost(Constants.expoConfig?.extra?.PRODUCT_SERVICE_URL) || API_BASE_URL;
-export const CART_URL = resolveLocalhost(Constants.expoConfig?.extra?.CART_SERVICE_URL) || API_BASE_URL;
-export const LOCATION_URL = resolveLocalhost(Constants.expoConfig?.extra?.LOCATION_SERVICE_URL) || API_BASE_URL;
+export const API_BASE_URL = resolveLocalhost(extra.API_BASE_URL || (IS_PRODUCTION ? '' : DEV_API_BASE_URL));
+export const AUTH_URL = resolveLocalhost(extra.AUTH_SERVICE_URL) || API_BASE_URL;
+export const USER_URL = resolveLocalhost(extra.USER_SERVICE_URL) || API_BASE_URL;
+export const RIDER_URL = resolveLocalhost(extra.RIDER_SERVICE_URL) || API_BASE_URL;
+export const ORDER_URL = resolveLocalhost(extra.ORDER_SERVICE_URL) || API_BASE_URL;
+export const PRODUCT_URL = resolveLocalhost(extra.PRODUCT_SERVICE_URL) || API_BASE_URL;
+export const CART_URL = resolveLocalhost(extra.CART_SERVICE_URL) || API_BASE_URL;
+export const LOCATION_URL = resolveLocalhost(extra.LOCATION_SERVICE_URL) || API_BASE_URL;
 
-export const TRACKING_URL = resolveLocalhost(Constants.expoConfig?.extra?.TRACKING_URL || (
-    IS_PRODUCTION
-        ? 'https://api.lumioui.com/tracking'
-        : 'http://localhost:3000/tracking'
-));
+export const TRACKING_URL = resolveLocalhost(extra.TRACKING_URL || (IS_PRODUCTION ? '' : DEV_TRACKING_URL));
+
+if (IS_PRODUCTION) {
+    const urls = { API_BASE_URL, AUTH_URL, USER_URL, ORDER_URL, PRODUCT_URL, LOCATION_URL, TRACKING_URL };
+    const bad = Object.entries(urls).filter(([, url]) => !url || /localhost|127\.0\.0\.1|10\.0\.2\.2/.test(url));
+    if (bad.length > 0) {
+        const message = '[config] Production build resolved an empty/localhost API URL ('
+            + bad.map(([key]) => key).join(', ')
+            + '). Set API_BASE_URL and TRACKING_URL in the EAS build profile env.';
+        console.error(message);
+        throw new Error(message);
+    }
+}
 
 export const API_URL = ORDER_URL;
 
@@ -45,7 +52,7 @@ export const API_CONFIG = {
 };
 
 export const MAPMYINDIA_CONFIG = {
-    apiKey: Constants.expoConfig?.extra?.MAPMYINDIA_API_KEY || process.env.MAPMYINDIA_API_KEY || '',
+    apiKey: extra.MAPMYINDIA_API_KEY || '',
     baseUrl: 'https://apis.mappls.com/advancedmaps/v1',
     directionsUrl: 'https://route.mappls.com/route/direction/route_adv/driving',
     geocodeUrl: 'https://atlas.mappls.com/api/places/geocode',

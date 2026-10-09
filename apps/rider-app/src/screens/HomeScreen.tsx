@@ -49,6 +49,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const [toggling, setToggling] = React.useState(false);
   const [locationEnabled, setLocationEnabled] = React.useState(false);
   const [locationAddress, setLocationAddress] = React.useState<string>('');
+  // Set when background tracking could not start (e.g. background permission
+  // denied) and shown once the rider returns to the app.
+  const backgroundTrackingWarningRef = React.useRef<string | null>(null);
 
   const checkLocationPermission = useCallback(async () => {
     const hasPermission = await locationService.hasPermissions();
@@ -68,6 +71,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       }
 
       if (nextAppState === 'active') {
+        const warning = backgroundTrackingWarningRef.current;
+        if (warning) {
+          backgroundTrackingWarningRef.current = null;
+          Alert.alert('Background location off', warning, [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          ]);
+        }
         await stopBackgroundTracking();
         const started = await startTracking();
         if (started) {
@@ -79,7 +90,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
       stopSocketTracking();
       stopTracking();
-      await startBackgroundTracking();
+      const backgroundStarted = await startBackgroundTracking();
+      if (!backgroundStarted) {
+        backgroundTrackingWarningRef.current = locationService.lastError;
+      }
     };
 
     checkLocationPermission();

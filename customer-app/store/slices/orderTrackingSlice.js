@@ -22,7 +22,12 @@ const orderTrackingSlice = createSlice({
     initialState,
     reducers: {
         setCurrentOrder: (state, action) => {
-            state.currentOrder = action.payload;
+            const previous = state.currentOrder;
+            const next = action.payload;
+            const sameOrder = previous && next && (previous._id || previous.orderId) === (next._id || next.orderId);
+            state.currentOrder = sameOrder && !next.deliveryOtp && previous.deliveryOtp
+                ? { ...next, deliveryOtp: previous.deliveryOtp }
+                : next;
             state.error = null;
             state.isLoading = false;
 
@@ -70,10 +75,15 @@ const orderTrackingSlice = createSlice({
                 const { status, timeline, estimatedDeliveryTime, rider, order } = action.payload;
 
                 if (order) {
+                    // Socket payloads omit deliveryOtp; keep the value from REST GET /orders/:id.
+                    const deliveryOtp = order.deliveryOtp || state.currentOrder.deliveryOtp;
                     state.currentOrder = {
                         ...state.currentOrder,
                         ...order,
                     };
+                    if (deliveryOtp) {
+                        state.currentOrder.deliveryOtp = deliveryOtp;
+                    }
                 }
 
                 if (status) {

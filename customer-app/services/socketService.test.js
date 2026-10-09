@@ -40,6 +40,7 @@ describe('SocketService', () => {
             disconnect: jest.fn(),
             connected: false,
             id: 'mock-socket-id',
+            io: { on: jest.fn(), off: jest.fn() },
         };
 
         // Mock io to return our mock socket
@@ -83,9 +84,9 @@ describe('SocketService', () => {
             expect(mockSocket.on).toHaveBeenCalledWith('connect', expect.any(Function));
             expect(mockSocket.on).toHaveBeenCalledWith('disconnect', expect.any(Function));
             expect(mockSocket.on).toHaveBeenCalledWith('connect_error', expect.any(Function));
-            expect(mockSocket.on).toHaveBeenCalledWith('reconnect', expect.any(Function));
-            expect(mockSocket.on).toHaveBeenCalledWith('reconnect_attempt', expect.any(Function));
-            expect(mockSocket.on).toHaveBeenCalledWith('reconnect_failed', expect.any(Function));
+            expect(mockSocket.io.on).toHaveBeenCalledWith('reconnect', expect.any(Function));
+            expect(mockSocket.io.on).toHaveBeenCalledWith('reconnect_attempt', expect.any(Function));
+            expect(mockSocket.io.on).toHaveBeenCalledWith('reconnect_failed', expect.any(Function));
             expect(mockSocket.on).toHaveBeenCalledWith('orderStatusUpdate', expect.any(Function));
             expect(mockSocket.on).toHaveBeenCalledWith('riderLocationUpdate', expect.any(Function));
             expect(mockSocket.on).toHaveBeenCalledWith('etaUpdate', expect.any(Function));
@@ -134,7 +135,7 @@ describe('SocketService', () => {
             socketService.connect('token');
 
             // Get the reconnect_attempt event handler
-            const reconnectAttemptHandler = mockSocket.on.mock.calls.find(
+            const reconnectAttemptHandler = mockSocket.io.on.mock.calls.find(
                 (call) => call[0] === 'reconnect_attempt'
             )[1];
 
@@ -148,7 +149,7 @@ describe('SocketService', () => {
             socketService.connect('token');
 
             // Get the reconnect event handler
-            const reconnectHandler = mockSocket.on.mock.calls.find(
+            const reconnectHandler = mockSocket.io.on.mock.calls.find(
                 (call) => call[0] === 'reconnect'
             )[1];
 
@@ -195,7 +196,7 @@ describe('SocketService', () => {
             socketService.connect('token');
 
             // Get the reconnect_failed event handler
-            const reconnectFailedHandler = mockSocket.on.mock.calls.find(
+            const reconnectFailedHandler = mockSocket.io.on.mock.calls.find(
                 (call) => call[0] === 'reconnect_failed'
             )[1];
 
@@ -485,7 +486,7 @@ describe('SocketService', () => {
             expect(store.dispatch).toHaveBeenCalledWith(setConnectionStatus('disconnected'));
 
             // Simulate reconnection attempt
-            const reconnectAttemptHandler = mockSocket.on.mock.calls.find(
+            const reconnectAttemptHandler = mockSocket.io.on.mock.calls.find(
                 (call) => call[0] === 'reconnect_attempt'
             )[1];
             reconnectAttemptHandler(1);
@@ -493,7 +494,7 @@ describe('SocketService', () => {
             expect(store.dispatch).toHaveBeenCalledWith(setConnectionStatus('reconnecting'));
 
             // Simulate successful reconnection
-            const reconnectHandler = mockSocket.on.mock.calls.find(
+            const reconnectHandler = mockSocket.io.on.mock.calls.find(
                 (call) => call[0] === 'reconnect'
             )[1];
             mockSocket.connected = true;

@@ -89,11 +89,21 @@ export const rejectOrder = createAsyncThunk(
 export const updateOrderStatus = createAsyncThunk(
   'orders/updateStatus',
   async (
-    { orderId, status, location }: { orderId: string; status: OrderStatus; location?: { latitude: number; longitude: number } },
+    {
+      orderId,
+      status,
+      location,
+      deliveryOtp,
+    }: {
+      orderId: string;
+      status: OrderStatus;
+      location?: { latitude: number; longitude: number };
+      deliveryOtp?: string;
+    },
     { rejectWithValue }
   ) => {
     try {
-      const response = await orderApi.updateStatus(orderId, status, location);
+      const response = await orderApi.updateStatus(orderId, status, location, deliveryOtp);
       return response.order as Order;
     } catch (error) {
       if (axios.isAxiosError(error)) {

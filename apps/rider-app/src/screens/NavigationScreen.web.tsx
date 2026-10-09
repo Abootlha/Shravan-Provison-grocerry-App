@@ -7,6 +7,7 @@ import {
   Alert,
   ActivityIndicator,
   ScrollView,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS, SPACING } from '../utils/constants';
@@ -20,9 +21,10 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
   route,
 }) => {
   const { order } = route.params;
-  const { updateStatus, currentOrder } = useOrders();
+  const { updateStatus, completeDelivery, currentOrder } = useOrders();
   const { currentLocation } = useLocation();
   const [loading, setLoading] = useState(false);
+  const [deliveryOtpInput, setDeliveryOtpInput] = useState('');
 
   const activeOrder = currentOrder?.id === order.id ? currentOrder : order;
   const pickupCoords = order.pickup.address.coordinates;
@@ -70,16 +72,30 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
   }, [updateStatus, order.id, currentLocation]);
 
   const handleMarkDelivered = useCallback(async () => {
+    const otp = deliveryOtpInput.trim();
+    if (!/^\d{4}$/.test(otp)) {
+      Alert.alert('Invalid OTP', 'Please enter the 4-digit delivery OTP shown in the customer app.');
+      return;
+    }
+
     setLoading(true);
-    const result = await updateStatus(order.id, 'delivered', currentLocation ?? undefined);
+    // The server verifies the OTP; the rider never sees the expected value.
+    const { order: result, error: deliveryError } = await completeDelivery(
+      order.id,
+      otp,
+      currentLocation ?? undefined
+    );
     setLoading(false);
     if (result) {
+      setDeliveryOtpInput('');
       navigation.replace('DeliveryComplete', {
         order: result,
         tip: result.tip,
       });
+    } else {
+      Alert.alert('Unable to complete delivery', deliveryError || 'The OTP may be incorrect. Please check with the customer and try again.');
     }
-  }, [updateStatus, order.id, currentLocation, navigation]);
+  }, [completeDelivery, order.id, currentLocation, navigation, deliveryOtpInput]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -158,6 +174,17 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
               <Text style={styles.actionButtonText}>Start Delivery</Text>
             )}
           </TouchableOpacity>
+        )}
+
+        {activeOrder.status === 'out_for_delivery' && (
+          <TextInput
+            style={styles.otpInput}
+            value={deliveryOtpInput}
+            onChangeText={(value) => setDeliveryOtpInput(value.replace(/\D/g, '').slice(0, 4))}
+            keyboardType="number-pad"
+            placeholder="Delivery OTP from customer"
+            maxLength={4}
+          />
         )}
 
         {activeOrder.status === 'out_for_delivery' && (
@@ -276,5 +303,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: COLORS.surface,
+  },
+  otpInput: {
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: SPACING.md,
+    fontSize: 18,
+    letterSpacing: 4,
+    textAlign: 'center',
+    color: COLORS.text,
   },
 });

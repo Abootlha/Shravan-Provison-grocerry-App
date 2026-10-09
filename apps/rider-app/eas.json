@@ -5,11 +5,7 @@
   },
   "build": {
     "development": {
-      "developmentClient": true,
       "distribution": "internal",
-      "ios": {
-        "simulator": true
-      },
       "env": {
         "PUBLIC_NODE_ENV": "development"
       }
@@ -24,13 +20,13 @@
       }
     },
     "production": {
-      "autoIncrement": true,
       "env": {
         "NODE_ENV": "production",
         "PUBLIC_NODE_ENV": "production",
         "API_BASE_URL": "https://api.example.com/api/v1",
         "TRACKING_URL": "https://api.example.com/tracking"
-      }
+      },
+      "autoIncrement": true
     }
   },
   "submit": {

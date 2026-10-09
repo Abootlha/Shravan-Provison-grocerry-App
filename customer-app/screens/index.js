@@ -8,7 +8,6 @@ export { default as CategoryScreen } from './CategoryScreen';
 export { default as CategoriesScreen } from './CategoriesScreen';
 export { default as ProductDetailScreen } from './ProductDetailScreen';
 export { default as SearchScreen } from './SearchScreen';
-export { default as CartScreen } from './CartScreen';
 export { default as CheckoutScreen } from './CheckoutScreen';
 export { default as OrderTrackingScreen } from './OrderTrackingScreen';
 export { default as OrderDetailsScreen } from './OrderDetailsScreen';

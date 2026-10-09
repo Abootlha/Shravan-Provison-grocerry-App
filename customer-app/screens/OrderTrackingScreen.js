@@ -101,6 +101,9 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
             if (socketOrderIdRef.current) {
                 socketService.leaveOrderRoom(socketOrderIdRef.current);
             }
+            // This screen is the only realtime consumer: close the socket and drop
+            // its listeners so nothing keeps dispatching after unmount.
+            socketService.disconnect();
             dispatch(clearCurrentOrder());
             dispatch(clearRiderLocation());
         };

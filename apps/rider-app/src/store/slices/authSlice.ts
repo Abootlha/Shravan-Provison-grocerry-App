@@ -25,6 +25,7 @@ export const login = createAsyncThunk(
     try {
       const response = await authApi.login(username, password);
       await storage.setToken(response.token);
+      await storage.setRefreshToken(response.refreshToken);
       await storage.setUser(response.user);
       return response;
     } catch (error: any) {
@@ -50,6 +51,7 @@ export const verifyOtp = createAsyncThunk(
     try {
       const response = await authApi.verifyOtp(phone, otp, name);
       await storage.setToken(response.token);
+      await storage.setRefreshToken(response.refreshToken);
       await storage.setUser(response.user);
       return response;
     } catch (error: any) {
@@ -75,6 +77,11 @@ export const loadUser = createAsyncThunk(
 );
 
 export const logout = createAsyncThunk('auth/logout', async () => {
+  try {
+    await authApi.logout();
+  } catch {
+    // Best effort: local tokens are cleared regardless.
+  }
   await storage.clearAll();
   return null;
 });
@@ -88,6 +95,14 @@ const authSlice = createSlice({
     },
     setUser: (state, action: PayloadAction<Rider>) => {
       state.user = action.payload;
+    },
+    tokenRefreshed: (state, action: PayloadAction<string>) => {
+      state.token = action.payload;
+    },
+    sessionExpired: (state) => {
+      state.isAuthenticated = false;
+      state.user = null;
+      state.token = null;
     },
   },
   extraReducers: (builder) => {
@@ -153,5 +168,5 @@ const authSlice = createSlice({
   },
 });
 
-export const { clearError, setUser } = authSlice.actions;
+export const { clearError, setUser, tokenRefreshed, sessionExpired } = authSlice.actions;
 export default authSlice.reducer;
