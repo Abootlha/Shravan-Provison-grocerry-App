@@ -69,7 +69,7 @@ describe('HttpExceptionFilter - Property-Based Tests', () => {
             const errorMessage = `Invalid status transition from ${currentStatus} to ${requestedStatus}. This transition is not allowed.`;
             const exception = new BadRequestException(errorMessage);
 
-            filter.catch(exception, mockHost as any);
+            filter.catch(exception, mockHost);
 
             // Verify HTTP 400 status
             expect(mockResponse.status).toHaveBeenCalledWith(
@@ -100,7 +100,7 @@ describe('HttpExceptionFilter - Property-Based Tests', () => {
 
             const exception = new BadRequestException(errorMessage);
 
-            filter.catch(exception, mockHost as any);
+            filter.catch(exception, mockHost);
 
             const responseCall = mockResponse.json.mock.calls[0][0];
             expect(responseCall.timestamp).toBeDefined();
@@ -134,7 +134,7 @@ describe('HttpExceptionFilter - Property-Based Tests', () => {
 
             const exception = new HttpException(message, status);
 
-            filter.catch(exception, mockHost as any);
+            filter.catch(exception, mockHost);
 
             expect(mockResponse.status).toHaveBeenCalledWith(status);
             const responseCall = mockResponse.json.mock.calls[0][0];
@@ -158,27 +158,24 @@ describe('HttpExceptionFilter - Property-Based Tests', () => {
   describe('Property 39: Database Error HTTP Codes', () => {
     it('should return HTTP 404 for DocumentNotFoundError', () => {
       fc.assert(
-        fc.property(
-          fc.string({ minLength: 1, maxLength: 50 }),
-          (documentId) => {
-            // Reset mocks for each iteration
-            mockResponse.status.mockClear();
-            mockResponse.json.mockClear();
+        fc.property(fc.string({ minLength: 1, maxLength: 50 }), () => {
+          // Reset mocks for each iteration
+          mockResponse.status.mockClear();
+          mockResponse.json.mockClear();
 
-            const error = new MongooseError.DocumentNotFoundError(
-              'Document not found',
-            );
+          const error = new MongooseError.DocumentNotFoundError(
+            'Document not found',
+          );
 
-            filter.catch(error, mockHost as any);
+          filter.catch(error, mockHost);
 
-            expect(mockResponse.status).toHaveBeenCalledWith(
-              HttpStatus.NOT_FOUND,
-            );
-            const responseCall = mockResponse.json.mock.calls[0][0];
-            expect(responseCall.statusCode).toBe(HttpStatus.NOT_FOUND);
-            expect(responseCall.message).toContain('not found');
-          },
-        ),
+          expect(mockResponse.status).toHaveBeenCalledWith(
+            HttpStatus.NOT_FOUND,
+          );
+          const responseCall = mockResponse.json.mock.calls[0][0];
+          expect(responseCall.statusCode).toBe(HttpStatus.NOT_FOUND);
+          expect(responseCall.message).toContain('not found');
+        }),
         { numRuns: 20 },
       );
     });
@@ -202,7 +199,7 @@ describe('HttpExceptionFilter - Property-Based Tests', () => {
               } as any;
             });
 
-            filter.catch(validationError, mockHost as any);
+            filter.catch(validationError, mockHost);
 
             expect(mockResponse.status).toHaveBeenCalledWith(
               HttpStatus.BAD_REQUEST,
@@ -236,7 +233,7 @@ describe('HttpExceptionFilter - Property-Based Tests', () => {
               fieldName,
             );
 
-            filter.catch(castError, mockHost as any);
+            filter.catch(castError, mockHost);
 
             expect(mockResponse.status).toHaveBeenCalledWith(
               HttpStatus.BAD_REQUEST,
@@ -261,7 +258,7 @@ describe('HttpExceptionFilter - Property-Based Tests', () => {
 
             const mongoError = new MongoError(errorMessage);
 
-            filter.catch(mongoError, mockHost as any);
+            filter.catch(mongoError, mockHost);
 
             expect(mockResponse.status).toHaveBeenCalledWith(
               HttpStatus.INTERNAL_SERVER_ERROR,
@@ -279,26 +276,21 @@ describe('HttpExceptionFilter - Property-Based Tests', () => {
 
     it('should return HTTP 409 for duplicate key errors', () => {
       fc.assert(
-        fc.property(
-          fc.string({ minLength: 1, maxLength: 50 }),
-          (duplicateValue) => {
-            // Reset mocks for each iteration
-            mockResponse.status.mockClear();
-            mockResponse.json.mockClear();
+        fc.property(fc.string({ minLength: 1, maxLength: 50 }), () => {
+          // Reset mocks for each iteration
+          mockResponse.status.mockClear();
+          mockResponse.json.mockClear();
 
-            const duplicateError = new MongoError('E11000 duplicate key error');
-            (duplicateError as any).code = 11000;
+          const duplicateError = new MongoError('E11000 duplicate key error');
+          (duplicateError as any).code = 11000;
 
-            filter.catch(duplicateError, mockHost as any);
+          filter.catch(duplicateError, mockHost);
 
-            expect(mockResponse.status).toHaveBeenCalledWith(
-              HttpStatus.CONFLICT,
-            );
-            const responseCall = mockResponse.json.mock.calls[0][0];
-            expect(responseCall.statusCode).toBe(HttpStatus.CONFLICT);
-            expect(responseCall.message).toBe('Duplicate entry found');
-          },
-        ),
+          expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.CONFLICT);
+          const responseCall = mockResponse.json.mock.calls[0][0];
+          expect(responseCall.statusCode).toBe(HttpStatus.CONFLICT);
+          expect(responseCall.message).toBe('Duplicate entry found');
+        }),
         { numRuns: 20 },
       );
     });
@@ -318,7 +310,7 @@ describe('HttpExceptionFilter - Property-Based Tests', () => {
             new MongooseError.ValidationError(),
           ),
           (exception) => {
-            filter.catch(exception, mockHost as any);
+            filter.catch(exception, mockHost);
 
             // Verify logging occurred
             const totalCalls =

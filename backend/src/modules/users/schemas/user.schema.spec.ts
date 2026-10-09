@@ -4,14 +4,6 @@ import { Model } from 'mongoose';
 import * as fc from 'fast-check';
 import { User, UserRole, UserDocument } from './user.schema';
 
-// Custom generator for MongoDB ObjectId (24 hex characters)
-const objectIdArb = fc.string({ minLength: 24, maxLength: 24 }).map((s) =>
-  s
-    .split('')
-    .map((c) => '0123456789abcdef'[c.charCodeAt(0) % 16])
-    .join(''),
-);
-
 describe('User Schema Property Tests', () => {
   let userModel: Model<UserDocument>;
 

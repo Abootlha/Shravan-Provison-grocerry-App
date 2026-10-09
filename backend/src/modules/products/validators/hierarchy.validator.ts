@@ -7,7 +7,7 @@ import {
 } from 'class-validator';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model } from 'mongoose';
 import { Category } from '../../categories/schemas/category.schema';
 import { Subcategory } from '../../subcategories/schemas/subcategory.schema';
 import { ItemGroup } from '../../item-groups/schemas/item-group.schema';
@@ -111,13 +111,13 @@ export class HierarchyValidator implements ValidatorConstraintInterface {
     }
   }
 
-  defaultMessage(args: ValidationArguments): string {
+  defaultMessage(): string {
     return 'Invalid category hierarchy. Please ensure subcategory belongs to the selected category and item group belongs to the selected subcategory.';
   }
 }
 
 export function ValidateHierarchy(validationOptions?: ValidationOptions) {
-  return function (object: Object, propertyName: string) {
+  return function (object: object, propertyName: string) {
     registerDecorator({
       target: object.constructor,
       propertyName: propertyName,

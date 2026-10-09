@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AppController } from './app.controller';
+import { getConnectionToken } from '@nestjs/mongoose';
 import { AppService } from './app.service';
 
 describe('AppController', () => {
@@ -8,7 +9,10 @@ describe('AppController', () => {
   beforeEach(async () => {
     const app: TestingModule = await Test.createTestingModule({
       controllers: [AppController],
-      providers: [AppService],
+      providers: [
+        AppService,
+        { provide: getConnectionToken(), useValue: { readyState: 1 } },
+      ],
     }).compile();
 
     appController = app.get<AppController>(AppController);
@@ -18,5 +22,9 @@ describe('AppController', () => {
     it('should return "Hello World!"', () => {
       expect(appController.getHello()).toBe('Hello World!');
     });
+  });
+
+  it('reports healthy when Mongo is connected', () => {
+    expect(appController.health()).toEqual({ status: 'ok' });
   });
 });

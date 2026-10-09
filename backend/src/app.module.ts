@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { BullModule } from '@nestjs/bullmq';
 import { LoggerModule } from 'nestjs-pino';
@@ -20,6 +21,7 @@ import { JobsModule } from './modules/jobs/jobs.module';
 import { MapsModule } from './modules/maps/maps.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { RedisModule } from './common/utils/redis.module';
+import { HttpThrottlerGuard } from './modules/auth/guards/http-throttler.guard';
 
 // Config
 import configuration from './config/configuration';
@@ -47,7 +49,7 @@ import configuration from './config/configuration';
     // MongoDB
     MongooseModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: async (configService: ConfigService) => {
+      useFactory: (configService: ConfigService) => {
         const uri = configService.get<string>('database.uri');
         const dbName = configService.get<string>('database.name');
 
@@ -59,9 +61,11 @@ import configuration from './config/configuration';
       inject: [ConfigService],
     }),
 
-    // Rate Limiting
+    // Rate Limiting (default: 100 requests / minute / client IP).
+    // Stricter per-route limits are set with @Throttle on auth and maps routes.
     ThrottlerModule.forRoot([
       {
+        name: 'default',
         ttl: 60000,
         limit: 100,
       },
@@ -70,10 +74,11 @@ import configuration from './config/configuration';
     // BullMQ
     BullModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: async (configService: ConfigService) => ({
+      useFactory: (configService: ConfigService) => ({
         connection: {
           host: configService.get<string>('redis.host'),
           port: configService.get<number>('redis.port'),
+          password: configService.get<string>('redis.password'),
         },
       }),
       inject: [ConfigService],
@@ -95,6 +100,10 @@ import configuration from './config/configuration';
     JobsModule,
     MapsModule,
     PaymentsModule,
+  ],
+  providers: [
+    // Apply rate limiting globally to all HTTP routes.
+    { provide: APP_GUARD, useClass: HttpThrottlerGuard },
   ],
 })
 export class AppModule {}

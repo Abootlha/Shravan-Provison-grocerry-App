@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  UnauthorizedException,
   Inject,
   forwardRef,
 } from '@nestjs/common';
@@ -111,8 +112,35 @@ export class RidersService {
             : RiderStatus.BUSY;
     }
 
+    await this.keepBusyWhileOnActiveOrder(rider);
     await rider.save();
     return rider;
+  }
+
+  /**
+   * A rider with an in-progress order must stay BUSY, otherwise toggling
+   * "available" would let auto-assignment hand them a second order.
+   */
+  private async keepBusyWhileOnActiveOrder(
+    rider: RiderDocument,
+  ): Promise<void> {
+    if (rider.status !== RiderStatus.AVAILABLE) return;
+
+    const activeOrder = await this.orderModel.exists({
+      riderId: rider._id,
+      orderStatus: {
+        $in: [
+          OrderStatus.CONFIRMED,
+          OrderStatus.ASSIGNED,
+          OrderStatus.PACKED,
+          OrderStatus.PICKED_UP,
+          OrderStatus.OUT_FOR_DELIVERY,
+        ],
+      },
+    });
+    if (activeOrder) {
+      rider.status = RiderStatus.BUSY;
+    }
   }
 
   async getMetrics(riderId: string): Promise<{
@@ -145,6 +173,7 @@ export class RidersService {
     const rider = await this.findRiderById(riderId);
 
     rider.status = isAvailable ? RiderStatus.AVAILABLE : RiderStatus.BUSY;
+    await this.keepBusyWhileOnActiveOrder(rider);
     await rider.save();
 
     return rider;
@@ -154,6 +183,7 @@ export class RidersService {
     const rider = await this.findRiderById(riderId);
 
     rider.status = isOnline ? RiderStatus.AVAILABLE : RiderStatus.OFFLINE;
+    await this.keepBusyWhileOnActiveOrder(rider);
     await rider.save();
 
     return rider;
@@ -248,7 +278,7 @@ export class RidersService {
           await this.etaService.recalculateForOrder(order._id.toString());
         } catch (error) {
           console.error(
-            `Failed to recalculate ETA for order ${order._id}:`,
+            `Failed to recalculate ETA for order ${String(order._id)}:`,
             error,
           );
         }
@@ -330,7 +360,11 @@ export class RidersService {
     return rider.save();
   }
 
-  async ensureOtpRider(phone: string, name?: string): Promise<RiderDocument> {
+  /**
+   * OTP login for riders. Riders must be pre-created (and activated) by an
+   * admin; this never creates a rider.
+   */
+  async ensureOtpRider(phone: string): Promise<RiderDocument> {
     const normalizedPhone = phone.startsWith('+91')
       ? phone
       : `+91${phone.replace(/\s/g, '')}`;
@@ -342,44 +376,13 @@ export class RidersService {
       ],
     });
 
-    if (existingRider) {
-      if (name && existingRider.name !== name) {
-        existingRider.name = name;
-        await existingRider.save();
-      }
-      return existingRider;
+    if (!existingRider || !existingRider.isActive) {
+      throw new UnauthorizedException(
+        'This phone number is not registered as an active rider',
+      );
     }
 
-    const phoneDigits = normalizedPhone.replace(/\D/g, '').slice(-10);
-    let usernameBase = `rider${phoneDigits}`;
-    let username = usernameBase;
-    let suffix = 1;
-
-    while (await this.riderModel.findOne({ username })) {
-      username = `${usernameBase}${suffix}`;
-      suffix += 1;
-    }
-
-    const hashedPassword = await bcrypt.hash(
-      `otp-${phoneDigits}-${Date.now()}`,
-      10,
-    );
-
-    const rider = new this.riderModel({
-      name: name || 'Rider',
-      username,
-      password: hashedPassword,
-      phone: normalizedPhone,
-      vehicleType: VehicleType.TWO_WHEELER,
-      status: RiderStatus.OFFLINE,
-      isActive: true,
-      currentLocation: {
-        type: 'Point',
-        coordinates: [0, 0],
-      },
-    });
-
-    return rider.save();
+    return existingRider;
   }
 
   async updateRider(riderId: string, data: Partial<Rider>): Promise<Rider> {

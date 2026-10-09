@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { RedisService } from '../../common/utils/redis.service';
@@ -20,6 +26,8 @@ export class MapsService {
   private readonly googleGeocodeUrl =
     'https://maps.googleapis.com/maps/api/geocode/json';
   private readonly CACHE_TTL = 300; // 5 minutes
+  private readonly GEOCODE_CACHE_TTL = 3600; // 1 hour
+  private readonly MAX_PLACE_DETAILS = 5; // cap paid Place Details fan-out per search
 
   // Store (delivery) centre — loaded from config dynamically. Used to bound searches so
   // cross-state/irrelevant results are never returned (like Zepto/Blinkit).
@@ -172,7 +180,7 @@ export class MapsService {
         return null;
       }
       return coords;
-    } catch (error) {
+    } catch {
       this.logger.warn(`Coordinate fallback failed for "${query}"`);
       return null;
     }
@@ -196,7 +204,7 @@ export class MapsService {
         this.logger.debug(`Cache hit for query: "${trimmedQuery}"`);
         return JSON.parse(cached);
       }
-    } catch (error) {
+    } catch {
       this.logger.warn('Cache read failed, proceeding with API calls');
     }
 
@@ -298,7 +306,7 @@ export class MapsService {
         this.CACHE_TTL,
       );
       this.logger.debug(`Cached results for query: "${trimmedQuery}"`);
-    } catch (error) {
+    } catch {
       this.logger.warn('Cache write failed');
     }
 
@@ -464,41 +472,43 @@ export class MapsService {
 
       // Get detailed place information for each prediction
       const results = await Promise.all(
-        response.data.predictions.slice(0, 10).map(async (prediction: any) => {
-          try {
-            const placeDetails = await this.getGooglePlaceDetails(
-              prediction.place_id,
-            );
-            return {
-              placeId: prediction.place_id,
-              name:
-                prediction.structured_formatting?.main_text ||
-                prediction.description.split(',')[0],
-              formattedAddress: prediction.description,
-              latitude: placeDetails?.latitude || null,
-              longitude: placeDetails?.longitude || null,
-              city: placeDetails?.city || '',
-              state: placeDetails?.state || '',
-              pincode: placeDetails?.pincode || '',
-              type: prediction.types?.[0] || '',
-            };
-          } catch (error) {
-            // If details fail, return prediction without coordinates
-            return {
-              placeId: prediction.place_id,
-              name:
-                prediction.structured_formatting?.main_text ||
-                prediction.description.split(',')[0],
-              formattedAddress: prediction.description,
-              latitude: null,
-              longitude: null,
-              city: '',
-              state: '',
-              pincode: '',
-              type: prediction.types?.[0] || '',
-            };
-          }
-        }),
+        response.data.predictions
+          .slice(0, this.MAX_PLACE_DETAILS)
+          .map(async (prediction: any) => {
+            try {
+              const placeDetails = await this.getGooglePlaceDetails(
+                prediction.place_id,
+              );
+              return {
+                placeId: prediction.place_id,
+                name:
+                  prediction.structured_formatting?.main_text ||
+                  prediction.description.split(',')[0],
+                formattedAddress: prediction.description,
+                latitude: placeDetails?.latitude || null,
+                longitude: placeDetails?.longitude || null,
+                city: placeDetails?.city || '',
+                state: placeDetails?.state || '',
+                pincode: placeDetails?.pincode || '',
+                type: prediction.types?.[0] || '',
+              };
+            } catch {
+              // If details fail, return prediction without coordinates
+              return {
+                placeId: prediction.place_id,
+                name:
+                  prediction.structured_formatting?.main_text ||
+                  prediction.description.split(',')[0],
+                formattedAddress: prediction.description,
+                latitude: null,
+                longitude: null,
+                city: '',
+                state: '',
+                pincode: '',
+                type: prediction.types?.[0] || '',
+              };
+            }
+          }),
       );
 
       return results.filter((result) => result.latitude && result.longitude);
@@ -609,37 +619,96 @@ export class MapsService {
     }
   }
 
+  private async readCache<T>(key: string): Promise<T | null> {
+    try {
+      const cached = await this.redisService.get(key);
+      return cached ? (JSON.parse(cached) as T) : null;
+    } catch {
+      this.logger.warn('Cache read failed, proceeding with API calls');
+      return null;
+    }
+  }
+
+  private async writeCache(key: string, value: unknown, ttl: number) {
+    try {
+      await this.redisService.set(key, JSON.stringify(value), ttl);
+    } catch {
+      this.logger.warn('Cache write failed');
+    }
+  }
+
   async geocodeAddress(address: string) {
     if (!address?.trim()) {
       throw new BadRequestException('Address is required');
     }
 
-    const result = await this.geocodeWithFallback(address);
-    return {
+    const cacheKey = `geocode:${address.trim().toLowerCase()}`;
+    const cached = await this.readCache<any>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    let result: Awaited<ReturnType<MapsService['geocodeWithFallback']>>;
+    try {
+      result = await this.geocodeWithFallback(address);
+    } catch (error: any) {
+      if (error instanceof HttpException) throw error;
+      this.logger.warn(`Geocode failed: ${error?.message}`);
+      throw new ServiceUnavailableException(
+        'Geocoding service is temporarily unavailable',
+      );
+    }
+
+    const response = {
       responseCode: result ? 200 : 404,
       results: result ? [result] : [],
     };
+    if (result) {
+      await this.writeCache(cacheKey, response, this.GEOCODE_CACHE_TTL);
+    }
+    return response;
   }
 
   async reverseGeocode(latitude: number, longitude: number) {
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      Math.abs(latitude) > 90 ||
+      Math.abs(longitude) > 180
+    ) {
       throw new BadRequestException(
         'Valid latitude and longitude are required',
       );
     }
 
-    this.ensureLegacyKey();
-    const response = await axios.get(
-      `${this.legacyBaseUrl}/${this.apiKey}/rev_geocode`,
-      {
-        params: {
-          lat: latitude,
-          lng: longitude,
-        },
-        timeout: 10000,
-      },
-    );
+    // ~1m precision is plenty for an address lookup and keeps the cache useful.
+    const lat = Number(latitude.toFixed(5));
+    const lng = Number(longitude.toFixed(5));
+    const cacheKey = `revgeocode:${lat}:${lng}`;
+    const cached = await this.readCache<any>(cacheKey);
+    if (cached) {
+      return cached;
+    }
 
-    return response.data;
+    this.ensureLegacyKey();
+    try {
+      const response = await axios.get(
+        `${this.legacyBaseUrl}/${encodeURIComponent(this.apiKey)}/rev_geocode`,
+        {
+          params: { lat, lng },
+          timeout: 10000,
+        },
+      );
+
+      await this.writeCache(cacheKey, response.data, this.GEOCODE_CACHE_TTL);
+      return response.data;
+    } catch (error: any) {
+      this.logger.warn(
+        `Reverse geocode failed: ${error?.response?.status || error?.message}`,
+      );
+      throw new ServiceUnavailableException(
+        'Reverse geocoding service is temporarily unavailable',
+      );
+    }
   }
 }
