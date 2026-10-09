@@ -14,8 +14,13 @@ import {
 import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
-import { OrderStatus, PaymentMethod } from './schemas/order.schema';
-import { CreateOrderDto, UpdateStatusDto, AssignRiderDto } from './dto';
+import { OrderStatus } from './schemas/order.schema';
+import {
+  CreateOrderDto,
+  UpdateStatusDto,
+  AdminUpdateStatusDto,
+  AssignRiderDto,
+} from './dto';
 import { UserRole } from '../users/schemas/user.schema';
 
 @Controller('orders')
@@ -43,6 +48,29 @@ export class OrdersController {
         : value.id?.toString?.() || null;
     }
     return value?.toString?.() || null;
+  }
+
+  /**
+   * Loads an order by its human-readable orderId and ensures the caller is the
+   * owning customer, the assigned rider, or an admin.
+   */
+  private async assertOrderAccess(req: any, orderId: string) {
+    const order = await this.ordersService.findAccessInfoByOrderId(orderId);
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    const isOwner = this.extractEntityId(order.userId) === req.user.userId;
+    const isAssignedRider =
+      req.user.role === UserRole.RIDER &&
+      this.extractEntityId(order.riderId) === req.user.userId;
+    const isAdmin = req.user.role === UserRole.ADMIN;
+
+    if (!isOwner && !isAssignedRider && !isAdmin) {
+      throw new ForbiddenException('You can only access your own orders');
+    }
+
+    return { order, isAdmin };
   }
 
   @Post()
@@ -132,20 +160,41 @@ export class OrdersController {
       throw new ForbiddenException('You can only access your own orders');
     }
 
-    const trackingOrder = await this.ordersService.getTrackingOrderById(id);
+    // Only the owning customer may see the delivery OTP.
+    const trackingOrder = await this.ordersService.getTrackingOrderById(id, {
+      includeDeliveryOtp: isOwner,
+    });
     return { order: trackingOrder };
   }
 
   @Get(':orderId/status')
-  async getOrderStatus(@Param('orderId') orderId: string) {
+  async getOrderStatus(@Request() req: any, @Param('orderId') orderId: string) {
+    await this.assertOrderAccess(req, orderId);
     const status = await this.ordersService.getOrderStatus(orderId);
     return { orderId, status };
   }
 
   @Get(':orderId/history')
-  async getStatusHistory(@Param('orderId') orderId: string) {
+  async getStatusHistory(
+    @Request() req: any,
+    @Param('orderId') orderId: string,
+  ) {
+    const { isAdmin } = await this.assertOrderAccess(req, orderId);
     const history = await this.ordersService.getStatusHistory(orderId);
-    return { history };
+
+    if (isAdmin) {
+      return { history };
+    }
+
+    // Non-admins don't get the ids of the staff/riders who changed the status.
+    return {
+      history: history.map((entry: any) => ({
+        previousStatus: entry.previousStatus ?? null,
+        newStatus: entry.newStatus,
+        note: entry.note,
+        createdAt: entry.createdAt,
+      })),
+    };
   }
 
   @Patch(':id/status')
@@ -180,6 +229,17 @@ export class OrdersController {
           'Riders can only update pickup, delivery, or cancellation statuses',
         );
       }
+
+      if (
+        updateStatusDto.status === OrderStatus.CANCELLED &&
+        [OrderStatus.PICKED_UP, OrderStatus.OUT_FOR_DELIVERY].includes(
+          order.orderStatus,
+        )
+      ) {
+        throw new ForbiddenException(
+          'Riders cannot cancel an order after pickup. Contact the store.',
+        );
+      }
     }
     // Customers cannot update order status
     else if (req.user.role === UserRole.CUSTOMER) {
@@ -202,6 +262,10 @@ export class OrdersController {
       id,
       updateStatusDto.status,
       req.user.userId,
+      {
+        actorRole: req.user.role,
+        deliveryOtp: updateStatusDto.deliveryOtp,
+      },
     );
 
     return { order: updatedOrder };
@@ -248,7 +312,7 @@ export class AdminOrdersController {
   async updateOrderStatus(
     @Request() req: any,
     @Param('id') id: string,
-    @Body() body: { status: OrderStatus; note?: string },
+    @Body() body: AdminUpdateStatusDto,
   ) {
     if (
       [
@@ -267,6 +331,7 @@ export class AdminOrdersController {
       id,
       body.status,
       req.user.userId,
+      { actorRole: UserRole.ADMIN, reason: body.note },
     );
     return { order };
   }

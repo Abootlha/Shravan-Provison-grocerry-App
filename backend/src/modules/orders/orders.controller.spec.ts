@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import * as fc from 'fast-check';
-import { OrdersController } from './orders.controller';
+import { OrdersController, AdminOrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { OrderStatus } from './schemas/order.schema';
 import { UserRole } from '../users/schemas/user.schema';
@@ -9,7 +9,6 @@ import { Types } from 'mongoose';
 
 describe('OrdersController - Property-Based Tests', () => {
   let controller: OrdersController;
-  let ordersService: OrdersService;
 
   const mockOrdersService = {
     createOrder: jest.fn(),
@@ -20,6 +19,8 @@ describe('OrdersController - Property-Based Tests', () => {
     assignRider: jest.fn(),
     getOrderStatus: jest.fn(),
     getStatusHistory: jest.fn(),
+    getTrackingOrderById: jest.fn(),
+    findAccessInfoByOrderId: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -29,7 +30,6 @@ describe('OrdersController - Property-Based Tests', () => {
     }).compile();
 
     controller = module.get<OrdersController>(OrdersController);
-    ordersService = module.get<OrdersService>(OrdersService);
   });
 
   afterEach(() => {
@@ -100,6 +100,7 @@ describe('OrdersController - Property-Based Tests', () => {
                 orderId,
                 newStatus,
                 riderId,
+                expect.objectContaining({ actorRole: UserRole.RIDER }),
               );
             } else {
               // Rider is NOT assigned to this order - should throw ForbiddenException
@@ -213,6 +214,20 @@ describe('OrdersController - Property-Based Tests', () => {
 
             const updateStatusDto = { status: newStatus };
 
+            const riderControlled = [
+              OrderStatus.ASSIGNED,
+              OrderStatus.PICKED_UP,
+              OrderStatus.OUT_FOR_DELIVERY,
+              OrderStatus.DELIVERED,
+            ].includes(newStatus);
+
+            if (riderControlled) {
+              await expect(
+                controller.updateOrderStatus(req, orderId, updateStatusDto),
+              ).rejects.toThrow(ForbiddenException);
+              return;
+            }
+
             const result = await controller.updateOrderStatus(
               req,
               orderId,
@@ -223,6 +238,7 @@ describe('OrdersController - Property-Based Tests', () => {
               orderId,
               newStatus,
               adminId,
+              expect.objectContaining({ actorRole: UserRole.ADMIN }),
             );
           },
         ),
@@ -309,6 +325,10 @@ describe('OrdersController - Property-Based Tests', () => {
             };
 
             mockOrdersService.findById.mockResolvedValue(mockOrder);
+            const trackingOrder = { ...mockOrder, deliveryOtp: '1234' };
+            mockOrdersService.getTrackingOrderById.mockResolvedValue(
+              trackingOrder,
+            );
 
             const req = {
               user: {
@@ -319,8 +339,13 @@ describe('OrdersController - Property-Based Tests', () => {
 
             const result = await controller.getOrder(req, orderId);
             expect(result).toBeDefined();
-            expect(result.order).toBe(mockOrder);
+            expect(result.order).toBe(trackingOrder);
             expect(mockOrdersService.findById).toHaveBeenCalledWith(orderId);
+            // The owning customer is the only one who gets the delivery OTP
+            expect(mockOrdersService.getTrackingOrderById).toHaveBeenCalledWith(
+              orderId,
+              { includeDeliveryOtp: true },
+            );
           },
         ),
         { numRuns: 100 },
@@ -415,6 +440,10 @@ describe('OrdersController - Property-Based Tests', () => {
             };
 
             mockOrdersService.findById.mockResolvedValue(mockOrder);
+            const trackingOrder = { ...mockOrder };
+            mockOrdersService.getTrackingOrderById.mockResolvedValue(
+              trackingOrder,
+            );
 
             const req = {
               user: {
@@ -425,7 +454,12 @@ describe('OrdersController - Property-Based Tests', () => {
 
             const result = await controller.getOrder(req, orderId);
             expect(result).toBeDefined();
-            expect(result.order).toBe(mockOrder);
+            expect(result.order).toBe(trackingOrder);
+            // Admins never receive the delivery OTP
+            expect(mockOrdersService.getTrackingOrderById).toHaveBeenCalledWith(
+              orderId,
+              { includeDeliveryOtp: false },
+            );
           },
         ),
         { numRuns: 100 },
@@ -830,5 +864,201 @@ describe('OrdersController - Property-Based Tests', () => {
         ).rejects.toThrow(NotFoundException);
       });
     });
+  });
+  describe('Order status/history access control', () => {
+    const ownerId = new Types.ObjectId().toString();
+    const riderId = new Types.ObjectId().toString();
+    const accessInfo = () => ({
+      _id: new Types.ObjectId(),
+      orderId: 'ORD-20260101-ABCDEF12',
+      userId: new Types.ObjectId(ownerId),
+      riderId: new Types.ObjectId(riderId),
+      orderStatus: OrderStatus.ASSIGNED,
+    });
+    const history = [
+      {
+        previousStatus: OrderStatus.PENDING,
+        newStatus: OrderStatus.CONFIRMED,
+        changedBy: new Types.ObjectId(),
+        createdAt: new Date(),
+      },
+    ];
+
+    beforeEach(() => {
+      mockOrdersService.findAccessInfoByOrderId.mockResolvedValue(accessInfo());
+      mockOrdersService.getStatusHistory.mockResolvedValue(history);
+      mockOrdersService.getOrderStatus.mockResolvedValue(OrderStatus.ASSIGNED);
+    });
+
+    it('rejects customers who do not own the order', async () => {
+      const req = {
+        user: {
+          userId: new Types.ObjectId().toString(),
+          role: UserRole.CUSTOMER,
+        },
+      };
+      await expect(
+        controller.getOrderStatus(req, 'ORD-20260101-ABCDEF12'),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        controller.getStatusHistory(req, 'ORD-20260101-ABCDEF12'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockOrdersService.getStatusHistory).not.toHaveBeenCalled();
+    });
+
+    it('rejects riders who are not assigned', async () => {
+      const req = {
+        user: { userId: new Types.ObjectId().toString(), role: UserRole.RIDER },
+      };
+      await expect(
+        controller.getOrderStatus(req, 'ORD-20260101-ABCDEF12'),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('returns 404 for unknown orders', async () => {
+      mockOrdersService.findAccessInfoByOrderId.mockResolvedValue(null);
+      const req = { user: { userId: ownerId, role: UserRole.CUSTOMER } };
+      await expect(
+        controller.getOrderStatus(req, 'ORD-UNKNOWN'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('lets the owner and assigned rider read status', async () => {
+      for (const user of [
+        { userId: ownerId, role: UserRole.CUSTOMER },
+        { userId: riderId, role: UserRole.RIDER },
+      ]) {
+        await expect(
+          controller.getOrderStatus({ user }, 'ORD-20260101-ABCDEF12'),
+        ).resolves.toEqual({
+          orderId: 'ORD-20260101-ABCDEF12',
+          status: OrderStatus.ASSIGNED,
+        });
+      }
+    });
+
+    it('strips changedBy ids from history for non-admins but not for admins', async () => {
+      const ownerResult: any = await controller.getStatusHistory(
+        { user: { userId: ownerId, role: UserRole.CUSTOMER } },
+        'ORD-20260101-ABCDEF12',
+      );
+      expect(ownerResult.history[0]).not.toHaveProperty('changedBy');
+      expect(ownerResult.history[0].newStatus).toBe(OrderStatus.CONFIRMED);
+
+      const adminResult: any = await controller.getStatusHistory(
+        {
+          user: {
+            userId: new Types.ObjectId().toString(),
+            role: UserRole.ADMIN,
+          },
+        },
+        'ORD-20260101-ABCDEF12',
+      );
+      expect(adminResult.history[0]).toHaveProperty('changedBy');
+    });
+  });
+
+  describe('Rider delivery rules', () => {
+    const riderId = new Types.ObjectId().toString();
+    const orderId = new Types.ObjectId().toString();
+    const req = { user: { userId: riderId, role: UserRole.RIDER } };
+
+    it('forwards the delivery OTP to the service when marking DELIVERED', async () => {
+      mockOrdersService.findById.mockResolvedValue({
+        _id: new Types.ObjectId(orderId),
+        riderId: new Types.ObjectId(riderId),
+        orderStatus: OrderStatus.OUT_FOR_DELIVERY,
+      });
+      mockOrdersService.updateStatus.mockResolvedValue({});
+
+      await controller.updateOrderStatus(req, orderId, {
+        status: OrderStatus.DELIVERED,
+        deliveryOtp: '1234',
+      });
+
+      expect(mockOrdersService.updateStatus).toHaveBeenCalledWith(
+        orderId,
+        OrderStatus.DELIVERED,
+        riderId,
+        { actorRole: UserRole.RIDER, deliveryOtp: '1234' },
+      );
+    });
+
+    it('does not let riders cancel after pickup', async () => {
+      for (const orderStatus of [
+        OrderStatus.PICKED_UP,
+        OrderStatus.OUT_FOR_DELIVERY,
+      ]) {
+        mockOrdersService.findById.mockResolvedValue({
+          _id: new Types.ObjectId(orderId),
+          riderId: new Types.ObjectId(riderId),
+          orderStatus,
+        });
+        await expect(
+          controller.updateOrderStatus(req, orderId, {
+            status: OrderStatus.CANCELLED,
+          }),
+        ).rejects.toThrow(ForbiddenException);
+      }
+      expect(mockOrdersService.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it('does not give the assigned rider the delivery OTP via GET /orders/:id', async () => {
+      mockOrdersService.findById.mockResolvedValue({
+        _id: new Types.ObjectId(orderId),
+        userId: new Types.ObjectId(),
+        riderId: new Types.ObjectId(riderId),
+      });
+      mockOrdersService.getTrackingOrderById.mockResolvedValue({});
+
+      await controller.getOrder(req, orderId);
+
+      expect(mockOrdersService.getTrackingOrderById).toHaveBeenCalledWith(
+        orderId,
+        { includeDeliveryOtp: false },
+      );
+    });
+  });
+});
+
+describe('AdminOrdersController', () => {
+  const mockOrdersService = { updateStatus: jest.fn(), findAll: jest.fn() };
+  let controller: AdminOrdersController;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [AdminOrdersController],
+      providers: [{ provide: OrdersService, useValue: mockOrdersService }],
+    }).compile();
+    controller = module.get(AdminOrdersController);
+    jest.clearAllMocks();
+  });
+
+  it('passes the admin role and note to the service', async () => {
+    const adminId = new Types.ObjectId().toString();
+    mockOrdersService.updateStatus.mockResolvedValue({});
+
+    await controller.updateOrderStatus(
+      { user: { userId: adminId, role: UserRole.ADMIN } },
+      'order-id',
+      { status: OrderStatus.CANCELLED, note: 'out of stock' },
+    );
+
+    expect(mockOrdersService.updateStatus).toHaveBeenCalledWith(
+      'order-id',
+      OrderStatus.CANCELLED,
+      adminId,
+      { actorRole: UserRole.ADMIN, reason: 'out of stock' },
+    );
+  });
+
+  it('rejects rider-controlled statuses', async () => {
+    await expect(
+      controller.updateOrderStatus(
+        { user: { userId: 'x', role: UserRole.ADMIN } },
+        'order-id',
+        { status: OrderStatus.DELIVERED },
+      ),
+    ).rejects.toThrow(ForbiddenException);
   });
 });

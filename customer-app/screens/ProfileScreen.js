@@ -30,7 +30,6 @@ import {
 } from 'hugeicons-react-native';
 import { useSelector, useDispatch } from 'react-redux';
 import { CommonActions } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { logout, updateUser } from '../store/slices/authSlice';
 import { AuthService, UserService, OrderService } from '../services';
@@ -56,7 +55,7 @@ const ProfileScreen = ({ navigation }) => {
                         }
                     }
                 } catch (err) {
-                    console.log('Error fetching user profile in ProfileScreen:', err);
+                    if (__DEV__) console.log('Error fetching user profile in ProfileScreen:', err);
                 }
             }
         });
@@ -67,13 +66,11 @@ const ProfileScreen = ({ navigation }) => {
         setIsLoggingOut(true);
 
         try {
-            const refreshToken = await AsyncStorage.getItem('customerRefreshToken');
-            await AuthService.logout(refreshToken || undefined);
+            // Calls /auth/logout, then clears stored tokens even if the call fails.
+            await AuthService.logout();
         } catch (error) {
-            console.log('Logout API error (proceeding anyway):', error.message);
+            if (__DEV__) console.log('Logout API error (proceeding anyway):', error.message);
         }
-
-        await AsyncStorage.multiRemove(['customerUser', 'customerAccessToken', 'customerRefreshToken']);
 
         dispatch(logout());
         setIsLoggingOut(false);

@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model } from 'mongoose';
 import { User, UserDocument, UserRole } from './schemas/user.schema';
+import { CreateAddressDto, UpdateAddressDto } from './dto/address.dto';
 
 @Injectable()
 export class UsersService {
@@ -78,7 +79,32 @@ export class UsersService {
     return user.save();
   }
 
-  async addAddress(userId: string, address: any): Promise<UserDocument> {
+  private static readonly ADDRESS_FIELDS = [
+    'type',
+    'address',
+    'city',
+    'pincode',
+    'isDefault',
+    'latitude',
+    'longitude',
+  ] as const;
+
+  /** Copy only whitelisted address fields (never spread client input into a subdocument). */
+  private applyAddressFields(
+    target: Record<string, any>,
+    input: UpdateAddressDto,
+  ): void {
+    for (const field of UsersService.ADDRESS_FIELDS) {
+      if (input[field] !== undefined && input[field] !== null) {
+        target[field] = input[field];
+      }
+    }
+  }
+
+  async addAddress(
+    userId: string,
+    input: CreateAddressDto,
+  ): Promise<UserDocument> {
     const user = await this.userModel.findById(userId);
     if (!user) throw new NotFoundException('User not found');
 
@@ -86,24 +112,26 @@ export class UsersService {
     const existingIndex = user.addresses.findIndex(
       (addr: any) =>
         (addr.address || '').toLowerCase().trim() ===
-          (address.address || '').toLowerCase().trim() &&
+          (input.address || '').toLowerCase().trim() &&
         (addr.city || '').toLowerCase().trim() ===
-          (address.city || '').toLowerCase().trim() &&
-        addr.type === address.type,
+          (input.city || '').toLowerCase().trim() &&
+        addr.type === input.type,
     );
+
+    const makeDefault = !!input.isDefault || user.addresses.length === 0;
+    if (makeDefault) {
+      user.addresses.forEach((addr) => (addr.isDefault = false));
+    }
 
     if (existingIndex !== -1) {
       // Update existing address instead of pushing a duplicate
-      user.addresses[existingIndex] = {
-        ...user.addresses[existingIndex],
-        ...address,
-      };
+      this.applyAddressFields(user.addresses[existingIndex], input);
+      if (makeDefault) user.addresses[existingIndex].isDefault = true;
     } else {
-      if (address.isDefault || user.addresses.length === 0) {
-        user.addresses.forEach((addr) => (addr.isDefault = false));
-        address.isDefault = true;
-      }
-      user.addresses.push(address);
+      const address: Record<string, any> = { isDefault: false };
+      this.applyAddressFields(address, input);
+      address.isDefault = makeDefault;
+      user.addresses.push(address as any);
     }
 
     return user.save();
@@ -112,23 +140,24 @@ export class UsersService {
   async updateAddress(
     userId: string,
     addressIndex: number,
-    newAddress: any,
+    input: UpdateAddressDto,
   ): Promise<UserDocument> {
     const user = await this.userModel.findById(userId);
     if (!user) throw new NotFoundException('User not found');
 
-    if (addressIndex < 0 || addressIndex >= user.addresses.length) {
+    if (
+      !Number.isInteger(addressIndex) ||
+      addressIndex < 0 ||
+      addressIndex >= user.addresses.length
+    ) {
       throw new NotFoundException('Address index out of bounds');
     }
 
-    if (newAddress.isDefault) {
+    if (input.isDefault) {
       user.addresses.forEach((addr) => (addr.isDefault = false));
     }
 
-    user.addresses[addressIndex] = {
-      ...user.addresses[addressIndex],
-      ...newAddress,
-    };
+    this.applyAddressFields(user.addresses[addressIndex], input);
 
     return user.save();
   }

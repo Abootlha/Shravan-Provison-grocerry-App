@@ -85,6 +85,16 @@ const cartSlice = createSlice({
             state.totalAmount = 0;
             state.totalItems = 0;
         },
+
+        // Restores a cart saved by store/index.js; totals are recomputed.
+        hydrateCart: (state, action) => {
+            const items = Array.isArray(action.payload?.items)
+                ? action.payload.items.filter((item) => item && item.id && item.quantity > 0)
+                : [];
+            state.items = items;
+            state.totalItems = items.reduce((total, item) => total + item.quantity, 0);
+            state.totalAmount = items.reduce((total, item) => total + item.price * item.quantity, 0);
+        },
     },
 });
 
@@ -94,6 +104,7 @@ export const {
     incrementQuantity,
     decrementQuantity,
     clearCart,
+    hydrateCart,
 } = cartSlice.actions;
 
 export default cartSlice.reducer;

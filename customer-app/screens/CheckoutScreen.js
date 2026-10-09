@@ -13,9 +13,8 @@ import {
     TextInput,
     Platform,
     Modal,
-    DeviceEventEmitter,
+    Linking,
 } from 'react-native';
-import CBWrapper from 'payu-core-pg-react';
 import {
     ArrowLeft02Icon,
     ShoppingCart01Icon,
@@ -47,8 +46,20 @@ import {
 } from 'hugeicons-react-native';
 import { useSelector, useDispatch } from 'react-redux';
 import { COLORS, SHADOWS } from '../constants';
-import { UserService, OrderService, api } from '../services';
+import { UserService } from '../services';
 import { WebView } from 'react-native-webview';
+import {
+    PAYMENT_METHOD_MAP,
+    PAYMENT_RESULT,
+    getPayUOptions,
+    createOrder,
+    requestPaymentHash,
+    submitPayUFormOnWeb,
+    getNativePaymentRequest,
+    parsePaymentReturnUrl,
+    pollOrderPayment,
+    checkOrderPayment,
+} from '../services/paymentService';
 import { setSavedAddresses, setSelectedAddress } from '../store/slices/locationSlice';
 import { clearCart, incrementQuantity, decrementQuantity, removeFromCart } from '../store/slices/cartSlice';
 import { useTranslation } from '../hooks/useTranslation';
@@ -70,43 +81,43 @@ const CheckoutScreen = ({ navigation, route }) => {
     const [appliedCoupon, setAppliedCoupon] = useState(null);
     const [isFetchingAddresses, setIsFetchingAddresses] = useState(false);
     const [isPlacing, setIsPlacing] = useState(false);
-    const [payuHtml, setPayuHtml] = useState(null);
+    // Native PayU checkout request ({ url, body }) loaded in a WebView
+    const [payuRequest, setPayuRequest] = useState(null);
 
 
     // Payment Gateway Processing State
     const [isProcessingPayment, setIsProcessingPayment] = useState(false);
-    const [paymentStep, setPaymentStep] = useState(0); // 0: Connecting, 1: Verifying/Processing, 2: Approved
+    // 0: Connecting, 1: Verifying with server, 2: Approved, 3: Still verifying (timed out)
+    const [paymentStep, setPaymentStep] = useState(0);
     const paymentTimersRef = useRef([]);
+    const pendingOrderIdRef = useRef(null);
+    const pollingRef = useRef(false);
+    const isMountedRef = useRef(true);
 
     useEffect(() => {
+        isMountedRef.current = true;
         return () => {
+            isMountedRef.current = false;
             paymentTimersRef.current.forEach(t => clearTimeout(t));
         };
     }, []);
 
+    // Return from PayU (web redirect via PAYMENT_RETURN_URL, forwarded as route
+    // params). ?payment=success is NOT proof of payment: always verify with the server.
     useEffect(() => {
-        if (route?.params?.payment === 'failed') {
-            Alert.alert('Payment Failed', 'Your transaction could not be processed. Please try another payment method or try again.');
-            // Clear param to avoid showing alert multiple times if re-rendered
-            navigation.setParams({ payment: undefined });
-        } else if (route?.params?.payment === 'success') {
-            // Wait a brief moment to ensure states are initialized, then place order
-            setTimeout(() => {
-                executeOrderPlacement();
-            }, 500);
-            navigation.setParams({ payment: undefined });
+        const payment = route?.params?.payment;
+        if (!payment) return;
+        const returnedOrderId = route?.params?.orderId || pendingOrderIdRef.current;
+        navigation.setParams({ payment: undefined, orderId: undefined });
+
+        // 'failed' can also mean PayU 'pending', so poll whenever we know the order.
+        if (returnedOrderId) {
+            verifyPayment(returnedOrderId);
+        } else {
+            // No orderId (e.g. the callback hash was rejected): nothing to verify.
+            showPaymentFailed();
         }
     }, [route?.params?.payment]);
-
-    useEffect(() => {
-        const cbListener = DeviceEventEmitter.addListener("CBListener", (event) => {
-            console.log("CBListener event:", event);
-            if (event.eveneType === "onPaymentSuccess") {
-                // Custom handling if needed, though startPayment callback should suffice
-            }
-        });
-        return () => cbListener.remove();
-    }, []);
 
     const clearPaymentTimers = () => {
         paymentTimersRef.current.forEach(t => clearTimeout(t));
@@ -235,47 +246,116 @@ const CheckoutScreen = ({ navigation, route }) => {
     };
 
     // Place Order handler
-    const PAYMENT_MAP = {
-        phonepe: 'UPI',
-        paytm: 'UPI',
-        gpay: 'UPI',
-        amazon_upi: 'UPI',
-        super_upi: 'UPI',
-        add_upi: 'UPI',
-        upi: 'UPI',
-        cod: 'COD',
-        card: 'CARD',
-        pluxee: 'CARD',
-        wallet: 'WALLET',
-        wallet_sk: 'WALLET',
-        amazon_wallet: 'WALLET',
-        mobikwik: 'WALLET',
-        netbanking: 'CARD',
-    };
-
     const mongoIdPattern = /^[a-f\d]{24}$/i;
 
-    const getSeamlessParameters = () => {
-        switch(selectedPayment) {
-            case 'phonepe': return { pg: 'UPI', bankcode: 'PHONEPE' };
-            case 'paytm': return { pg: 'UPI', bankcode: 'PAYTM' };
-            case 'gpay': return { pg: 'UPI', bankcode: 'TEZ' };
-            case 'amazon_upi': return { pg: 'UPI', bankcode: 'INTENT' };
-            case 'super_upi': return { pg: 'UPI', bankcode: 'INTENT' };
-            case 'add_upi': return { pg: 'UPI', bankcode: 'INTENT' };
-            case 'card': return { pg: 'CC', bankcode: 'CC' };
-            case 'pluxee': return { pg: 'CC', bankcode: 'SODEXO' };
-            case 'netbanking': return { pg: 'NB', bankcode: 'NB' };
-            case 'wallet': return { pg: 'WALLET', bankcode: 'WALLET' };
-            case 'wallet_sk': return { pg: 'WALLET', bankcode: 'WALLET' };
-            case 'amazon_wallet': return { pg: 'WALLET', bankcode: 'AMAZONPAY' };
-            case 'mobikwik': return { pg: 'WALLET', bankcode: 'MOBIKWIK' };
-            default: return { pg: 'UPI', bankcode: 'INTENT' };
+    const buildOrderData = () => {
+        const addrToUse = selectedAddress;
+        return {
+            items: cartItems.map(item => ({
+                productId: item.productId || item._id || item.id,
+                name: item.name,
+                quantity: item.quantity,
+                price: item.price,
+                image: item.image || undefined,
+            })),
+            itemTotal: effectiveTotalAmount,
+            deliveryFee,
+            packagingFee,
+            platformFee,
+            discount: totalDiscount,
+            totalAmount: grandTotal,
+            deliveryAddress: {
+                type: addrToUse.type || 'Home',
+                address: addrToUse.address || addrToUse.addressLine,
+                city: addrToUse.city,
+                pincode: addrToUse.pincode,
+                latitude: addrToUse.latitude,
+                longitude: addrToUse.longitude,
+            },
+            // paymentStatus is owned by the server (new orders start PENDING).
+            paymentMethod: PAYMENT_METHOD_MAP[selectedPayment] || 'UPI',
+            deliveryPreference: deliveryPref,
+            instructions: selectedInstructions.join(', ') + (customInstruction ? ` (${customInstruction})` : ''),
+        };
+    };
+
+    const showPaymentFailed = () => {
+        Alert.alert(
+            isHi ? 'भुगतान विफल' : 'Payment Failed',
+            isHi
+                ? 'आपका भुगतान पूरा नहीं हो सका। कृपया दूसरा भुगतान तरीका आज़माएं या फिर से प्रयास करें।'
+                : 'Your transaction could not be processed. Please try another payment method or try again.'
+        );
+    };
+
+    const finishPaidOrder = (orderId) => {
+        pendingOrderIdRef.current = null;
+        dispatch(clearCart());
+        setPaymentStep(2);
+        const t = setTimeout(() => {
+            setIsProcessingPayment(false);
+            navigation.replace('OrderTracking', { orderId });
+        }, 900);
+        paymentTimersRef.current.push(t);
+    };
+
+    // Polls the order until the server has verified the payment (or ~60s pass).
+    const verifyPayment = async (orderId) => {
+        if (!orderId || pollingRef.current) return;
+        pollingRef.current = true;
+        pendingOrderIdRef.current = orderId;
+        setIsProcessingPayment(true);
+        setPaymentStep(1);
+
+        const result = await pollOrderPayment(orderId, {
+            timeoutMs: 60000,
+            intervalMs: 3000,
+            shouldStop: () => !isMountedRef.current || !pollingRef.current,
+        });
+        pollingRef.current = false;
+        if (!isMountedRef.current || result === PAYMENT_RESULT.CANCELLED) return;
+
+        if (result === PAYMENT_RESULT.COMPLETED) {
+            finishPaidOrder(orderId);
+        } else if (result === PAYMENT_RESULT.FAILED) {
+            pendingOrderIdRef.current = null;
+            setIsProcessingPayment(false);
+            setPaymentStep(0);
+            showPaymentFailed();
+        } else {
+            setPaymentStep(3);
         }
     };
 
+    const closeVerification = () => {
+        pollingRef.current = false;
+        setIsProcessingPayment(false);
+        setPaymentStep(0);
+        Alert.alert(
+            isHi ? 'भुगतान सत्यापन जारी है' : 'Still verifying payment',
+            isHi
+                ? 'हम आपके भुगतान की पुष्टि कर रहे हैं। पुष्टि होने पर ऑर्डर मेरे ऑर्डर में दिखेगा। दोबारा भुगतान न करें।'
+                : 'We are still confirming your payment. Once confirmed, the order will appear in My Orders. Please do not pay again.'
+        );
+    };
+
     const handleInitiatePayment = async () => {
-        const itemsToSubmit = cartItems && cartItems.length > 0 ? cartItems : activeCartItems;
+        if (!cartItems || cartItems.length === 0) {
+            Alert.alert(
+                isHi ? 'कार्ट खाली है' : 'Your cart is empty',
+                isHi ? 'ऑर्डर करने से पहले कार्ट में आइटम जोड़ें।' : 'Add items to your cart before placing an order.'
+            );
+            return;
+        }
+
+        if (!selectedAddress) {
+            Alert.alert(
+                isHi ? 'पता चुनें' : 'Select an address',
+                isHi ? 'कृपया डिलीवरी पता जोड़ें या चुनें।' : 'Please add or select a delivery address.'
+            );
+            return;
+        }
+
         const invalidCartItem = cartItems.find((item) => {
             const productId = item.productId || item._id || item.id;
             return !productId || !mongoIdPattern.test(String(productId));
@@ -291,7 +371,7 @@ const CheckoutScreen = ({ navigation, route }) => {
 
         setIsPaymentModalOpen(false);
         clearPaymentTimers();
-        
+
         if (selectedPayment === 'cod') {
             setIsProcessingPayment(true);
             setPaymentStep(0);
@@ -305,118 +385,86 @@ const CheckoutScreen = ({ navigation, route }) => {
             const t2 = setTimeout(() => {
                 setPaymentStep(2);
                 const t3 = setTimeout(async () => {
-                    await executeOrderPlacement();
+                    await placeCodOrder();
                 }, 900);
                 paymentTimersRef.current.push(t3);
             }, 2500);
 
             paymentTimersRef.current.push(t1, t2);
-        } else {
-            // PayU Seamless Integration
-            try {
-                setIsProcessingPayment(true);
-                setPaymentStep(0);
-                
-                const { pg, bankcode } = getSeamlessParameters();
-                
-                const payload = {
-                    txnid: 'TXN' + Date.now(),
-                    amount: grandTotal,
-                    productinfo: 'Grocery Order',
-                    firstname: 'Amit',
-                    email: 'test@example.com',
-                    phone: '9999999999',
-                    surl: 'http://localhost:3000/payments/success',
-                    furl: 'http://localhost:3000/payments/failure',
-                    pg,
-                    bankcode
-                };
-
-                const response = await api.post('/payments/seamless-hash', payload);
-                const hashData = response.data?.data;
-                
-                if (hashData) {
-                    setIsProcessingPayment(false);
-                    
-                    if (Platform.OS === 'web') {
-                        const form = document.createElement('form');
-                        form.method = 'POST';
-                        form.action = 'https://secure.payu.in/_payment';
-                        form.style.display = 'none';
-                        
-                        const fields = ['key', 'txnid', 'amount', 'productinfo', 'firstname', 'email', 'phone', 'surl', 'furl', 'hash', 'pg', 'bankcode'];
-                        fields.forEach(fieldName => {
-                            if (hashData[fieldName] !== undefined && hashData[fieldName] !== null) {
-                                const input = document.createElement('input');
-                                input.type = 'hidden';
-                                input.name = fieldName;
-                                input.value = hashData[fieldName];
-                                form.appendChild(input);
-                            }
-                        });
-                        
-                        document.body.appendChild(form);
-                        form.submit();
-                    } else {
-                        // React Native SDK for Android/iOS
-                        const payUPaymentParams = {
-                            payUPaymentParams: {
-                                key: hashData.key,
-                                transaction_id: hashData.txnid,
-                                amount: String(hashData.amount),
-                                product_info: hashData.productinfo,
-                                first_name: hashData.firstname,
-                                email: hashData.email,
-                                phone: hashData.phone,
-                                ios_surl: hashData.surl,
-                                ios_furl: hashData.furl,
-                                android_surl: hashData.surl,
-                                android_furl: hashData.furl,
-                                environment: "0", // "1" for Stage, "0" for production
-                                user_credentials: `${hashData.email}:${hashData.phone}`,
-                                hashes: {
-                                    payment: hashData.hash,
-                                },
-                                bankcode: hashData.bankcode,
-                            }
-                        };
-                        
-                        let paymentMode = hashData.pg === 'UPI' ? 'NB' : hashData.pg === 'CC' ? 'CC' : 'CASH'; // NB stands for Netbanking/UPI in some SDKs, check mapping
-
-                        if (!CBWrapper || typeof CBWrapper.startPayment !== 'function') {
-                            Alert.alert("Not Supported", "PayU SDK requires a Native Build (APK/IPA). It does not work inside Expo Go.");
-                            setIsProcessingPayment(false);
-                            return;
-                        }
-
-                        CBWrapper.startPayment(
-                            payUPaymentParams,
-                            paymentMode,
-                            (error) => {
-                                console.log("-----------Error Callback---------");
-                                console.log(error);
-                                console.log("------------------------------------");
-                                Alert.alert("Payment Error", "Transaction failed or cancelled");
-                                setIsProcessingPayment(false);
-                            },
-                            (payuResponse) => {
-                                console.log("-----------Success Callback---------");
-                                console.log(payuResponse);
-                                console.log("--------------------------------------");
-                                // On success, process order
-                                executeOrderPlacement();
-                            }
-                        );
-                    }
-                } else {
-                    throw new Error("Invalid hash data");
-                }
-            } catch (error) {
-                console.error("PayU Hash Error", error);
-                Alert.alert("Payment Error", "Failed to initialize payment gateway.");
-                setIsProcessingPayment(false);
-            }
+            return;
         }
+
+        // Online payment: order (PENDING) -> server-signed PayU params -> PayU -> poll order.
+        setIsPlacing(true);
+        setIsProcessingPayment(true);
+        setPaymentStep(0);
+        try {
+            const { orderId } = await createOrder(buildOrderData());
+            pendingOrderIdRef.current = orderId;
+
+            const payuOptions = getPayUOptions(selectedPayment);
+            const hashData = await requestPaymentHash({ orderId, ...payuOptions });
+
+            if (Platform.OS === 'web') {
+                // The browser leaves the app; the backend redirects back to
+                // PAYMENT_RETURN_URL?payment=...&orderId=... and we poll from there.
+                submitPayUFormOnWeb(hashData);
+                return;
+            }
+
+            const request = await getNativePaymentRequest(hashData, payuOptions);
+            setIsProcessingPayment(false);
+            setPayuRequest(request);
+        } catch (error) {
+            console.error('Payment initiation failed:', error?.response?.status, error?.response?.data?.message || error.message);
+            setIsProcessingPayment(false);
+            Alert.alert(
+                isHi ? 'भुगतान त्रुटि' : 'Payment Error',
+                error?.response?.data?.message || (isHi ? 'पेमेंट गेटवे शुरू नहीं हो सका।' : 'Failed to initialize payment gateway.')
+            );
+        } finally {
+            setIsPlacing(false);
+        }
+    };
+
+    // PayU finished (redirected to the backend return URL) -> verify with the server.
+    const handlePayuReturn = (url) => {
+        const parsed = parsePaymentReturnUrl(url);
+        if (!parsed) return false;
+        setPayuRequest(null);
+        verifyPayment(parsed.orderId || pendingOrderIdRef.current);
+        return true;
+    };
+
+    // User closed the PayU page: check once in case the payment already went through.
+    const handlePayuClosed = async () => {
+        setPayuRequest(null);
+        const orderId = pendingOrderIdRef.current;
+        if (!orderId) return;
+        const result = await checkOrderPayment(orderId);
+        if (result === PAYMENT_RESULT.COMPLETED) {
+            setIsProcessingPayment(true);
+            finishPaidOrder(orderId);
+            return;
+        }
+        Alert.alert(
+            isHi ? 'भुगतान रद्द किया गया' : 'Payment Cancelled',
+            isHi ? 'भुगतान पूरा नहीं हुआ। आप फिर से प्रयास कर सकते हैं।' : 'The payment was not completed. You can try again.'
+        );
+    };
+
+    // Opens UPI intent / app links that PayU's page hands to the WebView.
+    const handlePayuNavigation = (request) => {
+        const url = request?.url || '';
+        if (handlePayuReturn(url)) return false;
+        if (/^(https?|about|data|blob):/i.test(url)) return true;
+        Linking.openURL(url).catch(() => {
+            Alert.alert(
+                isHi ? 'ऐप नहीं मिला' : 'App not found',
+                isHi ? 'यह भुगतान ऐप इस डिवाइस पर उपलब्ध नहीं है।' : 'The selected payment app is not available on this device.'
+            );
+        });
+        return false;
     };
 
     const cancelPaymentProcess = () => {
@@ -430,66 +478,21 @@ const CheckoutScreen = ({ navigation, route }) => {
         );
     };
 
-    const executeOrderPlacement = async () => {
-        const addrToUse = selectedAddress || {
-            type: 'Home',
-            name: 'Amit Kumar',
-            address: 'Medical Road, Near Gorakhpur University',
-            city: 'Gorakhpur',
-            pincode: '273009',
-            latitude: 26.7606,
-            longitude: 83.3731,
-        };
-
+    const placeCodOrder = async () => {
         setIsPlacing(true);
         try {
-            const itemsToSubmit = cartItems && cartItems.length > 0 ? cartItems : activeCartItems;
-            
-            const orderData = {
-                items: itemsToSubmit.map(item => ({
-                    productId: item.productId || item._id || item.id,
-                    name: item.name,
-                    quantity: item.quantity,
-                    price: item.price,
-                    image: item.image || undefined,
-                })),
-                itemTotal: effectiveTotalAmount,
-                deliveryFee,
-                packagingFee,
-                platformFee,
-                discount: totalDiscount,
-                totalAmount: grandTotal,
-                deliveryAddress: {
-                    type: addrToUse.type || 'Home',
-                    address: addrToUse.address || addrToUse.addressLine || 'Medical Road, Near Gorakhpur University',
-                    city: addrToUse.city || 'Gorakhpur',
-                    pincode: addrToUse.pincode || '273009',
-                    latitude: addrToUse.latitude || 26.7606,
-                    longitude: addrToUse.longitude || 83.3731,
-                },
-                paymentMethod: PAYMENT_MAP[selectedPayment] || 'UPI',
-                paymentStatus: selectedPayment === 'cod' ? 'PENDING' : 'COMPLETED',
-                deliveryPreference: deliveryPref,
-                instructions: selectedInstructions.join(', ') + (customInstruction ? ` (${customInstruction})` : ''),
-            };
-
-            const response = await OrderService.createOrder(orderData);
-            const orderId = response?.order?._id || response?._id || response?.orderId || `ORD-${Date.now()}`;
-
+            const { orderId } = await createOrder(buildOrderData());
             dispatch(clearCart());
             setIsProcessingPayment(false);
-            if (orderId) {
-                navigation.replace('OrderTracking', { orderId });
-            } else {
-                Alert.alert('Success', 'Order placed successfully!');
-                navigation.navigate('Home');
-            }
+            navigation.replace('OrderTracking', { orderId });
         } catch (error) {
-            console.error('Order creation API error details:', error?.response?.status, error?.response?.data || error.message);
-            // Friendly fallback flow if offline or test mode
-            dispatch(clearCart());
+            console.error('Order creation API error details:', error?.response?.status, error?.response?.data?.message || error.message);
             setIsProcessingPayment(false);
-            navigation.replace('OrderTracking', { orderId: `ORD-${Math.floor(100000 + Math.random() * 900000)}` });
+            setPaymentStep(0);
+            Alert.alert(
+                isHi ? 'ऑर्डर विफल' : 'Order Failed',
+                error?.response?.data?.message || (isHi ? 'ऑर्डर नहीं दिया जा सका। कृपया फिर से प्रयास करें।' : 'Your order could not be placed. Please try again.')
+            );
         } finally {
             setIsPlacing(false);
         }
@@ -1213,17 +1216,26 @@ const CheckoutScreen = ({ navigation, route }) => {
 
                             <Text style={styles.paymentStepText}>
                                 {paymentStep === 0 && (isHi ? 'बैंक पेमेंट गेटवे से सुरक्षित रूप से जुड़ रहा है...' : 'Connecting securely to payment gateway...')}
-                                {paymentStep === 1 && (isHi ? 'ट्रांजैक्शन और बैंक पेमेंट सत्यापित हो रहा है...' : 'Authenticating transaction with bank...')}
-                                {paymentStep === 2 && (isHi ? 'भुगतान सफल! ऑर्डर कन्फर्म हो गया ✓' : 'Payment Approved! Order Confirmed ✓')}
+                                {paymentStep === 1 && (selectedPayment === 'cod'
+                                    ? (isHi ? 'आपका ऑर्डर तैयार किया जा रहा है...' : 'Preparing your order...')
+                                    : (isHi ? 'आपके भुगतान की पुष्टि की जा रही है...' : 'Confirming your payment with the bank...'))}
+                                {paymentStep === 2 && (selectedPayment === 'cod'
+                                    ? (isHi ? 'ऑर्डर कन्फर्म हो गया ✓' : 'Order Confirmed ✓')
+                                    : (isHi ? 'भुगतान सफल! ऑर्डर कन्फर्म हो गया ✓' : 'Payment Approved! Order Confirmed ✓'))}
+                                {paymentStep === 3 && (isHi
+                                    ? 'भुगतान की पुष्टि में समय लग रहा है। दोबारा भुगतान न करें।'
+                                    : 'Still verifying your payment. This can take a few minutes - please do not pay again.')}
                             </Text>
 
-                            <Text style={styles.paymentWarningText}>
-                                {isHi ? 'कृपया ऐप बंद न करें और न ही बैक बटन दबाएं' : 'Please do not close the app or press back'}
-                            </Text>
+                            {paymentStep !== 3 && (
+                                <Text style={styles.paymentWarningText}>
+                                    {isHi ? 'कृपया ऐप बंद न करें और न ही बैक बटन दबाएं' : 'Please do not close the app or press back'}
+                                </Text>
+                            )}
                         </View>
 
-                        {/* Cancel Payment Button (only available while connecting/processing) */}
-                        {paymentStep < 2 && (
+                        {/* Cancel is only offered before anything has been charged */}
+                        {paymentStep === 0 && (
                             <TouchableOpacity
                                 style={styles.cancelPaymentBtn}
                                 onPress={cancelPaymentProcess}
@@ -1232,26 +1244,40 @@ const CheckoutScreen = ({ navigation, route }) => {
                                 <Text style={styles.cancelPaymentText}>{isHi ? 'भुगतान रद्द करें' : 'Cancel Payment'}</Text>
                             </TouchableOpacity>
                         )}
+
+                        {paymentStep === 3 && (
+                            <>
+                                <TouchableOpacity
+                                    style={styles.cancelPaymentBtn}
+                                    onPress={() => verifyPayment(pendingOrderIdRef.current)}
+                                    activeOpacity={0.8}
+                                >
+                                    <Text style={styles.cancelPaymentText}>{isHi ? 'फिर से जांचें' : 'Check again'}</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.cancelPaymentBtn}
+                                    onPress={closeVerification}
+                                    activeOpacity={0.8}
+                                >
+                                    <Text style={styles.cancelPaymentText}>{isHi ? 'बंद करें' : 'Close'}</Text>
+                                </TouchableOpacity>
+                            </>
+                        )}
                     </View>
                 </View>
             </Modal>
 
-            {/* PayU Seamless WebView Modal (Mobile) */}
+            {/* PayU checkout WebView (native). Completion is detected from the
+                backend return URL and then verified by polling the order. */}
             <Modal
-                visible={!!payuHtml}
+                visible={!!payuRequest}
                 animationType="slide"
-                onRequestClose={() => {
-                    setPayuHtml(null);
-                    cancelPaymentProcess();
-                }}
+                onRequestClose={handlePayuClosed}
             >
                 <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
                     <View style={styles.header}>
-                        <TouchableOpacity 
-                            onPress={() => {
-                                setPayuHtml(null);
-                                cancelPaymentProcess();
-                            }} 
+                        <TouchableOpacity
+                            onPress={handlePayuClosed}
                             style={styles.backButton}
                         >
                             <ArrowLeft02Icon size={24} color={COLORS.text} />
@@ -1259,21 +1285,21 @@ const CheckoutScreen = ({ navigation, route }) => {
                         <Text style={styles.headerTitle}>{isHi ? 'सुरक्षित भुगतान' : 'Secure Payment'}</Text>
                         <View style={{ width: 40 }} />
                     </View>
-                    {payuHtml && (
+                    {payuRequest && (
                         <WebView
-                            source={{ html: payuHtml }}
+                            source={{
+                                uri: payuRequest.url,
+                                method: 'POST',
+                                body: payuRequest.body,
+                                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            }}
                             style={{ flex: 1 }}
                             javaScriptEnabled={true}
                             domStorageEnabled={true}
+                            originWhitelist={['*']}
+                            onShouldStartLoadWithRequest={handlePayuNavigation}
                             onNavigationStateChange={(navState) => {
-                                if (navState.url.includes('payments/success')) {
-                                    setPayuHtml(null);
-                                    setPaymentStep(2);
-                                    executeOrderPlacement();
-                                } else if (navState.url.includes('payments/failure')) {
-                                    setPayuHtml(null);
-                                    cancelPaymentProcess();
-                                }
+                                handlePayuReturn(navState.url);
                             }}
                         />
                     )}

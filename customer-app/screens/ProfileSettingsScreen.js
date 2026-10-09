@@ -39,7 +39,7 @@ const ProfileSettingsScreen = ({ navigation }) => {
     const dispatch = useDispatch();
     const { isHi } = useTranslation();
 
-    const { user, refreshToken } = useSelector((state) => state.auth);
+    const { user } = useSelector((state) => state.auth);
 
     // State variables for form fields
     const [name, setName] = useState(user?.name || '');
@@ -71,7 +71,7 @@ const ProfileSettingsScreen = ({ navigation }) => {
                     dispatch(updateUser({ ...user, ...profile }));
                 }
             } catch (err) {
-                console.log('Error fetching latest profile:', err);
+                if (__DEV__) console.log('Error fetching latest profile:', err);
             }
         };
         fetchLatestProfile();
@@ -148,7 +148,7 @@ const ProfileSettingsScreen = ({ navigation }) => {
                     await AsyncStorage.setItem('customerUser', JSON.stringify({ ...updatedUserData, ...res }));
                 }
             } catch (apiErr) {
-                console.log('Backend profile save error:', apiErr?.response?.data || apiErr?.message);
+                if (__DEV__) console.log('Backend profile save error:', apiErr?.response?.data || apiErr?.message);
             }
 
             setIsSaving(false);
@@ -161,7 +161,7 @@ const ProfileSettingsScreen = ({ navigation }) => {
                 }
             }, 1000);
         } catch (error) {
-            console.log('Error updating profile:', error);
+            if (__DEV__) console.log('Error updating profile:', error);
             setIsSaving(false);
             Alert.alert(
                 isHi ? 'त्रुटि' : 'Error',
@@ -178,17 +178,13 @@ const ProfileSettingsScreen = ({ navigation }) => {
         try {
             // Attempt API call if available
             try {
-                await AuthService.logout(refreshToken || undefined);
+                // Calls /auth/logout, then clears stored tokens even if the call fails.
+                await AuthService.logout();
             } catch (err) {
-                console.log('Logout on delete error:', err.message);
+                if (__DEV__) console.log('Logout on delete error:', err.message);
             }
 
-            await AsyncStorage.multiRemove([
-                'customerUser',
-                'customerAccessToken',
-                'customerRefreshToken',
-                'customerCart',
-            ]);
+            await AsyncStorage.removeItem('customerCart');
 
             dispatch(logout());
             setIsDeleting(false);
@@ -200,7 +196,7 @@ const ProfileSettingsScreen = ({ navigation }) => {
                 })
             );
         } catch (error) {
-            console.log('Error deleting account:', error);
+            if (__DEV__) console.log('Error deleting account:', error);
             setIsDeleting(false);
             Alert.alert(
                 isHi ? 'त्रुटि' : 'Error',

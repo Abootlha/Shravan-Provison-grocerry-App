@@ -1,23 +1,74 @@
-version: '3.8'
+# Local development stack: NestJS backend + MongoDB + Redis.
+#
+#   cp .env.example .env        # fill in the placeholders
+#   docker compose up -d --build
+#
+# MongoDB and Redis are only reachable from this machine (127.0.0.1) and both
+# require credentials. The backend is published on :3000 so phones on the LAN
+# can reach it while developing the mobile apps.
+# For production use infrastructure/docker/docker-compose.yml.
+
+name: shravankirana
 
 services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      # Optional: extra backend settings (maps keys, PayU, OTP...). See backend/.env.example.
+      - path: ./backend/.env
+        required: false
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      MONGODB_URI: mongodb://${MONGO_ROOT_USERNAME:?set in .env}:${MONGO_ROOT_PASSWORD:?set in .env}@mongodb:27017/shravankirana?authSource=admin
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set in .env}
+      # JWT_SECRET / JWT_REFRESH_SECRET come from backend/.env (dev falls back to
+      # a random per-boot secret if unset).
+    ports:
+      - "3000:3000"
+
   mongodb:
     image: mongo:7
-    container_name: shravankirana-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?set in .env}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set in .env}
+      MONGO_INITDB_DATABASE: shravankirana
     ports:
-      - "27017:27017"
+      - "127.0.0.1:27017:27017"
     volumes:
       - mongodb_data:/data/db
-    environment:
-      - MONGO_INITDB_DATABASE=shravankirana
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   redis:
     image: redis:7-alpine
-    container_name: shravankirana-redis
+    restart: unless-stopped
+    # Password comes from .env; nothing is hardcoded in this file.
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set in .env}
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
 volumes:
   mongodb_data:

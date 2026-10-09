@@ -52,7 +52,6 @@ const apiBase = getApiBaseUrl();
                                     type="text"
                                     class="flex h-12 w-full rounded-xl border bg-[var(--bg-tertiary)] border-[var(--border)] px-4 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:border-[var(--accent)] transition-all duration-200"
                                     placeholder="Enter username or email"
-                                    value="admin"
                                     autocomplete="username"
                                     required
                                 />
@@ -67,7 +66,6 @@ const apiBase = getApiBaseUrl();
                                     type="password"
                                     class="flex h-12 w-full rounded-xl border bg-[var(--bg-tertiary)] border-[var(--border)] px-4 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:border-[var(--accent)] transition-all duration-200"
                                     placeholder="Enter password"
-                                    value="admin123"
                                     autocomplete="current-password"
                                     required
                                 />
@@ -85,19 +83,24 @@ const apiBase = getApiBaseUrl();
                     </div>
                 </div>
 
-                <div class="mt-6 p-4 rounded-xl text-sm" style="background: var(--bg-secondary); border: 1px solid var(--border);">
-                    <p class="font-semibold mb-2" style="color: var(--text-primary);">Demo Credentials</p>
-                    <div class="space-y-1" style="color: var(--text-muted);">
-                        <p><span class="font-medium">Username:</span> admin</p>
-                        <p><span class="font-medium">Password:</span> admin123</p>
-                    </div>
-                </div>
             </div>
         </div>
 
         <script define:vars={{ apiBase }}>
+            // Only skip the login form for a token that is still valid (JWT exp claim).
+            // An expired token stays put so AdminLayout's guard can try a refresh.
             const token = localStorage.getItem('adminToken');
-            if (token) {
+            const tokenIsValid = (() => {
+                try {
+                    const part = token && token.split('.')[1];
+                    if (!part) return false;
+                    const claims = JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/')));
+                    return typeof claims.exp === 'number' && Date.now() < claims.exp * 1000;
+                } catch {
+                    return false;
+                }
+            })();
+            if (tokenIsValid) {
                 window.location.replace('/');
             }
 

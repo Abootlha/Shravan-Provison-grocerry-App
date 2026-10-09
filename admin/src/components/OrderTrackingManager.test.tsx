@@ -244,10 +244,9 @@ describe('OrderTrackingManager', () => {
                 expect(screen.getByText('Order ORD-001')).toBeInTheDocument();
             });
 
-            // Click on CONFIRMED status button in the drawer (use getAllByRole and get the last one)
-            const confirmedButtons = screen.getAllByRole('button', { name: /Confirmed/i });
-            const confirmedButton = confirmedButtons[confirmedButtons.length - 1];
-            await user.click(confirmedButton);
+            // Click the "Confirm" action in the drawer's Update Status section
+            const confirmButton = screen.getByRole('button', { name: 'Update status to Confirm' });
+            await user.click(confirmButton);
 
             await waitFor(() => {
                 expect(api.updateOrderStatus).toHaveBeenCalledWith('1', 'CONFIRMED');

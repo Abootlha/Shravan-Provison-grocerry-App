@@ -14,9 +14,6 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.shravankirana.rider",
-      "config": {
-        "googleMapsApiKey": "AIzaSyAsiP7CR40fAir7Wz81RvQ1qf7eZTIZGpk"
-      },
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "We need your location to show your position on the map and track deliveries.",
         "NSLocationAlwaysUsageDescription": "We need your location to track deliveries even when the app is in the background.",
@@ -32,11 +29,6 @@
         "backgroundColor": "#1E3A8A"
       },
       "package": "com.shravankirana.rider",
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyAsiP7CR40fAir7Wz81RvQ1qf7eZTIZGpk"
-        }
-      },
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -61,7 +53,8 @@
         {
           "color": "#1E3A8A"
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "extra": {
       "eas": {

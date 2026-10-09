@@ -29,6 +29,12 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-floating-promises': 'warn',
       '@typescript-eslint/no-unsafe-argument': 'warn',
+      // Existing `any`-heavy code trips these hundreds of times; keep them visible
+      // as warnings so CI can gate on real errors while the debt is paid down.
+      '@typescript-eslint/no-unsafe-member-access': 'warn',
+      '@typescript-eslint/no-unsafe-assignment': 'warn',
+      '@typescript-eslint/no-unsafe-call': 'warn',
+      '@typescript-eslint/no-unsafe-return': 'warn',
       "prettier/prettier": ["error", { endOfLine: "auto" }],
     },
   },

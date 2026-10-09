@@ -1,46 +1,28 @@
-# Astro Starter Kit: Basics
+# ShravanKirana Admin
 
-```sh
-npm create astro@latest -- --template basics
-```
+Static Astro + React dashboard for the NestJS backend (`../backend`).
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+| Command              | Action                                            |
+|----------------------|---------------------------------------------------|
+| `npm run dev`        | Dev server at `localhost:4321`                    |
+| `npm run build`      | Static build to `dist/` (needs `PUBLIC_API_URL` and `PUBLIC_TRACKING_URL`) |
+| `npm test`           | Vitest, single run (`npm run test:watch` to watch) |
 
-## 🚀 Project Structure
+Configuration is in `.env` (see `.env.example`). `PUBLIC_*` values are baked into the
+bundle and are public.
 
-Inside of your Astro project, you'll see the following folders and files:
+## Auth model
 
-```text
-/
-├── public/
-│   └── favicon.svg
-├── src
-│   ├── assets
-│   │   └── astro.svg
-│   ├── components
-│   │   └── Welcome.astro
-│   ├── layouts
-│   │   └── Layout.astro
-│   └── pages
-│       └── index.astro
-└── package.json
-```
+- Login stores the access token, refresh token and user in `localStorage`.
+- `src/layouts/AdminLayout.astro` has an inline guard in `<head>`. It hides the page and
+  redirects to `/login` when there is no valid token. It refreshes the token first when
+  only the access token has expired.
+- `src/lib/api.ts` reads the JWT `exp` claim. On a 401 it makes one shared
+  `POST /auth/refresh` call (`{ refreshToken }`), retries the request, and sends the user
+  to `/login` if that fails. Logout calls `POST /auth/logout` and clears every stored key.
+- The guard only hides UI. The backend enforces authorization on every request.
 
-To learn more about the folder structure of an Astro project, refer to [our guide on project structure](https://docs.astro.build/en/basics/project-structure/).
-
-## 🧞 Commands
-
-All commands are run from the root of the project, from a terminal:
-
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
-
-## 👀 Want to learn more?
-
-Feel free to check [our documentation](https://docs.astro.build) or jump into our [Discord server](https://astro.build/chat).
+**Accepted risk:** a static site with no server of its own cannot use httpOnly cookies,
+so tokens sit in `localStorage` and an XSS bug could read them. To limit this, keep
+access tokens short-lived, don't add third-party scripts, and never render untrusted
+HTML.

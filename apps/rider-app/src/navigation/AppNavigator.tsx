@@ -1,7 +1,8 @@
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useEffect, useRef } from 'react';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useSocket } from '../hooks/useSocket';
+import { useAppSelector } from '../hooks/useAuth';
 import type { RootStackParamList } from '../types/navigation';
 
 import { SplashScreen } from '../screens/SplashScreen';
@@ -16,12 +17,23 @@ import { EarningsScreen } from '../screens/EarningsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
 export const AppNavigator: React.FC = () => {
   useSocket();
+  const isAuthenticated = useAppSelector((state) => state.auth.isAuthenticated);
+  const wasAuthenticated = useRef(isAuthenticated);
+
+  // Session ended (logout, or token refresh failed): send the rider back to Login.
+  useEffect(() => {
+    if (wasAuthenticated.current && !isAuthenticated && navigationRef.isReady()) {
+      navigationRef.reset({ index: 0, routes: [{ name: 'Login' }] });
+    }
+    wasAuthenticated.current = isAuthenticated;
+  }, [isAuthenticated]);
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <Stack.Navigator
         initialRouteName="Splash"
         screenOptions={{

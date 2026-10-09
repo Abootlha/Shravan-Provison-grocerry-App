@@ -1,12 +1,23 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { UsersService } from '../users/users.service';
 import { RidersService } from '../riders/riders.service';
 import { OtpService } from './otp.service';
 import { RedisService } from '../../common/utils/redis.service';
 import * as bcrypt from 'bcrypt';
 import { UserRole } from '../users/schemas/user.schema';
+import { AuthKeys } from './auth.keys';
+import { JwtPayload } from './strategies/jwt.strategy';
+
+/** Roles that may be requested on /auth/verify-otp. */
+export type OtpLoginRole = UserRole.CUSTOMER | UserRole.RIDER;
+
+export interface AuthTokens {
+  accessToken: string;
+  refreshToken: string;
+}
 
 @Injectable()
 export class AuthService {
@@ -22,24 +33,27 @@ export class AuthService {
     private redisService: RedisService,
   ) {}
 
-  private getRefreshTokenKey(userId: string): string {
-    return `refresh_token:${userId}`;
+  /**
+   * Refresh tokens are high-entropy JWTs, so a fast SHA-256 is appropriate.
+   * (bcrypt only looks at the first 72 bytes, which are identical for every
+   * token of the same subject, so it must not be used here.)
+   */
+  private hashToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
   }
 
-  private getAccessTokenKey(userId: string): string {
-    return `access_token:${userId}`;
+  private matchesStoredHash(token: string, storedHash: string): boolean {
+    const a = Buffer.from(this.hashToken(token));
+    const b = Buffer.from(storedHash);
+    return a.length === b.length && timingSafeEqual(a, b);
   }
 
   // Admin login with username and password
   async adminLogin(username: string, password: string): Promise<any> {
     const user = await this.usersService.findByUsername(username);
 
-    if (!user || user.role !== 'admin') {
+    if (!user || user.role !== UserRole.ADMIN || !user.password) {
       throw new UnauthorizedException('Invalid credentials');
-    }
-
-    if (!user.password) {
-      throw new UnauthorizedException('Password not set for this admin user');
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
@@ -51,23 +65,7 @@ export class AuthService {
       throw new UnauthorizedException('Account is disabled');
     }
 
-    // Generate tokens with 2-hour expiry for access token
-    const tokens = await this.generateTokens(user._id.toString(), user.role);
-
-    // Store hashed refresh token in Redis (28 days expiry)
-    const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
-    await this.redisService.set(
-      this.getRefreshTokenKey(user._id.toString()),
-      hashedRefreshToken,
-      this.refreshTokenExpiry,
-    );
-
-    // Store access token in Redis with 2-hour expiry
-    await this.redisService.set(
-      this.getAccessTokenKey(user._id.toString()),
-      tokens.accessToken,
-      this.accessTokenExpiry,
-    );
+    const tokens = await this.issueSession(user._id.toString(), user.role);
 
     return {
       user: {
@@ -84,12 +82,8 @@ export class AuthService {
   async riderLogin(username: string, password: string): Promise<any> {
     const rider = await this.ridersService.findByUsername(username);
 
-    if (!rider) {
+    if (!rider || !rider.password) {
       throw new UnauthorizedException('Invalid credentials');
-    }
-
-    if (!rider.password) {
-      throw new UnauthorizedException('Password not set for this rider');
     }
 
     const isPasswordValid = await bcrypt.compare(password, rider.password);
@@ -101,33 +95,10 @@ export class AuthService {
       throw new UnauthorizedException('Account is disabled');
     }
 
-    // Generate tokens with rider role
-    const tokens = await this.generateTokens(rider._id.toString(), 'rider');
-
-    // Store hashed refresh token in Redis (28 days expiry)
-    const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
-    await this.redisService.set(
-      this.getRefreshTokenKey(rider._id.toString()),
-      hashedRefreshToken,
-      this.refreshTokenExpiry,
-    );
-
-    // Store access token in Redis with 2-hour expiry
-    await this.redisService.set(
-      this.getAccessTokenKey(rider._id.toString()),
-      tokens.accessToken,
-      this.accessTokenExpiry,
-    );
+    const tokens = await this.issueSession(rider._id.toString(), 'rider');
 
     return {
-      user: {
-        id: rider._id,
-        name: rider.name,
-        username: rider.username,
-        role: 'rider',
-        phone: rider.phone,
-        vehicleType: rider.vehicleType,
-      },
+      user: this.riderView(rider),
       ...tokens,
     };
   }
@@ -138,64 +109,50 @@ export class AuthService {
     return this.otpService.sendOtp(phone);
   }
 
+  /**
+   * OTP login.
+   * - role 'rider': logs in an EXISTING active rider (riders are pre-created by an admin).
+   * - otherwise: logs in / registers a CUSTOMER. Accounts with any other role
+   *   (e.g. admin) can never be accessed via OTP.
+   */
   async verifyOtp(
     phone: string,
     otp: string,
     name?: string,
-    role?: UserRole,
+    role?: OtpLoginRole,
   ): Promise<any> {
-    // Verify OTP using OtpService
+    if (role && role !== UserRole.CUSTOMER && role !== UserRole.RIDER) {
+      throw new UnauthorizedException('Invalid role');
+    }
+
     await this.otpService.verifyOtp(phone, otp);
 
     if (role === UserRole.RIDER) {
-      const rider = await this.ridersService.ensureOtpRider(phone, name);
-      const tokens = await this.generateTokens(rider._id.toString(), 'rider');
-
-      const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
-      await this.redisService.set(
-        this.getRefreshTokenKey(rider._id.toString()),
-        hashedRefreshToken,
-        this.refreshTokenExpiry,
-      );
-
+      const rider = await this.ridersService.ensureOtpRider(phone);
+      const tokens = await this.issueSession(rider._id.toString(), 'rider');
       return {
-        user: {
-          id: rider._id,
-          name: rider.name,
-          username: rider.username,
-          role: 'rider',
-          phone: rider.phone,
-          vehicleType: rider.vehicleType,
-        },
+        user: this.riderView(rider),
         ...tokens,
       };
     }
 
-    // Find or create user
     let user = await this.usersService.findByPhone(phone);
 
     if (!user) {
       user = await this.usersService.create({
         name: name || 'User',
         phone,
-        role: role || UserRole.CUSTOMER,
+        role: UserRole.CUSTOMER,
       });
-    } else if (role && user.role !== role) {
+    } else if (user.role !== UserRole.CUSTOMER) {
       throw new UnauthorizedException(
-        `This phone number is not registered as a ${role}`,
+        'This phone number is not registered as a customer',
       );
+    } else if (user.isActive === false) {
+      throw new UnauthorizedException('Account is disabled');
     }
 
-    // Generate tokens
-    const tokens = await this.generateTokens(user._id.toString(), user.role);
-
-    // Store hashed refresh token in Redis (28 days expiry)
-    const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
-    await this.redisService.set(
-      this.getRefreshTokenKey(user._id.toString()),
-      hashedRefreshToken,
-      this.refreshTokenExpiry,
-    );
+    const tokens = await this.issueSession(user._id.toString(), user.role);
 
     return {
       user: {
@@ -208,73 +165,141 @@ export class AuthService {
     };
   }
 
-  async refreshTokens(userId: string, refreshToken: string): Promise<any> {
-    const user = await this.usersService.findById(userId);
-
-    if (!user) {
-      throw new UnauthorizedException('Access denied');
+  /**
+   * Exchange a valid refresh token for a new access/refresh pair (rotation).
+   * Does not require an access token. Works for customers, admins and riders.
+   */
+  async refreshTokens(refreshToken: string): Promise<any> {
+    if (!refreshToken) {
+      throw new UnauthorizedException('Refresh token is required');
     }
 
-    // Get refresh token from Redis
-    const storedHash = await this.redisService.get(
-      this.getRefreshTokenKey(userId),
-    );
-
-    if (!storedHash) {
-      throw new UnauthorizedException('Session expired. Please login again.');
-    }
-
-    const isValid = await bcrypt.compare(refreshToken, storedHash);
-    if (!isValid) {
+    let payload: JwtPayload;
+    try {
+      payload = await this.jwtService.verifyAsync<JwtPayload>(refreshToken, {
+        secret: this.configService.getOrThrow<string>('jwt.refreshSecret'),
+      });
+    } catch {
       throw new UnauthorizedException('Invalid session. Please login again.');
     }
 
-    const tokens = await this.generateTokens(user._id.toString(), user.role);
+    // Legacy refresh tokens have no type claim; new ones must be 'refresh'.
+    if (!payload?.sub || (payload.type && payload.type !== 'refresh')) {
+      throw new UnauthorizedException('Invalid session. Please login again.');
+    }
 
-    // Update refresh token in Redis
-    const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
+    const storedHash = await this.redisService.get(
+      AuthKeys.refreshToken(payload.sub),
+    );
+    if (!storedHash) {
+      throw new UnauthorizedException('Session expired. Please login again.');
+    }
+    if (!this.matchesStoredHash(refreshToken, storedHash)) {
+      throw new UnauthorizedException('Invalid session. Please login again.');
+    }
+
+    let user: Record<string, any>;
+    let role: string;
+
+    if (payload.role === (UserRole.RIDER as string)) {
+      const rider = await this.ridersService
+        .findRiderById(payload.sub)
+        .catch(() => null);
+      if (!rider || !rider.isActive) {
+        await this.redisService.del(AuthKeys.refreshToken(payload.sub));
+        throw new UnauthorizedException('Access denied');
+      }
+      user = this.riderView(rider);
+      role = 'rider';
+    } else {
+      const dbUser = await this.usersService.findById(payload.sub);
+      if (!dbUser || dbUser.isActive === false) {
+        await this.redisService.del(AuthKeys.refreshToken(payload.sub));
+        throw new UnauthorizedException('Access denied');
+      }
+      // Always take the role from the database, never from the token.
+      role = dbUser.role;
+      user = {
+        id: dbUser._id,
+        name: dbUser.name,
+        phone: dbUser.phone,
+        username: dbUser.username,
+        role: dbUser.role,
+      };
+    }
+
+    const tokens = await this.issueSession(payload.sub, role);
+    return { user, ...tokens };
+  }
+
+  /**
+   * Revoke the session: delete the stored refresh token and deny-list the
+   * presented access token until it would have expired anyway.
+   */
+  async logout(
+    userId: string,
+    accessToken?: { jti?: string; exp?: number },
+  ): Promise<void> {
+    await this.redisService.del(AuthKeys.refreshToken(userId));
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (accessToken?.jti) {
+      const ttl = accessToken.exp
+        ? Math.max(accessToken.exp - nowSeconds, 1)
+        : this.accessTokenExpiry;
+      await this.redisService.set(
+        AuthKeys.accessDenylist(accessToken.jti),
+        '1',
+        ttl,
+      );
+    } else {
+      // Legacy token without jti: revoke every access token issued before now.
+      await this.redisService.set(
+        AuthKeys.revokedBefore(userId),
+        nowSeconds.toString(),
+        this.accessTokenExpiry,
+      );
+    }
+  }
+
+  private riderView(rider: any) {
+    return {
+      id: rider._id,
+      name: rider.name,
+      username: rider.username,
+      role: 'rider',
+      phone: rider.phone,
+      vehicleType: rider.vehicleType,
+    };
+  }
+
+  /** Generate a token pair and store the refresh token hash (single active session per subject). */
+  private async issueSession(
+    subjectId: string,
+    role: string,
+  ): Promise<AuthTokens> {
+    const tokens = this.generateTokens(subjectId, role);
     await this.redisService.set(
-      this.getRefreshTokenKey(userId),
-      hashedRefreshToken,
+      AuthKeys.refreshToken(subjectId),
+      this.hashToken(tokens.refreshToken),
       this.refreshTokenExpiry,
     );
-
-    // Store new access token with 2-hour expiry
-    await this.redisService.set(
-      this.getAccessTokenKey(userId),
-      tokens.accessToken,
-      this.accessTokenExpiry,
-    );
-
     return tokens;
   }
 
-  async logout(userId: string): Promise<void> {
-    // Remove both refresh and access tokens from Redis
-    await this.redisService.del(this.getRefreshTokenKey(userId));
-    await this.redisService.del(this.getAccessTokenKey(userId));
-  }
-
-  async validateAccessToken(userId: string, token: string): Promise<boolean> {
-    const storedToken = await this.redisService.get(
-      this.getAccessTokenKey(userId),
+  private generateTokens(userId: string, role: string): AuthTokens {
+    const accessToken = this.jwtService.sign(
+      { sub: userId, role, jti: randomUUID() },
+      { expiresIn: this.accessTokenExpiry },
     );
-    return storedToken === token;
-  }
 
-  private async generateTokens(userId: string, role: string) {
-    const payload = { sub: userId, role };
-
-    // Access token expires in 2 hours
-    const accessToken = this.jwtService.sign(payload, {
-      expiresIn: '2h',
-    });
-
-    const refreshToken = this.jwtService.sign(payload, {
-      secret:
-        this.configService.get<string>('jwt.refreshSecret') || 'refresh-secret',
-      expiresIn: '28d',
-    });
+    const refreshToken = this.jwtService.sign(
+      { sub: userId, role, type: 'refresh', jti: randomUUID() },
+      {
+        secret: this.configService.getOrThrow<string>('jwt.refreshSecret'),
+        expiresIn: this.refreshTokenExpiry,
+      },
+    );
 
     return { accessToken, refreshToken };
   }

@@ -435,7 +435,7 @@ const AddAddressScreen = ({ navigation, route }) => {
                 });
             }
         } catch (error) {
-            console.error('Failed to save address:', error);
+            if (__DEV__) console.error('Failed to save address:', error);
             const fallbackAddress = {
                 id: `loc-${Date.now()}`,
                 type: addressType,

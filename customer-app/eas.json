@@ -9,13 +9,28 @@
       "distribution": "internal",
       "ios": {
         "simulator": true
+      },
+      "env": {
+        "PUBLIC_NODE_ENV": "development"
       }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "NODE_ENV": "production",
+        "PUBLIC_NODE_ENV": "production",
+        "API_BASE_URL": "https://api.example.com/api/v1",
+        "TRACKING_URL": "https://api.example.com/tracking"
+      }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "NODE_ENV": "production",
+        "PUBLIC_NODE_ENV": "production",
+        "API_BASE_URL": "https://api.example.com/api/v1",
+        "TRACKING_URL": "https://api.example.com/tracking"
+      }
     }
   },
   "submit": {
