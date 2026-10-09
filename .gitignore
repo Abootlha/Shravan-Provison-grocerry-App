@@ -1,49 +1,53 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-
-# dependencies
+# Dependencies
 node_modules/
 
-# Expo
-.expo/
+# Environment files
+.env
+.env.*
+**/.env
+**/.env.*
+.env.local
+.env.*.local
+.env.production
+.env.test
+!.env.example
+!**/.env.example
+
+# Build outputs
 dist/
-web-build/
-expo-env.d.ts
-
-# Native
-.kotlin/
-*.orig.*
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
-
-# Metro
-.metro-health-check*
-
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
-
-# macOS
-.DS_Store
-*.pem
-
-# local env files
-.env*.local
-
-# typescript
+build/
 *.tsbuildinfo
 
-# generated native folders
-/ios
-/android
+# Next.js
+.next/
+out/
 
-# Markdown files
-*.md
+# Test coverage
+coverage/
 
-# Docker
-Dockerfile
-docker-compose.yml
-docker-compose.*.yml
+# IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# OS
+Thumbs.db
+
+# Turborepo
+.turbo/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+.expo/
+**/.expo/

@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package auth;
+
+import "common.proto";
+
+message User {
+  string id = 1;
+  string email = 2;
+  string phone = 3;
+  string name = 4;
+  common.Timestamp created_at = 5;
+  common.Timestamp updated_at = 6;
+}
+
+message AuthTokens {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3;
+}
+
+message OTPRequest {
+  string phone = 1;
+}
+
+message OTPResponse {
+  bool sent = 1;
+  string message = 2;
+}
+
+message SendOTPRequest {
+  string phone = 1;
+}
+
+message SendOTPResponse {
+  bool success = 1;
+  string message = 2;
+  int64 expires_in = 3;
+}
+
+message VerifyOTPRequest {
+  string phone = 1;
+  string otp = 2;
+}
+
+message VerifyOTPResponse {
+  bool valid = 1;
+  AuthTokens tokens = 2;
+  User user = 3;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message RefreshTokenResponse {
+  AuthTokens tokens = 1;
+}
+
+message ValidateTokenRequest {
+  string token = 1;
+}
+
+message ValidateTokenResponse {
+  bool valid = 1;
+  User user = 2;
+}
+
+message LogoutRequest {
+  string user_id = 1;
+}
+
+message LogoutResponse {
+  bool success = 1;
+}
+
+service AuthService {
+  rpc SendOTP(SendOTPRequest) returns (SendOTPResponse);
+  rpc VerifyOTP(VerifyOTPRequest) returns (VerifyOTPResponse);
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+}

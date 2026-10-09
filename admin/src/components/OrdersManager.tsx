@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { io, Socket } from 'socket.io-client';
 import { api } from '../lib/api';
+import { getTrackingServiceUrl } from '../lib/config';
 import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
 import { Badge } from './ui/badge';
@@ -8,7 +10,7 @@ import { Skeleton } from './ui/Skeleton';
 import { EmptyState } from './ui/EmptyState';
 import {
     ShoppingCart, ChevronLeft, ChevronRight, Clock, Package, User, Phone, MapPin,
-    CheckCircle, Truck, XCircle, RefreshCw, Search, X, Eye, Zap, LayoutGrid, List
+    CheckCircle, Truck, XCircle, RefreshCw, Search, X, Eye, Zap, LayoutGrid, List, UserPlus
 } from 'lucide-react';
 
 interface Order {
@@ -21,17 +23,34 @@ interface Order {
     createdAt: string;
     deliveryAddress?: { street?: string; city?: string; pincode?: string };
 }
+const STATUS_OPTIONS = ['PENDING', 'CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'];
 
-const STATUS_OPTIONS = ['PLACED', 'CONFIRMED', 'PACKED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'];
+const NEXT_STATUS: Record<string, string[]> = {
+    PENDING: ['CONFIRMED'],
+    CONFIRMED: [],
+    ASSIGNED: ['PACKED'],
+    PACKED: [],
+    PICKED_UP: [],
+    OUT_FOR_DELIVERY: [],
+};
 
 const STATUS_CONFIG: Record<string, { color: string; glow: string; icon: React.ReactNode; label: string }> = {
-    PLACED: { color: '#3B82F6', glow: 'rgba(59, 130, 246, 0.2)', icon: <Clock className="w-4 h-4" />, label: 'Placed' },
+    PENDING: { color: '#3B82F6', glow: 'rgba(59, 130, 246, 0.2)', icon: <Clock className="w-4 h-4" />, label: 'Placed' },
     CONFIRMED: { color: '#8B5CF6', glow: 'rgba(139, 92, 246, 0.2)', icon: <CheckCircle className="w-4 h-4" />, label: 'Confirmed' },
     PACKED: { color: '#F97316', glow: 'rgba(249, 115, 22, 0.2)', icon: <Package className="w-4 h-4" />, label: 'Packed' },
+    ASSIGNED: { color: '#14B8A6', glow: 'rgba(20, 184, 166, 0.2)', icon: <UserPlus className="w-4 h-4" />, label: 'Rider Accepted' },
+    PICKED_UP: { color: '#0EA5E9', glow: 'rgba(14, 165, 233, 0.2)', icon: <Package className="w-4 h-4" />, label: 'Picked Up' },
     OUT_FOR_DELIVERY: { color: '#E6A23C', glow: 'rgba(230, 162, 60, 0.2)', icon: <Truck className="w-4 h-4" />, label: 'Out for Delivery' },
     DELIVERED: { color: '#22C55E', glow: 'rgba(34, 197, 94, 0.2)', icon: <CheckCircle className="w-4 h-4" />, label: 'Delivered' },
     CANCELLED: { color: '#EF4444', glow: 'rgba(239, 68, 68, 0.2)', icon: <XCircle className="w-4 h-4" />, label: 'Cancelled' },
 };
+const STATUS_ACTION_LABELS: Record<string, string> = {
+    CONFIRMED: 'Confirm',
+    PACKED: 'Pack',
+    CANCELLED: 'Cancel',
+};
+const ACTIVE_STATUSES = ['PENDING', 'CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY'];
+const TRACKING_SOCKET_URL = getTrackingServiceUrl();
 
 export default function OrdersManager() {
     const [orders, setOrders] = useState<Order[]>([]);
@@ -40,17 +59,112 @@ export default function OrdersManager() {
     const [page, setPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
     const [statusFilter, setStatusFilter] = useState<string>('');
+    const [pageMode, setPageMode] = useState<'live' | 'completed' | 'returns'>('live');
     const [search, setSearch] = useState('');
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
     const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+    const socketRef = useRef<Socket | null>(null);
+    const selectedOrderRef = useRef<Order | null>(null);
+
+    useEffect(() => {
+        // Parse URL params
+        const query = new URLSearchParams(window.location.search);
+        const urlStatus = query.get('status');
+
+        if (urlStatus === 'completed') {
+            setPageMode('completed');
+            setStatusFilter('DELIVERED,CANCELLED'); // Show both by default in completed
+        } else if (urlStatus === 'returns') {
+            setPageMode('returns');
+            setStatusFilter('CANCELLED'); // Just an example, maybe there's a RETURNED status later
+        } else {
+            setPageMode('live');
+            setStatusFilter(''); // Default to 'All' live orders
+        }
+    }, []);
 
     useEffect(() => {
         fetchOrders();
-    }, [page, statusFilter]);
+    }, [page, statusFilter, pageMode]);
+
+    useEffect(() => {
+        selectedOrderRef.current = selectedOrder;
+    }, [selectedOrder]);
+
+    useEffect(() => {
+        const token = localStorage.getItem('adminToken');
+        if (!token) {
+            return;
+        }
+
+        const socket = io(TRACKING_SOCKET_URL, {
+            auth: { token },
+            transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            reconnectionAttempts: 5,
+        });
+
+        socket.on('connect', () => {
+            orders.forEach((order) => {
+                if (ACTIVE_STATUSES.includes(order.orderStatus)) {
+                    socket.emit('joinOrderRoom', { orderId: order._id });
+                }
+            });
+        });
+
+        socket.on('orderStatusUpdate', (data: any) => {
+            setOrders((prev) => prev.map((order) => (
+                order._id === data.orderId
+                    ? {
+                        ...order,
+                        ...(data.order || {}),
+                        orderStatus: data.status,
+                    }
+                    : order
+            )));
+
+            if (selectedOrderRef.current?._id === data.orderId) {
+                setSelectedOrder((prev) => prev ? {
+                    ...prev,
+                    ...(data.order || {}),
+                    orderStatus: data.status,
+                } : null);
+            }
+        });
+
+        socketRef.current = socket;
+
+        return () => {
+            socket.disconnect();
+            socketRef.current = null;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!socketRef.current?.connected) {
+            return;
+        }
+
+        orders.forEach((order) => {
+            if (ACTIVE_STATUSES.includes(order.orderStatus)) {
+                socketRef.current?.emit('joinOrderRoom', { orderId: order._id });
+            }
+        });
+    }, [orders]);
 
     async function fetchOrders() {
         try {
-            const data = await api.getOrders({ page, status: statusFilter || undefined });
+            // If we're in 'live' mode and no specific status is selected,
+            // we want to fetch all LIVE statuses (not DELIVERED or CANCELLED)
+            let queryStatus = statusFilter;
+
+            if (pageMode === 'live' && !statusFilter) {
+                queryStatus = 'PENDING,CONFIRMED,ASSIGNED,PACKED,PICKED_UP,OUT_FOR_DELIVERY';
+            }
+
+            const data = await api.getOrders({ page, status: queryStatus || undefined });
             setOrders(data.orders || []);
             setTotalPages(data.pagination?.pages || 1);
         } catch (error) {
@@ -73,8 +187,8 @@ export default function OrdersManager() {
             if (selectedOrder?._id === orderId) {
                 setSelectedOrder({ ...selectedOrder, orderStatus: newStatus });
             }
-        } catch (error) {
-            alert('Error updating status');
+        } catch (error: any) {
+            alert(error?.message || 'Error updating status');
         }
     }
 
@@ -90,7 +204,7 @@ export default function OrdersManager() {
 
     // Animated Timeline
     function OrderTimeline({ currentStatus }: { currentStatus: string }) {
-        const steps = ['PLACED', 'CONFIRMED', 'PACKED', 'OUT_FOR_DELIVERY', 'DELIVERED'];
+        const steps = ['PENDING', 'CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'DELIVERED'];
         const currentIndex = steps.indexOf(currentStatus);
         const isCancelled = currentStatus === 'CANCELLED';
 
@@ -168,14 +282,14 @@ export default function OrdersManager() {
                             <div className="flex items-center gap-3 mb-2">
                                 <Zap className="w-5 h-5" style={{ color: 'var(--accent)' }} />
                                 <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
-                                    Live Operations
+                                    {pageMode === 'live' ? 'Live Operations' : pageMode === 'completed' ? 'History' : 'Returns'}
                                 </span>
                             </div>
                             <h1 className="font-display text-4xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
-                                Orders
+                                {pageMode === 'live' ? 'Live Orders' : pageMode === 'completed' ? 'Completed Orders' : 'Returns & Replacements'}
                             </h1>
                             <p className="mt-2 text-lg" style={{ color: 'var(--text-secondary)' }}>
-                                Manage and track customer orders
+                                {pageMode === 'live' ? 'Manage and track live customer orders' : 'View order history'}
                             </p>
                         </div>
                         <div className="flex items-center gap-3">
@@ -215,17 +329,27 @@ export default function OrdersManager() {
                 {/* Status Filter Pills */}
                 <div className="flex gap-3 flex-wrap animate-slide-up delay-2">
                     <button
-                        onClick={() => { setStatusFilter(''); setPage(1); }}
+                        onClick={() => {
+                            if (pageMode === 'live') setStatusFilter('');
+                            else if (pageMode === 'completed') setStatusFilter('DELIVERED,CANCELLED');
+                            else setStatusFilter('');
+                            setPage(1);
+                        }}
                         className="px-4 py-2 rounded-xl text-sm font-semibold transition-all"
                         style={{
-                            background: !statusFilter ? 'var(--accent)' : 'var(--bg-tertiary)',
-                            color: !statusFilter ? 'var(--bg-primary)' : 'var(--text-secondary)',
-                            border: '1px solid ' + (!statusFilter ? 'var(--accent)' : 'var(--border)')
+                            background: (!statusFilter || statusFilter === 'DELIVERED,CANCELLED') ? 'var(--accent)' : 'var(--bg-tertiary)',
+                            color: (!statusFilter || statusFilter === 'DELIVERED,CANCELLED') ? 'var(--bg-primary)' : 'var(--text-secondary)',
+                            border: '1px solid ' + ((!statusFilter || statusFilter === 'DELIVERED,CANCELLED') ? 'var(--accent)' : 'var(--border)')
                         }}
                     >
                         All ({orders.length})
                     </button>
-                    {['PLACED', 'CONFIRMED', 'PACKED', 'OUT_FOR_DELIVERY'].map((status) => {
+                    {(pageMode === 'live'
+                        ? ['PENDING', 'CONFIRMED', 'PACKED', 'ASSIGNED', 'OUT_FOR_DELIVERY']
+                        : pageMode === 'completed'
+                            ? ['DELIVERED', 'CANCELLED']
+                            : ['CANCELLED']
+                    ).map((status) => {
                         const config = STATUS_CONFIG[status];
                         const isActive = statusFilter === status;
                         return (
@@ -270,7 +394,7 @@ export default function OrdersManager() {
                             </div>
                         ) : (
                             filteredOrders.map((order, index) => {
-                                const config = STATUS_CONFIG[order.orderStatus] || STATUS_CONFIG.PLACED;
+                                const config = STATUS_CONFIG[order.orderStatus] || STATUS_CONFIG.PENDING;
                                 return (
                                     <div
                                         key={order._id}
@@ -374,7 +498,7 @@ export default function OrdersManager() {
                             </thead>
                             <tbody>
                                 {filteredOrders.map((order) => {
-                                    const config = STATUS_CONFIG[order.orderStatus] || STATUS_CONFIG.PLACED;
+                                    const config = STATUS_CONFIG[order.orderStatus] || STATUS_CONFIG.PENDING;
                                     return (
                                         <tr key={order._id}>
                                             <td>
@@ -479,8 +603,9 @@ export default function OrdersManager() {
                                             Update Status
                                         </h3>
                                         <div className="flex flex-wrap gap-2">
-                                            {STATUS_OPTIONS.filter(s => s !== selectedOrder.orderStatus).map((status) => {
+                                            {[...(NEXT_STATUS[selectedOrder.orderStatus] || []), 'CANCELLED'].map((status) => {
                                                 const config = STATUS_CONFIG[status];
+                                                const actionLabel = STATUS_ACTION_LABELS[status] || config?.label || status;
                                                 return (
                                                     <Button
                                                         key={status}
@@ -493,7 +618,7 @@ export default function OrdersManager() {
                                                         }}
                                                     >
                                                         {config?.icon}
-                                                        <span className="ml-1.5">{config?.label || status}</span>
+                                                        <span className="ml-1.5">{actionLabel}</span>
                                                     </Button>
                                                 );
                                             })}

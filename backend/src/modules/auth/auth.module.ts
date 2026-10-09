@@ -7,25 +7,26 @@ import { AuthService } from './auth.service';
 import { OtpService } from './otp.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { UsersModule } from '../users/users.module';
+import { RidersModule } from '../riders/riders.module';
 import { RedisModule } from '../../common/utils/redis.module';
 
 @Module({
-    imports: [
-        UsersModule,
-        PassportModule,
-        RedisModule,
-        JwtModule.registerAsync({
-            imports: [ConfigModule],
-            useFactory: (configService: ConfigService) => ({
-                secret: configService.get<string>('jwt.secret') || 'default-secret',
-                signOptions: { expiresIn: '15m' },
-            }),
-            inject: [ConfigService],
-        }),
-    ],
-    controllers: [AuthController],
-    providers: [AuthService, OtpService, JwtStrategy],
-    exports: [AuthService],
+  imports: [
+    UsersModule,
+    RidersModule,
+    PassportModule,
+    RedisModule,
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        secret: configService.get<string>('jwt.secret') || 'default-secret',
+        signOptions: { expiresIn: '15m' },
+      }),
+      inject: [ConfigService],
+    }),
+  ],
+  controllers: [AuthController],
+  providers: [AuthService, OtpService, JwtStrategy],
+  exports: [AuthService],
 })
-export class AuthModule { }
-
+export class AuthModule {}

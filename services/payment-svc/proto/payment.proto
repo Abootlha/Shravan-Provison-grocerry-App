@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package payment;
+
+service PaymentService {
+  rpc CreatePayment(CreatePaymentRequest) returns (PaymentResponse);
+  rpc GetPayment(GetPaymentRequest) returns (PaymentResponse);
+  rpc GetPaymentsByUser(GetPaymentsByUserRequest) returns (PaymentListResponse);
+  rpc GetPaymentsByOrder(GetPaymentsByOrderRequest) returns (PaymentListResponse);
+  rpc UpdatePaymentStatus(UpdatePaymentStatusRequest) returns (PaymentResponse);
+  rpc MarkCodCompleted(MarkCodCompletedRequest) returns (PaymentResponse);
+  rpc ProcessRefund(ProcessRefundRequest) returns (PaymentResponse);
+  rpc VerifyPaymentSignature(VerifySignatureRequest) returns (VerifySignatureResponse);
+}
+
+message PaymentResponse {
+  string id = 1;
+  string payment_id = 2;
+  string order_id = 3;
+  string user_id = 4;
+  double amount = 5;
+  string currency = 6;
+  string method = 7;
+  string status = 8;
+  string transaction_id = 9;
+  string razorpay_order_id = 10;
+  string razorpay_payment_id = 11;
+  string razorpay_signature = 12;
+  map<string, string> metadata = 13;
+  int64 created_at = 14;
+  int64 updated_at = 15;
+}
+
+message PaymentListResponse {
+  repeated PaymentResponse payments = 1;
+}
+
+message CreatePaymentRequest {
+  string order_id = 1;
+  string user_id = 2;
+  double amount = 3;
+  string currency = 4;
+  string method = 5;
+  map<string, string> metadata = 6;
+}
+
+message GetPaymentRequest {
+  string payment_id = 1;
+}
+
+message GetPaymentsByUserRequest {
+  string user_id = 1;
+}
+
+message GetPaymentsByOrderRequest {
+  string order_id = 1;
+}
+
+message UpdatePaymentStatusRequest {
+  string payment_id = 1;
+  string status = 2;
+}
+
+message MarkCodCompletedRequest {
+  string payment_id = 1;
+}
+
+message ProcessRefundRequest {
+  string payment_id = 1;
+}
+
+message VerifySignatureRequest {
+  string razorpay_order_id = 1;
+  string razorpay_payment_id = 2;
+  string razorpay_signature = 3;
+}
+
+message VerifySignatureResponse {
+  bool verified = 1;
+}

@@ -16,6 +16,9 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { ItemGroupsModule } from './modules/item-groups/item-groups.module';
+import { JobsModule } from './modules/jobs/jobs.module';
+import { MapsModule } from './modules/maps/maps.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 import { RedisModule } from './common/utils/redis.module';
 
 // Config
@@ -44,17 +47,25 @@ import configuration from './config/configuration';
     // MongoDB
     MongooseModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: async (configService: ConfigService) => ({
-        uri: configService.get<string>('database.uri'),
-      }),
+      useFactory: async (configService: ConfigService) => {
+        const uri = configService.get<string>('database.uri');
+        const dbName = configService.get<string>('database.name');
+
+        return {
+          uri,
+          ...(dbName ? { dbName } : {}),
+        };
+      },
       inject: [ConfigService],
     }),
 
     // Rate Limiting
-    ThrottlerModule.forRoot([{
-      ttl: 60000,
-      limit: 100,
-    }]),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 100,
+      },
+    ]),
 
     // BullMQ
     BullModule.forRootAsync({
@@ -81,7 +92,9 @@ import configuration from './config/configuration';
     AnalyticsModule,
     SettingsModule,
     ItemGroupsModule,
+    JobsModule,
+    MapsModule,
+    PaymentsModule,
   ],
 })
-export class AppModule { }
-
+export class AppModule {}

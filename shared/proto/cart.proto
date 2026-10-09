@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package cart;
+
+import "common.proto";
+
+message CartItem {
+  string id = 1;
+  string product_id = 2;
+  string product_name = 3;
+  string product_image = 4;
+  int32 quantity = 5;
+  double unit_price = 6;
+  double subtotal = 7;
+  map<string, string> attributes = 8;
+}
+
+message Cart {
+  string id = 1;
+  string user_id = 2;
+  repeated CartItem items = 3;
+  double subtotal = 4;
+  int32 item_count = 5;
+  common.Timestamp updated_at = 6;
+}
+
+message GetCartRequest {
+  string user_id = 1;
+}
+
+message GetCartResponse {
+  Cart cart = 1;
+}
+
+message AddToCartRequest {
+  string user_id = 1;
+  string product_id = 2;
+  int32 quantity = 3;
+  map<string, string> attributes = 4;
+}
+
+message AddToCartResponse {
+  Cart cart = 1;
+}
+
+message UpdateCartItemRequest {
+  string user_id = 1;
+  string product_id = 2;
+  int32 quantity = 3;
+}
+
+message UpdateCartItemResponse {
+  Cart cart = 1;
+}
+
+message RemoveCartItemRequest {
+  string user_id = 1;
+  string product_id = 2;
+}
+
+message RemoveCartItemResponse {
+  Cart cart = 1;
+}
+
+message ClearCartRequest {
+  string user_id = 1;
+}
+
+message ClearCartResponse {
+  bool success = 1;
+}
+
+service CartService {
+  rpc GetCart(GetCartRequest) returns (GetCartResponse);
+  rpc AddToCart(AddToCartRequest) returns (AddToCartResponse);
+  rpc UpdateCartItem(UpdateCartItemRequest) returns (UpdateCartItemResponse);
+  rpc RemoveCartItem(RemoveCartItemRequest) returns (RemoveCartItemResponse);
+  rpc ClearCart(ClearCartRequest) returns (ClearCartResponse);
+}

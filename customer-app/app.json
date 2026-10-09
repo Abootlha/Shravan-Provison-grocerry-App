@@ -1,0 +1,73 @@
+{
+  "expo": {
+    "name": "ShravanKirana Customer",
+    "slug": "shravankirana-customer",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F8CB46"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.shravankirana.customer",
+      "config": {
+        "googleMapsApiKey": "AIzaSyAsiP7CR40fAir7Wz81RvQ1qf7eZTIZGpk"
+      },
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "We need your location to show nearby stores and calculate delivery times.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "We need your location to track your delivery even when the app is in the background."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F8CB46"
+      },
+      "package": "com.shravankirana.customer",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyAsiP7CR40fAir7Wz81RvQ1qf7eZTIZGpk"
+        }
+      },
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "shravankirana",
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location."
+        }
+      ]
+    ],
+    "extra": {
+      "PUBLIC_NODE_ENV": "development",
+      "API_BASE_URL": "http://localhost:3000/api/v1",
+      "AUTH_SERVICE_URL": "http://localhost:3000/api/v1",
+      "USER_SERVICE_URL": "http://localhost:3000/api/v1",
+      "RIDER_SERVICE_URL": "http://localhost:3000/api/v1",
+      "ORDER_SERVICE_URL": "http://localhost:3000/api/v1",
+      "PRODUCT_SERVICE_URL": "http://localhost:3000/api/v1",
+      "CART_SERVICE_URL": "http://localhost:3000/api/v1",
+      "LOCATION_SERVICE_URL": "http://localhost:3000/api/v1",
+      "TRACKING_URL": "http://localhost:3000/tracking",
+      "MAPMYINDIA_API_KEY": "",
+      "MAPMYINDIA_CLIENT_ID": "",
+      "MAPMYINDIA_CLIENT_SECRET": "",
+      "eas": {
+        "projectId": "81680cdd-a244-4757-943a-2b8b95cb6285"
+      }
+    }
+  }
+}

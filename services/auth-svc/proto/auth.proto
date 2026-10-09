@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package auth;
+
+service AuthService {
+  rpc SendOtp (SendOtpRequest) returns (SendOtpResponse);
+  rpc VerifyOtp (VerifyOtpRequest) returns (VerifyOtpResponse);
+  rpc RefreshToken (RefreshTokenRequest) returns (RefreshTokenResponse);
+  rpc ValidateToken (ValidateTokenRequest) returns (ValidateTokenResponse);
+  rpc Logout (LogoutRequest) returns (LogoutResponse);
+}
+
+message SendOtpRequest {
+  string phone = 1;
+}
+
+message SendOtpResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message VerifyOtpRequest {
+  string phone = 1;
+  string otp = 2;
+}
+
+message VerifyOtpResponse {
+  bool success = 1;
+  AuthTokens tokens = 2;
+  string message = 3;
+}
+
+message AuthTokens {
+  string access_token = 1;
+  string refresh_token = 2;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message RefreshTokenResponse {
+  bool success = 1;
+  string access_token = 2;
+  string message = 3;
+}
+
+message ValidateTokenRequest {
+  string token = 1;
+}
+
+message ValidateTokenResponse {
+  bool valid = 1;
+  string user_id = 2;
+  string phone = 3;
+}
+
+message LogoutRequest {
+  string refresh_token = 1;
+}
+
+message LogoutResponse {
+  bool success = 1;
+  string message = 2;
+}

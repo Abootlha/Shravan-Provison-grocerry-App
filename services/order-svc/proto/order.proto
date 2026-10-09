@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+package order;
+
+service OrderService {
+  rpc CreateOrder(CreateOrderRequest) returns (OrderResponse);
+  rpc GetOrder(GetOrderRequest) returns (OrderResponse);
+  rpc GetOrdersByUser(GetOrdersByUserRequest) returns (OrderListResponse);
+  rpc GetOrdersByRider(GetOrdersByRiderRequest) returns (OrderListResponse);
+  rpc GetActiveOrders(GetActiveOrdersRequest) returns (OrderListResponse);
+  rpc UpdateStatus(UpdateStatusRequest) returns (OrderResponse);
+  rpc AssignRider(AssignRiderRequest) returns (OrderResponse);
+  rpc CancelOrder(CancelOrderRequest) returns (OrderResponse);
+}
+
+message OrderItem {
+  string product_id = 1;
+  string name = 2;
+  int32 quantity = 3;
+  double price = 4;
+  string image = 5;
+}
+
+message Coordinates {
+  string type = 1;
+  repeated double coordinates = 2;
+}
+
+message DeliveryAddress {
+  string label = 1;
+  string street = 2;
+  string city = 3;
+  string postal_code = 4;
+  Coordinates coordinates = 5;
+  string instructions = 6;
+}
+
+message TimelineEntry {
+  string status = 1;
+  int64 timestamp = 2;
+  string changed_by = 3;
+  string note = 4;
+}
+
+message OrderResponse {
+  string id = 1;
+  string order_id = 2;
+  string user_id = 3;
+  string rider_id = 4;
+  repeated OrderItem items = 5;
+  double item_total = 6;
+  double delivery_fee = 7;
+  double packaging_fee = 8;
+  double discount = 9;
+  double total_amount = 10;
+  DeliveryAddress delivery_address = 11;
+  string payment_method = 12;
+  string payment_status = 13;
+  string order_status = 14;
+  string cancellation_reason = 15;
+  repeated TimelineEntry timeline = 16;
+  int64 estimated_delivery_time = 17;
+  int64 actual_delivery_time = 18;
+  int64 created_at = 19;
+  int64 updated_at = 20;
+}
+
+message OrderListResponse {
+  repeated OrderResponse orders = 1;
+}
+
+message CreateOrderRequest {
+  string user_id = 1;
+  repeated OrderItem items = 2;
+  double delivery_fee = 3;
+  double packaging_fee = 4;
+  double discount = 5;
+  DeliveryAddress delivery_address = 6;
+  string payment_method = 7;
+}
+
+message GetOrderRequest {
+  string order_id = 1;
+}
+
+message GetOrdersByUserRequest {
+  string user_id = 1;
+}
+
+message GetOrdersByRiderRequest {
+  string rider_id = 1;
+}
+
+message GetActiveOrdersRequest {}
+
+message UpdateStatusRequest {
+  string order_id = 1;
+  string new_status = 2;
+  string note = 3;
+  string changed_by = 4;
+}
+
+message AssignRiderRequest {
+  string order_id = 1;
+  string rider_id = 2;
+}
+
+message CancelOrderRequest {
+  string order_id = 1;
+  string reason = 2;
+  string cancelled_by = 3;
+}

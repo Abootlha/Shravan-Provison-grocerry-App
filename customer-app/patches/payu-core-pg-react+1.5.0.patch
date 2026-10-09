@@ -1,0 +1,39 @@
+diff --git a/node_modules/payu-core-pg-react/android/.gradle/6.5/fileChanges/last-build.bin b/node_modules/payu-core-pg-react/android/.gradle/6.5/fileChanges/last-build.bin
+new file mode 100644
+index 0000000..f76dd23
+Binary files /dev/null and b/node_modules/payu-core-pg-react/android/.gradle/6.5/fileChanges/last-build.bin differ
+diff --git a/node_modules/payu-core-pg-react/android/.gradle/6.5/fileHashes/fileHashes.lock b/node_modules/payu-core-pg-react/android/.gradle/6.5/fileHashes/fileHashes.lock
+new file mode 100644
+index 0000000..e75b3ca
+Binary files /dev/null and b/node_modules/payu-core-pg-react/android/.gradle/6.5/fileHashes/fileHashes.lock differ
+diff --git a/node_modules/payu-core-pg-react/android/.gradle/6.5/gc.properties b/node_modules/payu-core-pg-react/android/.gradle/6.5/gc.properties
+new file mode 100644
+index 0000000..e69de29
+diff --git a/node_modules/payu-core-pg-react/android/.gradle/checksums/checksums.lock b/node_modules/payu-core-pg-react/android/.gradle/checksums/checksums.lock
+new file mode 100644
+index 0000000..7074ea7
+Binary files /dev/null and b/node_modules/payu-core-pg-react/android/.gradle/checksums/checksums.lock differ
+diff --git a/node_modules/payu-core-pg-react/android/.gradle/vcs-1/gc.properties b/node_modules/payu-core-pg-react/android/.gradle/vcs-1/gc.properties
+new file mode 100644
+index 0000000..e69de29
+diff --git a/node_modules/payu-core-pg-react/android/build.gradle b/node_modules/payu-core-pg-react/android/build.gradle
+index fd552a5..cb89f16 100644
+--- a/node_modules/payu-core-pg-react/android/build.gradle
++++ b/node_modules/payu-core-pg-react/android/build.gradle
+@@ -2,7 +2,7 @@ buildscript {
+   if (project == rootProject) {
+     repositories {
+       google()
+-      jcenter()
++      mavenCentral()
+     }
+ 
+     dependencies {
+@@ -49,7 +49,6 @@ repositories {
+     url("$rootDir/../node_modules/react-native/android")
+   }
+   google()
+-  jcenter()
+ }
+ 
+ dependencies {

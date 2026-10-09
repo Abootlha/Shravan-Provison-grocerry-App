@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package common;
+
+message Empty {}
+
+message Timestamp {
+  int64 seconds = 1;
+  int32 nanos = 2;
+}
+
+message Pagination {
+  int32 page = 1;
+  int32 page_size = 2;
+  int64 total_count = 3;
+  int32 total_pages = 4;
+}
+
+message GeoLocation {
+  double latitude = 1;
+  double longitude = 2;
+}
+
+message Address {
+  string id = 1;
+  string user_id = 2;
+  string label = 3;
+  string address_line1 = 4;
+  string address_line2 = 5;
+  string city = 6;
+  string state = 7;
+  string postal_code = 8;
+  string country = 9;
+  GeoLocation location = 10;
+  bool is_default = 11;
+}
+
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_ACTIVE = 1;
+  STATUS_INACTIVE = 2;
+  STATUS_PENDING = 3;
+  STATUS_DELETED = 4;
+  STATUS_BLOCKED = 5;
+}
+
+enum ErrorCode {
+  ERROR_UNSPECIFIED = 0;
+  ERROR_NOT_FOUND = 1;
+  ERROR_ALREADY_EXISTS = 2;
+  ERROR_INVALID_INPUT = 3;
+  ERROR_UNAUTHORIZED = 4;
+  ERROR_FORBIDDEN = 5;
+  ERROR_INTERNAL = 6;
+  ERROR_VALIDATION = 7;
+}

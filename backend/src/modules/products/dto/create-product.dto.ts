@@ -1,83 +1,101 @@
-import { IsNotEmpty, IsString, IsNumber, IsOptional, IsMongoId, IsBoolean, Min } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsString,
+  IsNumber,
+  IsOptional,
+  IsMongoId,
+  IsBoolean,
+  Min,
+  IsArray,
+} from 'class-validator';
 import { ValidateHierarchy } from '../validators/hierarchy.validator';
 
 export class CreateProductDto {
-    @IsNotEmpty()
-    @IsString()
-    name: string;
+  @IsNotEmpty()
+  @IsString()
+  name!: string;
 
-    @IsOptional()
-    @IsString()
-    brand?: string;
+  @IsOptional()
+  @IsString()
+  brand?: string;
 
-    @IsOptional()
-    @IsString()
-    barcode?: string;
+  @IsOptional()
+  @IsString()
+  barcode?: string;
 
-    @IsNotEmpty()
-    @IsMongoId()
-    categoryId: string;
+  @IsNotEmpty()
+  @IsMongoId()
+  categoryId!: string;
 
-    @IsNotEmpty()
-    @IsMongoId()
-    @ValidateHierarchy()
-    subcategoryId: string;
+  @IsOptional()
+  @IsMongoId()
+  @ValidateHierarchy()
+  subcategoryId?: string;
 
-    @IsNotEmpty()
-    @IsMongoId()
-    itemGroupId: string;
+  @IsOptional()
+  @IsMongoId()
+  itemGroupId?: string;
 
-    @IsNotEmpty()
-    @IsNumber()
-    @Min(0)
-    price: number;
+  @IsNotEmpty()
+  @IsNumber()
+  @Min(0)
+  price!: number;
 
-    @IsOptional()
-    @IsNumber()
-    @Min(0)
-    originalPrice?: number;
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  originalPrice?: number;
 
-    @IsNotEmpty()
-    @IsString()
-    unit: string;
+  @IsNotEmpty()
+  @IsString()
+  unit!: string;
 
-    @IsNotEmpty()
-    @IsNumber()
-    @Min(0)
-    stock: number;
+  @IsNotEmpty()
+  @IsNumber()
+  @Min(0)
+  stock!: number;
 
-    @IsOptional()
-    @IsString()
-    description?: string;
+  @IsOptional()
+  @IsString()
+  description?: string;
 
-    @IsOptional()
-    @IsString()
-    image?: string;
+  @IsOptional()
+  @IsString()
+  highlights?: string;
 
-    @IsOptional()
-    @IsNumber()
-    @Min(0)
-    gst?: number;
+  @IsOptional()
+  @IsString()
+  image?: string;
 
-    @IsOptional()
-    @IsNumber()
-    @Min(0)
-    shelfLife?: number;
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  images?: string[];
 
-    @IsOptional()
-    @IsString()
-    storageType?: string;
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  gst?: number;
 
-    @IsOptional()
-    nutrition?: {
-        protein?: number;
-        carbs?: number;
-        sugar?: number;
-        fat?: number;
-        transFat?: number;
-    };
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  shelfLife?: number;
 
-    @IsOptional()
-    @IsBoolean()
-    isAvailable?: boolean;
+  @IsOptional()
+  @IsString()
+  storageType?: string;
+
+  @IsOptional()
+  nutrition?: {
+    protein?: number;
+    carbs?: number;
+    sugar?: number;
+    fat?: number;
+    transFat?: number;
+  };
+
+  @IsOptional()
+  @IsBoolean()
+  isAvailable?: boolean;
 }

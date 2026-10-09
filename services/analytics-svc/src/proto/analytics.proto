@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package analytics;
+
+service AnalyticsService {
+  rpc GetOrderVolumeByDay(DateRange) returns (OrderVolumeResponse);
+  rpc GetOrderVolumeByHour(DateRequest) returns (OrderVolumeResponse);
+  rpc GetRevenueByDay(DateRange) returns (RevenueResponse);
+  rpc GetRevenueByWeek(DateRange) returns (RevenueResponse);
+  rpc GetRevenueByMonth(DateRange) returns (RevenueResponse);
+  rpc GetAverageOrderValue(DateRange) returns (ValueResponse);
+  rpc GetAverageDeliveryTime(DateRange) returns (ValueResponse);
+  rpc GetRiderPerformance(DateRange) returns (RiderPerformanceResponse);
+  rpc GetTopProducts(TopProductsRequest) returns (TopProductsResponse);
+  rpc GetCustomerRetention(DateRange) returns (CustomerRetentionResponse);
+  rpc TrackOrderEvent(OrderEventRequest) returns (SuccessResponse);
+  rpc TrackRiderEvent(RiderEventRequest) returns (SuccessResponse);
+}
+
+message DateRange {
+  string startDate = 1;
+  string endDate = 2;
+}
+
+message DateRequest {
+  string date = 1;
+}
+
+message TopProductsRequest {
+  string startDate = 1;
+  string endDate = 2;
+  int32 limit = 3;
+}
+
+message OrderEventRequest {
+  string type = 1;
+  map<string, string> data = 2;
+  string timestamp = 3;
+}
+
+message RiderEventRequest {
+  string eventType = 1;
+  map<string, string> data = 2;
+  string timestamp = 3;
+}
+
+message SuccessResponse {
+  bool success = 1;
+}
+
+message OrderVolumeResponse {
+  repeated OrderVolumeItem items = 1;
+}
+
+message OrderVolumeItem {
+  string date = 1;
+  int32 count = 2;
+}
+
+message RevenueResponse {
+  repeated RevenueItem items = 1;
+}
+
+message RevenueItem {
+  string date = 1;
+  double revenue = 2;
+}
+
+message ValueResponse {
+  double value = 1;
+}
+
+message RiderPerformanceResponse {
+  repeated RiderPerformanceItem items = 1;
+}
+
+message RiderPerformanceItem {
+  string riderId = 1;
+  int32 deliveriesCompleted = 2;
+  double avgDeliveryTime = 3;
+  string riderName = 4;
+}
+
+message TopProductsResponse {
+  repeated TopProductItem items = 1;
+}
+
+message TopProductItem {
+  string productId = 1;
+  int32 quantity = 2;
+  double revenue = 3;
+}
+
+message CustomerRetentionResponse {
+  int32 totalCustomers = 1;
+  int32 returningCustomers = 2;
+  double retentionRate = 3;
+}

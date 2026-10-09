@@ -5,11 +5,13 @@ import { CategoriesService } from './categories.service';
 import { CategoriesController } from './categories.controller';
 
 @Module({
-    imports: [
-        MongooseModule.forFeature([{ name: Category.name, schema: CategorySchema }]),
-    ],
-    controllers: [CategoriesController],
-    providers: [CategoriesService],
-    exports: [CategoriesService],
+  imports: [
+    MongooseModule.forFeature([
+      { name: Category.name, schema: CategorySchema },
+    ]),
+  ],
+  controllers: [CategoriesController],
+  providers: [CategoriesService],
+  exports: [CategoriesService],
 })
-export class CategoriesModule { }
+export class CategoriesModule {}

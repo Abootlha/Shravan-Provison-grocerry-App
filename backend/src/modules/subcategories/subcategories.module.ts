@@ -6,12 +6,14 @@ import { Subcategory, SubcategorySchema } from './schemas/subcategory.schema';
 import { RedisModule } from '../../common/utils/redis.module';
 
 @Module({
-    imports: [
-        MongooseModule.forFeature([{ name: Subcategory.name, schema: SubcategorySchema }]),
-        RedisModule,
-    ],
-    controllers: [SubcategoriesController],
-    providers: [SubcategoriesService],
-    exports: [SubcategoriesService],
+  imports: [
+    MongooseModule.forFeature([
+      { name: Subcategory.name, schema: SubcategorySchema },
+    ]),
+    RedisModule,
+  ],
+  controllers: [SubcategoriesController],
+  providers: [SubcategoriesService],
+  exports: [SubcategoriesService],
 })
-export class SubcategoriesModule { }
+export class SubcategoriesModule {}

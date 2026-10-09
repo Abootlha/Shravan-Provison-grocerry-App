@@ -5,11 +5,11 @@ import { AnalyticsService } from './analytics.service';
 import { AnalyticsController } from './analytics.controller';
 
 @Module({
-    imports: [
-        MongooseModule.forFeature([{ name: Order.name, schema: OrderSchema }]),
-    ],
-    controllers: [AnalyticsController],
-    providers: [AnalyticsService],
-    exports: [AnalyticsService],
+  imports: [
+    MongooseModule.forFeature([{ name: Order.name, schema: OrderSchema }]),
+  ],
+  controllers: [AnalyticsController],
+  providers: [AnalyticsService],
+  exports: [AnalyticsService],
 })
-export class AnalyticsModule { }
+export class AnalyticsModule {}

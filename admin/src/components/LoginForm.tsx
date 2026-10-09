@@ -1,110 +1,171 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
-import { User, Lock, ArrowRight, ShoppingCart } from 'lucide-react';
+import { Mail, Lock, ArrowRight, ShoppingCart } from 'lucide-react';
 
 export default function LoginForm() {
-    const [username, setUsername] = useState('admin');
-    const [password, setPassword] = useState('');
+    const usernameRef = useRef<HTMLInputElement>(null);
+    const passwordRef = useRef<HTMLInputElement>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
-    async function handleLogin(e: React.FormEvent) {
-        e.preventDefault();
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        const token = localStorage.getItem('adminToken');
+        if (token) {
+            window.location.replace('/');
+        }
+    }, []);
+
+    async function submitLogin() {
+        const username = usernameRef.current?.value?.trim() || '';
+        const password = passwordRef.current?.value || '';
+
+        if (!username || !password || loading) {
+            setError('Please enter username and password.');
+            return;
+        }
+
         setLoading(true);
         setError('');
+
         try {
-            const response = await fetch('http://localhost:3000/api/v1/auth/admin/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password }),
-            });
-
-            if (!response.ok) {
-                throw new Error('Invalid credentials');
-            }
-
-            const data = await response.json();
+            const data = await api.login(username, password);
             
-            // Store token and user info in localStorage
             localStorage.setItem('adminToken', data.accessToken);
             localStorage.setItem('adminUser', JSON.stringify(data.user));
             localStorage.setItem('adminRefreshToken', data.refreshToken);
             localStorage.setItem('adminLoginTime', Date.now().toString());
-            
-            // Redirect to dashboard
-            window.location.href = '/';
-        } catch (err) {
-            setError('Invalid username or password');
+
+            window.location.replace('/');
+        } catch (err: any) {
+            setError(err.message || 'Login failed. Please check your credentials.');
         } finally {
             setLoading(false);
         }
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 flex items-center justify-center p-4">
+        <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'var(--bg-primary)' }}>
             <div className="w-full max-w-md">
                 {/* Logo */}
                 <div className="text-center mb-8">
-                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-green-500 to-emerald-600 text-white shadow-lg shadow-green-500/30 mb-4">
-                        <ShoppingCart className="w-8 h-8" />
+                    <div 
+                        className="inline-flex items-center justify-center w-16 h-16 rounded-2xl shadow-lg mb-4"
+                        style={{ background: 'var(--accent-gradient)' }}
+                    >
+                        <ShoppingCart className="w-8 h-8" style={{ color: 'var(--bg-primary)' }} />
                     </div>
-                    <h1 className="text-2xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent">
+                    <h1 
+                        className="text-2xl font-bold"
+                        style={{ color: 'var(--text-primary)' }}
+                    >
                         ShravanKirana
                     </h1>
-                    <p className="text-gray-500 mt-1">Admin Console</p>
+                    <p className="mt-1" style={{ color: 'var(--text-muted)' }}>Admin Console</p>
                 </div>
 
-                <Card className="shadow-xl border-0 bg-white/80 backdrop-blur">
+                <Card className="shadow-xl" style={{ 
+                    background: 'var(--bg-secondary)', 
+                    border: '1px solid var(--border)' 
+                }}>
                     <CardHeader className="text-center pb-2">
-                        <CardTitle className="text-xl">Welcome Back</CardTitle>
-                        <CardDescription>Sign in to your admin account</CardDescription>
+                        <CardTitle className="text-xl" style={{ color: 'var(--text-primary)' }}>
+                            Admin Login
+                        </CardTitle>
+                        <CardDescription style={{ color: 'var(--text-muted)' }}>
+                            Enter your credentials to access the admin panel
+                        </CardDescription>
                     </CardHeader>
                     <CardContent className="pt-4">
                         {error && (
-                            <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg mb-4 text-sm font-medium border border-red-100">
+                            <div 
+                                className="px-4 py-3 rounded-lg mb-4 text-sm font-medium"
+                                style={{ 
+                                    background: 'var(--danger-light)', 
+                                    color: 'var(--danger)',
+                                    border: '1px solid var(--danger)'
+                                }}
+                            >
                                 {error}
                             </div>
                         )}
 
-                        <form onSubmit={handleLogin} className="space-y-4">
+                        <form
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                void submitLogin();
+                            }}
+                            action="#"
+                            className="space-y-4"
+                        >
                             <div>
-                                <label className="text-sm font-medium text-gray-700 mb-2 block">Username</label>
+                                <label 
+                                    className="text-sm font-medium mb-2 block" 
+                                    style={{ color: 'var(--text-secondary)' }}
+                                >
+                                    Username / Email
+                                </label>
                                 <div className="relative">
-                                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                                    <Mail 
+                                        className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5" 
+                                        style={{ color: 'var(--text-muted)' }} 
+                                    />
                                     <Input
                                         type="text"
-                                        value={username}
-                                        onChange={(e) => setUsername(e.target.value)}
+                                        ref={usernameRef}
                                         className="pl-11 h-12"
-                                        placeholder="Enter username"
+                                        placeholder="Enter username or email"
+                                        defaultValue="admin"
                                         required
                                         autoComplete="username"
                                     />
                                 </div>
                             </div>
+
                             <div>
-                                <label className="text-sm font-medium text-gray-700 mb-2 block">Password</label>
+                                <label 
+                                    className="text-sm font-medium mb-2 block" 
+                                    style={{ color: 'var(--text-secondary)' }}
+                                >
+                                    Password
+                                </label>
                                 <div className="relative">
-                                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                                    <Lock 
+                                        className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5" 
+                                        style={{ color: 'var(--text-muted)' }} 
+                                    />
                                     <Input
                                         type="password"
-                                        value={password}
-                                        onChange={(e) => setPassword(e.target.value)}
+                                        ref={passwordRef}
                                         className="pl-11 h-12"
                                         placeholder="Enter password"
+                                        defaultValue="admin123"
                                         required
                                         autoComplete="current-password"
                                     />
                                 </div>
                             </div>
-                            <Button type="submit" disabled={loading} className="w-full h-12 text-base">
+
+                            <Button 
+                                type="button"
+                                onClick={() => {
+                                    void submitLogin();
+                                }}
+                                disabled={loading} 
+                                className="w-full h-12 text-base"
+                                style={{ 
+                                    background: 'var(--accent-gradient)',
+                                    color: 'var(--bg-primary)'
+                                }}
+                            >
                                 {loading ? (
-                                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+                                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-[var(--bg-primary)] border-t-transparent" />
                                 ) : (
-                                    <>Sign In <ArrowRight className="w-5 h-5 ml-2" /></>
+                                    <>Login <ArrowRight className="w-5 h-5 ml-2" /></>
                                 )}
                             </Button>
                         </form>
@@ -112,12 +173,19 @@ export default function LoginForm() {
                 </Card>
 
                 {/* Demo Credentials */}
-                <div className="mt-6 p-4 rounded-xl bg-white/60 backdrop-blur border border-gray-100 text-sm">
-                    <p className="font-semibold text-gray-700 mb-2">🔐 Default Credentials</p>
-                    <div className="space-y-1 text-gray-600">
+                <div 
+                    className="mt-6 p-4 rounded-xl text-sm"
+                    style={{ 
+                        background: 'var(--bg-secondary)', 
+                        border: '1px solid var(--border)' 
+                    }}
+                >
+                    <p className="font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
+                        Demo Credentials
+                    </p>
+                    <div className="space-y-1" style={{ color: 'var(--text-muted)' }}>
                         <p><span className="font-medium">Username:</span> admin</p>
                         <p><span className="font-medium">Password:</span> admin123</p>
-                        <p className="text-xs text-amber-600 mt-2">⚠️ Please change password after first login</p>
                     </div>
                 </div>
             </div>

@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package product;
+
+import "common.proto";
+
+message Product {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  double price = 4;
+  string image_url = 5;
+  repeated string images = 6;
+  string category_id = 7;
+  Category category = 8;
+  int32 stock_quantity = 9;
+  bool is_available = 10;
+  map<string, string> attributes = 11;
+  common.Timestamp created_at = 12;
+  common.Timestamp updated_at = 13;
+  common.Status status = 14;
+}
+
+message Category {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string image_url = 4;
+  string parent_id = 5;
+  int32 sort_order = 6;
+  repeated Category children = 7;
+}
+
+message ProductSearchResult {
+  repeated Product products = 1;
+  common.Pagination pagination = 2;
+}
+
+message GetProductsRequest {
+  string category_id = 1;
+  common.Pagination pagination = 2;
+}
+
+message GetProductsResponse {
+  repeated Product products = 1;
+  common.Pagination pagination = 2;
+}
+
+message GetProductRequest {
+  string product_id = 1;
+}
+
+message GetProductResponse {
+  Product product = 1;
+}
+
+message SearchProductsRequest {
+  string query = 1;
+  repeated string category_ids = 2;
+  double min_price = 3;
+  double max_price = 4;
+  common.Pagination pagination = 5;
+}
+
+message SearchProductsResponse {
+  ProductSearchResult result = 1;
+}
+
+message GetCategoriesRequest {
+  string parent_id = 1;
+}
+
+message GetCategoriesResponse {
+  repeated Category categories = 1;
+}
+
+service ProductService {
+  rpc GetProducts(GetProductsRequest) returns (GetProductsResponse);
+  rpc GetProduct(GetProductRequest) returns (GetProductResponse);
+  rpc SearchProducts(SearchProductsRequest) returns (SearchProductsResponse);
+  rpc GetCategories(GetCategoriesRequest) returns (GetCategoriesResponse);
+}

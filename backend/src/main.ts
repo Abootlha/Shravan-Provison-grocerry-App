@@ -6,6 +6,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -39,6 +40,9 @@ async function bootstrap() {
   // Enable DI for class-validator (needed for custom validators)
   useContainer(app.select(AppModule), { fallbackOnErrors: true });
 
+  // Global exception filter
+  app.useGlobalFilters(new HttpExceptionFilter());
+
   // Global validation pipe
   app.useGlobalPipes(
     new ValidationPipe({
@@ -55,6 +59,8 @@ async function bootstrap() {
   // Listen on 0.0.0.0 to accept connections from all network interfaces (needed for mobile testing)
   await app.listen(port, '0.0.0.0');
 
-  console.log(`🚀 ShravanKirana Backend running on: http://0.0.0.0:${port}/api/v1`);
+  console.log(
+    `🚀 ShravanKirana Backend running on: http://0.0.0.0:${port}/api/v1`,
+  );
 }
 bootstrap();

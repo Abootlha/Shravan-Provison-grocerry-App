@@ -1,0 +1,175 @@
+version: '3.8'
+
+services:
+  auth-svc:
+    build:
+      context: ../../services/auth-svc
+      target: builder
+    volumes:
+      - ../../services/auth-svc/src:/app/src
+      - ../../services/auth-svc/src:/app/src:ro
+    ports:
+      - "3001:3001"
+      - "3002:3002"
+      - "9229:9229"
+    command: ["node", "--watch", "dist/main.js"]
+    environment:
+      - NODE_ENV=development
+      - DEBUG=*
+    restart: unless-stopped
+
+  user-svc:
+    build:
+      context: ../../services/user-svc
+      target: builder
+    volumes:
+      - ../../services/user-svc/src:/app/src
+    ports:
+      - "3002:3002"
+      - "9332:9332"
+      - "9229:9229"
+    command: ["node", "--watch", "dist/main"]
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  rider-svc:
+    build:
+      context: ../../services/rider-svc
+      target: builder
+    volumes:
+      - ../../services/rider-svc/src:/app/src
+    ports:
+      - "8083:8083"
+      - "3003:3003"
+      - "9333:9333"
+      - "9229:9229"
+    command: ["node", "--watch", "dist/main"]
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  order-svc:
+    build:
+      context: ../../services/order-svc
+      target: builder
+    volumes:
+      - ../../services/order-svc/src:/app/src
+    ports:
+      - "8084:8084"
+      - "3004:3004"
+      - "9334:9334"
+      - "9229:9229"
+    command: ["node", "--watch", "dist/main"]
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  product-svc:
+    build:
+      context: ../../services/product-svc
+      target: builder
+    volumes:
+      - ../../services/product-svc/src:/app/src
+    ports:
+      - "3005:3005"
+      - "9335:9335"
+      - "9229:9229"
+    command: ["node", "--watch", "dist/main"]
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  cart-svc:
+    build:
+      context: ../../services/cart-svc
+      target: builder
+    volumes:
+      - ../../services/cart-svc/src:/app/src
+    ports:
+      - "3006:3006"
+      - "9336:9336"
+      - "9229:9229"
+    command: ["node", "--watch", "dist/main"]
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  payment-svc:
+    build:
+      context: ../../services/payment-svc
+      target: builder
+    volumes:
+      - ../../services/payment-svc/src:/app/src
+    ports:
+      - "8089:8089"
+      - "3009:3009"
+      - "9339:9339"
+      - "9229:9229"
+    command: ["node", "--watch", "dist/main"]
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  notification-svc:
+    build:
+      context: ../../services/notification-svc
+      target: builder
+    volumes:
+      - ../../services/notification-svc/src:/app/src
+    ports:
+      - "8090:8090"
+      - "3010:3010"
+      - "9340:9340"
+      - "9229:9229"
+    command: ["node", "--watch", "dist/main"]
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  analytics-svc:
+    build:
+      context: ../../services/analytics-svc
+      target: builder
+    volumes:
+      - ../../services/analytics-svc/src:/app/src
+    ports:
+      - "8091:8091"
+      - "3011:3011"
+      - "9341:9341"
+      - "9229:9229"
+    command: ["node", "--watch", "dist/main"]
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  location-svc:
+    build:
+      context: ../../services/location-svc
+      target: builder
+    volumes:
+      - ../../services/location-svc/src:/app/src
+    ports:
+      - "8087:8087"
+      - "3007:3007"
+      - "9337:9337"
+      - "9229:9229"
+    command: ["node", "--watch", "dist/main"]
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  tracking-gw:
+    build:
+      context: ../../services/tracking-gw
+      target: builder
+    volumes:
+      - ../../services/tracking-gw/src:/app/src
+    ports:
+      - "3008:3008"
+      - "9338:9338"
+      - "9229:9229"
+    command: ["node", "--watch", "dist/main"]
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped

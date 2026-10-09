@@ -1,0 +1,11 @@
+---
+import AdminLayout from "../layouts/AdminLayout.astro";
+import RiderManager from "../components/react/RiderManager";
+import RiderTrackingMap from "../components/RiderTrackingMap";
+---
+
+<AdminLayout title="Riders">
+    <div class="p-6 lg:p-8">
+        <RiderManager client:load />
+    </div>
+</AdminLayout>

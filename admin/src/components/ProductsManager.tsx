@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
+import Papa from 'papaparse';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -9,9 +10,19 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/Tabs';
 import { EmptyState } from './ui/EmptyState';
 import {
     Plus, Pencil, Search, Package, X, Scan, Camera, StopCircle, Upload, Link, ImageIcon,
-    Filter, ChevronLeft, ChevronRight, MoreHorizontal, Eye, Trash2, CheckCircle, XCircle, Boxes
+    Filter, ChevronLeft, ChevronRight, MoreHorizontal, Eye, Trash2, CheckCircle, XCircle, Boxes,
+    Download, UploadCloud, AlertCircle, Loader2
 } from 'lucide-react';
-import { Html5Qrcode } from 'html5-qrcode';
+
+type Html5QrcodeInstance = {
+    start: (
+        cameraConfig: { facingMode: string },
+        config: { fps: number; qrbox: { width: number; height: number } },
+        onSuccess: (decodedText: string) => void,
+        onError?: (errorMessage: string) => void
+    ) => Promise<void>;
+    stop: () => Promise<void>;
+};
 
 interface Product {
     _id: string;
@@ -23,6 +34,7 @@ interface Product {
     isAvailable: boolean;
     barcode?: string;
     image?: string;
+    images?: string[];
     description?: string;
     brand?: string;
     gst?: number;
@@ -82,16 +94,22 @@ export default function ProductsManager() {
     const [scannerReady, setScannerReady] = useState(false);
     const [imageMode, setImageMode] = useState<'url' | 'file'>('url');
     const [imagePreview, setImagePreview] = useState<string>('');
-    const scannerRef = useRef<Html5Qrcode | null>(null);
+    const scannerRef = useRef<Html5QrcodeInstance | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const [form, setForm] = useState({
         name: '', price: '', originalPrice: '', unit: '', stock: '', categoryId: '',
-        subcategoryId: '', itemGroupId: '',  // NEW
-        description: '', image: '', barcode: '', customUnit: '', brand: '',
+        subcategoryId: '', itemGroupId: '',
+        description: '', highlights: '', image: '', images: [] as string[], barcode: '', customUnit: '', brand: '',
         mrp: '', gst: '', shelfLife: '', storageType: '',
         protein: '', carbs: '', sugar: '', fat: '', transFat: ''
     });
+
+    // Bulk Import States
+    const [showBulkImportModal, setShowBulkImportModal] = useState(false);
+    const [isBulkImporting, setIsBulkImporting] = useState(false);
+    const [bulkImportProgress, setBulkImportProgress] = useState({ current: 0, total: 0, success: 0, failed: 0 });
+    const bulkFileInputRef = useRef<HTMLInputElement>(null);
 
     const [availableSubcategories, setAvailableSubcategories] = useState<Category[]>([]);
     const [availableItemGroups, setAvailableItemGroups] = useState<any[]>([]);
@@ -162,7 +180,7 @@ export default function ProductsManager() {
         setForm({
             name: '', price: '', originalPrice: '', unit: '', stock: '', categoryId: '',
             subcategoryId: '', itemGroupId: '',
-            description: '', image: '', barcode: '', customUnit: '', brand: '',
+            description: '', highlights: '', image: '', images: [], barcode: '', customUnit: '', brand: '',
             mrp: '', gst: '', shelfLife: '', storageType: '',
             protein: '', carbs: '', sugar: '', fat: '', transFat: ''
         });
@@ -188,7 +206,9 @@ export default function ProductsManager() {
             subcategoryId: (product as any).subcategoryId?._id || (product as any).subcategoryId || '',
             itemGroupId: (product as any).itemGroupId?._id || (product as any).itemGroupId || '',
             description: product.description || '',
+            highlights: (product as any).highlights || '',
             image: product.image || '',
+            images: product.images || (product.image ? [product.image] : []),
             customUnit: '',
             barcode: product.barcode || '',
             brand: product.brand || '',
@@ -235,7 +255,9 @@ export default function ProductsManager() {
                 itemGroupId: form.itemGroupId,
                 barcode: form.barcode,
                 description: form.description,
-                image: form.image || imagePreview,
+                highlights: form.highlights,
+                image: form.images && form.images.length > 0 ? form.images[0] : (form.image || imagePreview),
+                images: form.images && form.images.length > 0 ? form.images.filter(Boolean) : (form.image ? [form.image] : (imagePreview ? [imagePreview] : [])),
                 brand: form.brand,
                 gst: Number(form.gst) || 0,
                 shelfLife: Number(form.shelfLife) || 0,
@@ -263,9 +285,23 @@ export default function ProductsManager() {
         }
     }
 
-    function handleImageUrlChange(url: string) {
-        setForm({ ...form, image: url });
-        setImagePreview(url);
+    function handleImageUrlChange(index: number, url: string) {
+        const newImages = [...(form.images || [])];
+        if (newImages.length === 0 && form.image) {
+            newImages.push(form.image);
+        }
+        newImages[index] = url;
+        setForm({ ...form, images: newImages, image: newImages[0] || '' });
+    }
+
+    function handleAddImageUrl() {
+        setForm({ ...form, images: [...(form.images || []), ''] });
+    }
+
+    function handleRemoveImage(index: number) {
+        const newImages = [...(form.images || [])];
+        newImages.splice(index, 1);
+        setForm({ ...form, images: newImages, image: newImages[0] || '' });
     }
 
     function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -275,7 +311,7 @@ export default function ProductsManager() {
             reader.onloadend = () => {
                 const base64 = reader.result as string;
                 setImagePreview(base64);
-                setForm({ ...form, image: base64 });
+                setForm({ ...form, image: base64, images: [...(form.images || []), base64] });
             };
             reader.readAsDataURL(file);
         }
@@ -283,14 +319,110 @@ export default function ProductsManager() {
 
     function clearImage() {
         setImagePreview('');
-        setForm({ ...form, image: '' });
+        setForm({ ...form, image: '', images: [] });
         if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+
+    function downloadCsvTemplate() {
+        const csvContent = "Barcode,Name,Brand,Price,OriginalPrice,Stock,Unit,Category,Subcategory,ItemGroup,Description,Highlights,Images,ImageURL1,ImageURL2\n1234567890123,Sample Product,Brand A,100,120,50,1pc,Category_ID,Subcategory_ID,ItemGroup_ID,Product Details here,High quality,https://example.com/img1.jpg|https://example.com/img2.jpg,,";
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", "shravan_kirana_products_template.csv");
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    function handleBulkImport(e: React.ChangeEvent<HTMLInputElement>) {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setIsBulkImporting(true);
+        setBulkImportProgress({ current: 0, total: 0, success: 0, failed: 0 });
+
+        Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: async (results) => {
+                const rows = results.data as any[];
+                setBulkImportProgress(prev => ({ ...prev, total: rows.length }));
+
+                let successCount = 0;
+                let failedCount = 0;
+
+                for (let i = 0; i < rows.length; i++) {
+                    const row = rows[i];
+                    try {
+                        let imagesArray = [];
+                        if (row.Images && row.Images.trim() !== '') {
+                            imagesArray = row.Images.split('|').map((img: string) => img.trim()).filter(Boolean);
+                        } else {
+                            imagesArray = [row.ImageURL1, row.ImageURL2, row.ImageURL3, row.ImageURL4].filter(Boolean);
+                        }
+
+                        const data: any = {
+                            name: row.Name,
+                            brand: row.Brand || '',
+                            price: Number(row.Price) || 0,
+                            originalPrice: Number(row.OriginalPrice) || Number(row.Price) || 0,
+                            stock: Number(row.Stock) || 0,
+                            unit: row.Unit || '1pc',
+                            categoryId: row.Category || (categories.length > 0 ? categories[0]._id : null),
+                            subcategoryId: row.Subcategory || null,
+                            itemGroupId: row.ItemGroup || null,
+                            description: row.Description || '',
+                            highlights: row.Highlights || '',
+                            images: imagesArray,
+                            image: imagesArray.length > 0 ? imagesArray[0] : '',
+                            isAvailable: true,
+                        };
+
+                        if (row.Barcode && row.Barcode.trim() !== '') {
+                            data.barcode = row.Barcode.trim();
+                        }
+                        
+                        if (!data.name || data.price === undefined || data.price === null || isNaN(data.price)) {
+                            throw new Error("Missing required fields (Name, Price)");
+                        }
+                        if (!data.categoryId) {
+                            throw new Error("Category is missing! Please create at least one category in the Admin Panel before importing products.");
+                        }
+
+                        await api.createProduct(data);
+                        successCount++;
+                    } catch (error: any) {
+                        console.error(`Error importing row ${i + 1}:`, error);
+                        alert(`Row ${i + 1} Failed: ${error.message}`);
+                        failedCount++;
+                    }
+                    
+                    setBulkImportProgress(prev => ({ 
+                        ...prev, 
+                        current: i + 1, 
+                        success: successCount, 
+                        failed: failedCount 
+                    }));
+                }
+
+                setIsBulkImporting(false);
+                fetchData(); // Refresh list after import
+            },
+            error: (error) => {
+                console.error("CSV Parse Error:", error);
+                alert("Failed to read CSV file.");
+                setIsBulkImporting(false);
+            }
+        });
     }
 
     async function startScanner() {
         setShowScanner(true);
         setScannerReady(false);
         try {
+            const { Html5Qrcode } = await import('html5-qrcode');
             scannerRef.current = new Html5Qrcode('barcode-reader');
             await scannerRef.current.start(
                 { facingMode: 'environment' },
@@ -300,6 +432,7 @@ export default function ProductsManager() {
             );
             setScannerReady(true);
         } catch (err) {
+            console.error('Scanner failed to start:', err);
             alert('Could not access camera.');
             setShowScanner(false);
         }
@@ -384,9 +517,17 @@ export default function ProductsManager() {
                                 {products.length} products in your catalog
                             </p>
                         </div>
-                        <Button onClick={openAddModal}>
-                            <Plus className="w-4 h-4 mr-2" /> Add Product
-                        </Button>
+                        <div className="flex gap-2">
+                            <Button variant="outline" onClick={downloadCsvTemplate} className="hidden sm:flex">
+                                <Download className="w-4 h-4 mr-2" /> Template
+                            </Button>
+                            <Button variant="secondary" onClick={() => setShowBulkImportModal(true)}>
+                                <UploadCloud className="w-4 h-4 mr-2" /> Bulk Import
+                            </Button>
+                            <Button onClick={openAddModal}>
+                                <Plus className="w-4 h-4 mr-2" /> Add Product
+                            </Button>
+                        </div>
                     </div>
                 </div>
 
@@ -847,6 +988,18 @@ export default function ProductsManager() {
                                                         rows={3}
                                                     />
                                                 </div>
+
+                                                <div className="mt-4">
+                                                    <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Highlights</label>
+                                                    <textarea
+                                                        placeholder="Product highlights..."
+                                                        value={form.highlights}
+                                                        onChange={(e) => setForm({ ...form, highlights: e.target.value })}
+                                                        className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none resize-none"
+                                                        style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                                                        rows={3}
+                                                    />
+                                                </div>
                                             </TabsContent>
 
                                             {/* Pricing Tab */}
@@ -995,23 +1148,28 @@ export default function ProductsManager() {
 
                                             {/* Images Tab */}
                                             <TabsContent value="images" className="mt-0 space-y-4">
-                                                {imagePreview && (
-                                                    <div className="relative">
-                                                        <img
-                                                            src={imagePreview}
-                                                            alt="Preview"
-                                                            className="w-full h-48 object-contain rounded-lg"
-                                                            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
-                                                        />
-                                                        <Button
-                                                            type="button"
-                                                            variant="destructive"
-                                                            size="icon"
-                                                            className="absolute top-2 right-2 h-8 w-8"
-                                                            onClick={clearImage}
-                                                        >
-                                                            <X className="w-4 h-4" />
-                                                        </Button>
+                                                {/* Previews */}
+                                                {(form.images?.length > 0 || imagePreview) && (
+                                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                        {(form.images?.length > 0 ? form.images.filter(Boolean) : (imagePreview ? [imagePreview] : [])).map((imgUrl, idx) => (
+                                                            <div key={idx} className="relative group">
+                                                                <img
+                                                                    src={imgUrl}
+                                                                    alt={`Preview ${idx + 1}`}
+                                                                    className="w-full h-32 object-contain rounded-lg"
+                                                                    style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+                                                                />
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="destructive"
+                                                                    size="icon"
+                                                                    className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                                    onClick={() => handleRemoveImage(idx)}
+                                                                >
+                                                                    <X className="w-3 h-3" />
+                                                                </Button>
+                                                            </div>
+                                                        ))}
                                                     </div>
                                                 )}
 
@@ -1026,7 +1184,7 @@ export default function ProductsManager() {
                                                             border: imageMode === 'url' ? '2px solid var(--accent)' : '2px solid transparent'
                                                         }}
                                                     >
-                                                        <Link className="w-4 h-4" /> Image URL
+                                                        <Link className="w-4 h-4" /> Image URLs
                                                     </button>
                                                     <button
                                                         type="button"
@@ -1043,11 +1201,33 @@ export default function ProductsManager() {
                                                 </div>
 
                                                 {imageMode === 'url' && (
-                                                    <Input
-                                                        placeholder="https://example.com/image.jpg"
-                                                        value={form.image}
-                                                        onChange={(e) => handleImageUrlChange(e.target.value)}
-                                                    />
+                                                    <div className="space-y-3">
+                                                        {(form.images?.length > 0 ? form.images : ['']).map((url, idx) => (
+                                                            <div key={idx} className="flex gap-2">
+                                                                <Input
+                                                                    placeholder="https://example.com/image.jpg"
+                                                                    value={url}
+                                                                    onChange={(e) => handleImageUrlChange(idx, e.target.value)}
+                                                                />
+                                                                <Button 
+                                                                    type="button" 
+                                                                    variant="outline"
+                                                                    size="icon"
+                                                                    onClick={() => handleRemoveImage(idx)}
+                                                                >
+                                                                    <X className="w-4 h-4" />
+                                                                </Button>
+                                                            </div>
+                                                        ))}
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            className="w-full"
+                                                            onClick={handleAddImageUrl}
+                                                        >
+                                                            + Add Another URL
+                                                        </Button>
+                                                    </div>
                                                 )}
 
                                                 {imageMode === 'file' && (
@@ -1096,6 +1276,109 @@ export default function ProductsManager() {
                                         </div>
                                     </Tabs>
                                 </form>
+                            </CardContent>
+                        </Card>
+                    </div>
+                )}
+
+                {/* Bulk Import Modal */}
+                {showBulkImportModal && (
+                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto py-8">
+                        <Card className="w-full max-w-lg mx-4 shadow-xl">
+                            <CardHeader className="flex flex-row items-center justify-between border-b py-4">
+                                <CardTitle className="text-lg">Bulk Import Products</CardTitle>
+                                {!isBulkImporting && (
+                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
+                                        setShowBulkImportModal(false);
+                                        setBulkImportProgress({ current: 0, total: 0, success: 0, failed: 0 });
+                                    }}>
+                                        <X className="w-4 h-4" />
+                                    </Button>
+                                )}
+                            </CardHeader>
+                            <CardContent className="p-6 space-y-6">
+                                {!isBulkImporting && bulkImportProgress.total === 0 && (
+                                    <>
+                                        <div className="p-4 rounded-xl" style={{ background: 'var(--bg-tertiary)' }}>
+                                            <div className="flex items-start gap-3">
+                                                <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: 'var(--accent)' }} />
+                                                <div className="text-sm space-y-2" style={{ color: 'var(--text-secondary)' }}>
+                                                    <p>Upload a CSV file to add multiple products at once.</p>
+                                                    <p>Make sure your CSV matches the template format. Invalid rows or duplicates will be skipped to prevent errors.</p>
+                                                    <Button variant="link" className="h-auto p-0" onClick={downloadCsvTemplate}>
+                                                        Download CSV Template
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <input
+                                                ref={bulkFileInputRef}
+                                                type="file"
+                                                accept=".csv"
+                                                onChange={handleBulkImport}
+                                                className="hidden"
+                                                id="bulk-csv-upload"
+                                            />
+                                            <label
+                                                htmlFor="bulk-csv-upload"
+                                                className="flex flex-col items-center justify-center gap-2 py-10 px-4 border-2 border-dashed rounded-lg cursor-pointer transition-colors"
+                                                style={{ borderColor: 'var(--border)', background: 'transparent' }}
+                                            >
+                                                <UploadCloud className="w-10 h-10" style={{ color: 'var(--text-muted)' }} />
+                                                <span className="text-base font-medium" style={{ color: 'var(--text-primary)' }}>Click to upload CSV</span>
+                                                <span className="text-sm" style={{ color: 'var(--text-muted)' }}>Only .csv files are supported</span>
+                                            </label>
+                                        </div>
+                                    </>
+                                )}
+
+                                {(isBulkImporting || bulkImportProgress.total > 0) && (
+                                    <div className="space-y-4">
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span style={{ color: 'var(--text-primary)' }} className="font-medium">
+                                                {isBulkImporting ? 'Importing products...' : 'Import complete'}
+                                            </span>
+                                            <span style={{ color: 'var(--text-muted)' }}>
+                                                {bulkImportProgress.current} / {bulkImportProgress.total}
+                                            </span>
+                                        </div>
+                                        
+                                        <div className="w-full rounded-full h-2.5 overflow-hidden" style={{ background: 'var(--bg-tertiary)' }}>
+                                            <div 
+                                                className="h-2.5 rounded-full transition-all duration-300" 
+                                                style={{ 
+                                                    width: `${bulkImportProgress.total > 0 ? (bulkImportProgress.current / bulkImportProgress.total) * 100 : 0}%`,
+                                                    background: 'var(--accent)'
+                                                }}
+                                            ></div>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-4 pt-2">
+                                            <div className="p-3 rounded-lg" style={{ background: 'var(--success-light)', border: '1px solid var(--success)' }}>
+                                                <p className="text-xs" style={{ color: 'var(--success)' }}>Successfully Added</p>
+                                                <p className="text-xl font-bold" style={{ color: 'var(--success)' }}>{bulkImportProgress.success}</p>
+                                            </div>
+                                            <div className="p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
+                                                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Failed / Skipped</p>
+                                                <p className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{bulkImportProgress.failed}</p>
+                                            </div>
+                                        </div>
+
+                                        {!isBulkImporting && (
+                                            <Button 
+                                                className="w-full mt-4" 
+                                                onClick={() => {
+                                                    setShowBulkImportModal(false);
+                                                    setBulkImportProgress({ current: 0, total: 0, success: 0, failed: 0 });
+                                                }}
+                                            >
+                                                Close
+                                            </Button>
+                                        )}
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
                     </div>

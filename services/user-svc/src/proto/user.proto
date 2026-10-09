@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+package user;
+
+service UserService {
+  rpc Create (CreateUserRequest) returns (UserResponse);
+  rpc FindById (FindByIdRequest) returns (UserResponse);
+  rpc FindByPhone (FindByPhoneRequest) returns (UserResponse);
+  rpc Update (UpdateUserRequest) returns (UserResponse);
+  rpc AddAddress (AddAddressRequest) returns (UserResponse);
+  rpc UpdateAddress (UpdateAddressRequest) returns (UserResponse);
+  rpc RemoveAddress (RemoveAddressRequest) returns (UserResponse);
+  rpc SetDefaultAddress (SetDefaultAddressRequest) returns (UserResponse);
+}
+
+message CreateUserRequest {
+  string phone = 1;
+  string name = 2;
+  string email = 3;
+  string role = 4;
+}
+
+message FindByIdRequest {
+  string id = 1;
+}
+
+message FindByPhoneRequest {
+  string phone = 1;
+}
+
+message UpdateUserRequest {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  string role = 4;
+}
+
+message AddressData {
+  string label = 1;
+  string street = 2;
+  string city = 3;
+  string postalCode = 4;
+  double longitude = 5;
+  double latitude = 6;
+}
+
+message AddAddressRequest {
+  string userId = 1;
+  AddressData address = 2;
+}
+
+message UpdateAddressRequest {
+  string userId = 1;
+  int32 addressIndex = 2;
+  AddressData address = 3;
+}
+
+message RemoveAddressRequest {
+  string userId = 1;
+  int32 addressIndex = 2;
+}
+
+message SetDefaultAddressRequest {
+  string userId = 1;
+  int32 addressIndex = 2;
+}
+
+message GeoPoint {
+  string type = 1;
+  repeated double coordinates = 2;
+}
+
+message Address {
+  string label = 1;
+  string street = 2;
+  string city = 3;
+  string postalCode = 4;
+  GeoPoint coordinates = 5;
+}
+
+message UserResponse {
+  string id = 1;
+  string phone = 2;
+  string name = 3;
+  string email = 4;
+  string role = 5;
+  repeated Address addresses = 6;
+  bool isActive = 7;
+  string createdAt = 8;
+  string updatedAt = 9;
+}

@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package notification;
+
+import "common.proto";
+
+message PushNotification {
+  string id = 1;
+  string user_id = 2;
+  string title = 3;
+  string body = 4;
+  map<string, string> data = 5;
+  string image_url = 6;
+  string channel_id = 7;
+  common.Timestamp created_at = 8;
+}
+
+message SMSMessage {
+  string id = 1;
+  string phone = 2;
+  string message = 3;
+  string sender_id = 4;
+  common.Timestamp created_at = 5;
+}
+
+message EmailMessage {
+  string id = 1;
+  string to = 2;
+  string from = 3;
+  string subject = 4;
+  string body = 5;
+  string html_body = 6;
+  repeated string attachments = 7;
+  common.Timestamp created_at = 8;
+}
+
+message SendPushRequest {
+  PushNotification notification = 1;
+}
+
+message SendPushResponse {
+  bool success = 1;
+  string message_id = 2;
+}
+
+message SendSMSRequest {
+  string phone = 1;
+  string message = 2;
+}
+
+message SendSMSResponse {
+  bool success = 1;
+  string message_id = 2;
+}
+
+message SendEmailRequest {
+  string to = 1;
+  string subject = 2;
+  string body = 3;
+  string html_body = 4;
+  repeated string attachments = 5;
+}
+
+message SendEmailResponse {
+  bool success = 1;
+  string message_id = 2;
+}
+
+service NotificationService {
+  rpc SendPush(SendPushRequest) returns (SendPushResponse);
+  rpc SendSMS(SendSMSRequest) returns (SendSMSResponse);
+  rpc SendEmail(SendEmailRequest) returns (SendEmailResponse);
+}
