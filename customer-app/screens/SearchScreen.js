@@ -1,357 +1,142 @@
-import React, { useState, useEffect } from 'react';
-import {
-    View,
-    Text,
-    TextInput,
-    FlatList,
-    TouchableOpacity,
-    StyleSheet,
-    SafeAreaView,
-    StatusBar,
-} from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+/**
+ * SearchScreen — live product search against the real API (GET /products?search=), with
+ * persisted recent searches, trending chips, popular categories, grouped results
+ * (categories, then a 2-column product grid), skeletons and a mascot empty state.
+ *
+ * Route params: { fromRect } — optional window rect of Home's search bar; the field springs from
+ * it into place (SearchHeader). Idle ↔ loading ↔ results ↔ empty crossfade through ContentSwap.
+ */
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Keyboard } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ProductCard } from '../components';
-import { COLORS, PRODUCTS, CATEGORIES } from '../constants';
+import { ContentSwap, Screen } from '../components/ui';
+import FloatingCartBar from '../components/FloatingCartBar';
+import { useCartBarOffset, useTabBarScroll } from '../components/BottomTabsIcons';
+import { space } from '../constants/theme';
 import { useTranslation } from '../hooks/useTranslation';
-import { translateToHindi } from '../services/translationService';
+import { ProductService } from '../services/services';
+import SearchHeader from './search/SearchHeader';
+import SearchIdle from './search/SearchIdle';
+import SearchResults from './search/SearchResults';
+import useProductSearch from './search/useProductSearch';
+import useRecentSearches from './search/useRecentSearches';
 
-const SearchScreen = ({ navigation }) => {
+/** Space for the floating tab bar + cart bar under the list. */
+const TAB_BAR_SPACE = 200;
+
+const SearchScreen = ({ navigation, route }) => {
     const insets = useSafeAreaInsets();
-    const { currentLanguage } = useTranslation();
-    const [searchQuery, setSearchQuery] = useState('');
-    const [searchResults, setSearchResults] = useState([]);
-    const [showResults, setShowResults] = useState(false);
+    const cartBarOffset = useCartBarOffset();
+    const { onScroll, reveal } = useTabBarScroll(navigation);
+    const { currentLanguage, isHi } = useTranslation();
+    const [query, setQuery] = useState('');
+    const [categories, setCategories] = useState([]);
+    const inputRef = useRef(null);
+    const { recent, add: addRecent, remove: removeRecent, clear: clearRecent } = useRecentSearches();
+    const { results, total, loading, query: resultQuery } = useProductSearch(query, currentLanguage);
 
-    const recentSearches = [
-        'Milk',
-        'Fresh vegetables',
-        'Bread',
-        'Eggs',
-        'Butter',
-    ];
-
-    const trendingSearches = [
-        'Organic fruits',
-        'Dairy products',
-        'Snacks',
-        'Cold drinks',
-        'Cleaning products',
-    ];
-
-    const handleSearch = (query) => {
-        setSearchQuery(query);
-        if (query.length > 0) {
-            const results = PRODUCTS.filter((product) =>
-                product.name.toLowerCase().includes(query.toLowerCase())
-            );
-            setSearchResults(results);
-            setShowResults(true);
-        } else {
-            setSearchResults([]);
-            setShowResults(false);
-        }
-    };
-
-    // Translate search results when language changes
     useEffect(() => {
-        const translateResults = async () => {
-            if (currentLanguage === 'hi' && searchResults.length > 0) {
-                try {
-                    const translated = await Promise.all(
-                        searchResults.map(async (product) => ({
-                            ...product,
-                            translatedName: product.nameHi || await translateToHindi(product.name)
-                        }))
-                    );
-                    setSearchResults(translated);
-                } catch (err) {
-                    console.error('Translation error:', err);
-                }
-            }
+        let alive = true;
+        ProductService.getCategories()
+            .then((list) => alive && setCategories(Array.isArray(list) ? list : []))
+            .catch(() => {});
+        return () => {
+            alive = false;
         };
+    }, []);
 
-        translateResults();
-    }, [currentLanguage]);
+    const trimmed = query.trim();
+    // the idle list / results list (keyed by query) remount at the top, so bring the dock back
+    useEffect(() => reveal(), [trimmed, reveal]);
+    const matchedCategories = useMemo(() => {
+        const q = trimmed.toLowerCase();
+        if (q.length < 2) return [];
+        return categories
+            .filter((c) => `${c.name || ''} ${c.nameHi || ''}`.toLowerCase().includes(q))
+            .slice(0, 6);
+    }, [categories, trimmed]);
 
-    const handleSearchPress = (term) => {
-        setSearchQuery(term);
-        handleSearch(term);
-    };
+    const runTerm = useCallback(
+        (term) => {
+            setQuery(term);
+            addRecent(term);
+            Keyboard.dismiss();
+        },
+        [addRecent]
+    );
+    const onSubmit = useCallback(() => addRecent(query), [addRecent, query]);
+    const onClear = useCallback(() => {
+        setQuery('');
+        inputRef.current?.focus();
+    }, []);
+    const openProduct = useCallback(
+        (product) => {
+            addRecent(query);
+            navigation.navigate('ProductDetail', { product });
+        },
+        [addRecent, query, navigation]
+    );
+    const openCategory = useCallback((category) => navigation.navigate('Category', { category }), [navigation]);
+    const openCart = useCallback(() => navigation.navigate('Cart'), [navigation]);
 
-    const handleProductPress = (product) => {
-        navigation.navigate('ProductDetail', { product });
-    };
-
-    const handleBackPress = () => {
-        navigation.goBack();
-    };
-
-    const renderProduct = ({ item }) => {
-        const displayName = currentLanguage === 'hi' && item.translatedName 
-            ? item.translatedName 
-            : item.name;
-        
-        return (
-            <View style={styles.productWrapper}>
-                <ProductCard 
-                    product={{
-                        ...item,
-                        name: displayName
-                    }} 
-                    onPress={() => handleProductPress(item)} 
-                />
-            </View>
-        );
-    };
+    const bottomPad = TAB_BAR_SPACE + insets.bottom + space.lg;
+    // Keep showing the previous results while the next query is in flight.
+    const showingStale = loading && resultQuery && resultQuery !== trimmed;
+    // Same branches SearchResults renders; a change of state crossfades instead of popping.
+    const view = !trimmed
+        ? 'idle'
+        : loading && results.length === 0
+          ? 'loading'
+          : !loading && results.length === 0 && matchedCategories.length === 0
+            ? 'empty'
+            : 'results';
 
     return (
-        <SafeAreaView style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
-
-            {/* Search Header */}
-            <View style={[styles.searchHeader, { paddingTop: Math.max(insets.top, 8) + 8 }]}>
-                <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
-                    <MaterialCommunityIcons name="arrow-left" size={24} color={COLORS.text} />
-                </TouchableOpacity>
-                <View style={styles.searchInputContainer}>
-                    <MaterialCommunityIcons name="magnify" size={22} color={COLORS.textSecondary} />
-                    <TextInput
-                        style={styles.searchInput}
-                        placeholder="Search for products..."
-                        placeholderTextColor={COLORS.textSecondary}
-                        value={searchQuery}
-                        onChangeText={handleSearch}
-                        autoFocus
-                    />
-                    {searchQuery.length > 0 && (
-                        <TouchableOpacity onPress={() => handleSearch('')}>
-                            <MaterialCommunityIcons name="close-circle" size={20} color={COLORS.textSecondary} />
-                        </TouchableOpacity>
-                    )}
-                </View>
-            </View>
-
-            {showResults ? (
-                /* Search Results */
-                <FlatList
-                    data={searchResults}
-                    renderItem={renderProduct}
-                    keyExtractor={(item) => item.id}
-                    numColumns={2}
-                    contentContainerStyle={styles.resultGrid}
-                    showsVerticalScrollIndicator={false}
-                    ListEmptyComponent={() => (
-                        <View style={styles.emptyState}>
-                            <MaterialCommunityIcons
-                                name="magnify-close"
-                                size={60}
-                                color={COLORS.lightGray}
-                            />
-                            <Text style={styles.emptyTitle}>No results found</Text>
-                            <Text style={styles.emptySubtitle}>
-                                Try searching with a different keyword
-                            </Text>
-                        </View>
-                    )}
+        <Screen background="canvas">
+            <SearchHeader
+                ref={inputRef}
+                value={query}
+                onChangeText={setQuery}
+                onSubmit={onSubmit}
+                onBack={navigation.goBack}
+                onClear={onClear}
+                isHi={isHi}
+                fromRect={route?.params?.fromRect}
+            />
+            <ContentSwap stateKey={view} style={styles.fill}>
+            {trimmed ? (
+                <SearchResults
+                    query={showingStale ? resultQuery : trimmed}
+                    results={results}
+                    total={total}
+                    loading={loading}
+                    matchedCategories={matchedCategories}
+                    onProductPress={openProduct}
+                    onCategory={openCategory}
+                    onClear={onClear}
+                    isHi={isHi}
+                    bottomPad={bottomPad}
+                    onScroll={onScroll}
                 />
             ) : (
-                <View style={styles.searchSuggestions}>
-                    {/* Recent Searches */}
-                    <View style={styles.section}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Recent Searches</Text>
-                            <TouchableOpacity>
-                                <Text style={styles.clearText}>Clear</Text>
-                            </TouchableOpacity>
-                        </View>
-                        <View style={styles.tagsContainer}>
-                            {recentSearches.map((term, index) => (
-                                <TouchableOpacity
-                                    key={index}
-                                    style={styles.tag}
-                                    onPress={() => handleSearchPress(term)}
-                                >
-                                    <MaterialCommunityIcons
-                                        name="history"
-                                        size={16}
-                                        color={COLORS.textSecondary}
-                                    />
-                                    <Text style={styles.tagText}>{term}</Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                    </View>
-
-                    {/* Trending Searches */}
-                    <View style={styles.section}>
-                        <Text style={styles.sectionTitle}>Trending Searches</Text>
-                        <View style={styles.tagsContainer}>
-                            {trendingSearches.map((term, index) => (
-                                <TouchableOpacity
-                                    key={index}
-                                    style={[styles.tag, styles.trendingTag]}
-                                    onPress={() => handleSearchPress(term)}
-                                >
-                                    <MaterialCommunityIcons
-                                        name="trending-up"
-                                        size={16}
-                                        color={COLORS.secondary}
-                                    />
-                                    <Text style={[styles.tagText, styles.trendingText]}>{term}</Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                    </View>
-
-                    {/* Popular Categories */}
-                    <View style={styles.section}>
-                        <Text style={styles.sectionTitle}>Popular Categories</Text>
-                        <View style={styles.categoriesGrid}>
-                            {CATEGORIES.slice(0, 8).map((category) => (
-                                <TouchableOpacity
-                                    key={category.id}
-                                    style={[styles.categoryItem, { backgroundColor: category.color }]}
-                                    onPress={() => navigation.navigate('Category', { category })}
-                                >
-                                    <Text style={styles.categoryName} numberOfLines={2}>
-                                        {category.name}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                    </View>
-                </View>
+                <SearchIdle
+                    recent={recent}
+                    onClearRecent={clearRecent}
+                    onRemoveRecent={removeRecent}
+                    onTerm={runTerm}
+                    categories={categories}
+                    onCategory={openCategory}
+                    isHi={isHi}
+                    bottomPad={bottomPad}
+                    onScroll={onScroll}
+                />
             )}
-        </SafeAreaView>
+            </ContentSwap>
+            <FloatingCartBar onPress={openCart} bottomOffset={cartBarOffset} />
+        </Screen>
     );
 };
 
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: COLORS.white,
-    },
-    searchHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.border,
-    },
-    backButton: {
-        marginRight: 12,
-        padding: 4,
-    },
-    searchInputContainer: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: COLORS.background,
-        borderRadius: 10,
-        paddingHorizontal: 12,
-        height: 44,
-    },
-    searchInput: {
-        flex: 1,
-        fontSize: 15,
-        color: COLORS.text,
-        marginLeft: 10,
-    },
-    resultGrid: {
-        padding: 8,
-    },
-    productWrapper: {
-        flex: 1,
-        padding: 8,
-        maxWidth: '50%',
-    },
-    emptyState: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 60,
-    },
-    emptyTitle: {
-        fontSize: 18,
-        fontWeight: '600',
-        color: COLORS.text,
-        marginTop: 16,
-    },
-    emptySubtitle: {
-        fontSize: 14,
-        color: COLORS.textSecondary,
-        marginTop: 8,
-    },
-    searchSuggestions: {
-        flex: 1,
-        padding: 16,
-    },
-    section: {
-        marginBottom: 24,
-    },
-    sectionHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 12,
-    },
-    sectionTitle: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: COLORS.text,
-    },
-    clearText: {
-        fontSize: 13,
-        color: COLORS.secondary,
-        fontWeight: '600',
-    },
-    tagsContainer: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-    },
-    tag: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: COLORS.background,
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        borderRadius: 20,
-        marginRight: 10,
-        marginBottom: 10,
-    },
-    trendingTag: {
-        backgroundColor: '#E8F5E9',
-    },
-    tagText: {
-        fontSize: 13,
-        color: COLORS.textSecondary,
-        marginLeft: 6,
-    },
-    trendingText: {
-        color: COLORS.secondary,
-        fontWeight: '500',
-    },
-    categoriesGrid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        marginTop: 8,
-    },
-    categoryItem: {
-        width: '23%',
-        aspectRatio: 1,
-        borderRadius: 12,
-        padding: 8,
-        marginRight: '2%',
-        marginBottom: 8,
-        justifyContent: 'flex-end',
-    },
-    categoryName: {
-        fontSize: 11,
-        fontWeight: '600',
-        color: COLORS.text,
-        lineHeight: 14,
-    },
-});
+const styles = { fill: { flex: 1 } };
 
 export default SearchScreen;

@@ -1,39 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import {
-    View,
-    Text,
-    ScrollView,
-    StyleSheet,
-    TouchableOpacity,
-    SafeAreaView,
-    StatusBar,
-    TextInput,
-    Alert,
-    ActivityIndicator,
-    Modal,
-    Platform,
-} from 'react-native';
+import { Platform, View, ScrollView, TextInput } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useDispatch, useSelector } from 'react-redux';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-    Location01Icon,
-    Target01Icon,
-    Home01Icon,
-    Briefcase01Icon,
-    ShoppingBag01Icon,
-    ArrowLeft01Icon,
-    ArrowRight01Icon,
-    FlashIcon,
-    MoreVerticalIcon,
-    Navigation01Icon,
-    PencilEdit01Icon,
-    Delete02Icon,
-    CheckmarkCircle01Icon,
-    Cancel01Icon,
-} from 'hugeicons-react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
     setCurrentLocation,
     setSelectedAddress,
@@ -44,35 +16,45 @@ import {
 } from '../store/slices/locationSlice';
 import { UserService, searchPlaces } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
-
 import MapViewContainer from '../components/MapViewContainer';
+import {
+    AnimatedScreen,
+    BottomSheet,
+    Button,
+    Card,
+    ContentSwap,
+    EmptyState,
+    GlassSurface,
+    GradientHeader,
+    IconButton,
+    KeyboardLift,
+    Screen,
+    SkeletonGroup,
+    SkeletonListRow,
+    Text,
+    toast,
+} from '../components/ui';
+import { radii, space, type } from '../constants/theme';
+import { layout, makeStyles, useTheme } from '../theme';
+import { PlaceSuggestions } from './address/PlaceSuggestions';
+import { SavedAddressCard } from './address/SavedAddressCard';
+import { CurrentLocationRow } from './address/CurrentLocationRow';
+import { useServiceArea } from './address/useServiceArea';
+import { formatAddressLine } from './address/addressUtils';
 
-// Store Center Location for distance calculation
-const STORE_LOCATION = {
-    latitude: 26.7588,
-    longitude: 83.3700,
-    maxRadiusKm: 15.0,
-};
-
-const calculateDistanceKm = (lat1, lon1, lat2, lon2) => {
-    if (!lat1 || !lon1 || !lat2 || !lon2) return null;
-    const R = 6371; // Earth radius in km
-    const dLat = ((lat2 - lat1) * Math.PI) / 180;
-    const dLon = ((lon2 - lon1) * Math.PI) / 180;
-    const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos((lat1 * Math.PI) / 180) *
-        Math.cos((lat2 * Math.PI) / 180) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return parseFloat((R * c).toFixed(1));
-};
+// How long a swiped-away address can be restored before the delete reaches the server.
+const UNDO_MS = 4000;
+// Reanimated web scales a container whose size changes (text distorts): native-only there.
+const sizeLayout = Platform.OS === 'web' ? undefined : layout.list;
 
 const LocationScreen = ({ navigation }) => {
+    const styles = useStyles();
+    const { colors, headerThemes, isDark } = useTheme();
+    const header = headerThemes.default;
     const insets = useSafeAreaInsets();
     const dispatch = useDispatch();
     const { isHi } = useTranslation();
+    const serviceArea = useServiceArea();
 
     const { selectedAddress, savedAddresses, isLoading } = useSelector(
         (state) => state.location
@@ -82,10 +64,12 @@ const LocationScreen = ({ navigation }) => {
     const [isSearching, setIsSearching] = useState(false);
     const [isSearchingLoading, setIsSearchingLoading] = useState(false);
     const [isFetchingAddresses, setIsFetchingAddresses] = useState(false);
-    const [selectedAddressForAction, setSelectedAddressForAction] = useState(null);
-    const [actionModalVisible, setActionModalVisible] = useState(false);
+    const [pendingDelete, setPendingDelete] = useState(null);
+    const [barHeight, setBarHeight] = useState(0);
+    // Swipe-to-delete with undo: the address leaves the list at once, the server delete waits UNDO_MS.
+    const pendingSwipe = useRef(null);
 
-    // Live debounced search effect for Zepto-style address recommendations
+    // Live debounced search for address recommendations
     useEffect(() => {
         if (!searchQuery || searchQuery.trim().length < 2) {
             setSuggestions([]);
@@ -107,7 +91,7 @@ const LocationScreen = ({ navigation }) => {
             } finally {
                 setIsSearchingLoading(false);
             }
-        }, 500); // Increased debounce time to reduce API calls
+        }, 500); // debounce to reduce API calls
 
         return () => clearTimeout(timer);
     }, [searchQuery]);
@@ -154,7 +138,7 @@ const LocationScreen = ({ navigation }) => {
                     const normCity = (addr.city || '').toLowerCase().trim();
                     const key = `${normAddress}_${normCity}_${addr.type}`;
 
-                    if (!seen.has(key)) {
+                    if (!seen.has(key) && (addr._id || `saved-${index}`) !== pendingSwipe.current?.item.id) {
                         seen.add(key);
                         uniqueAddresses.push({
                             id: addr._id || `saved-${index}`,
@@ -252,12 +236,11 @@ const LocationScreen = ({ navigation }) => {
             const loc = await detectCurrentLocation();
             if (!loc) {
                 dispatch(setLoading(false));
-                Alert.alert(
-                    isHi ? 'अनुमति अस्वीकृत' : 'Permission Denied',
-                    isHi
+                toast.error(isHi ? 'अनुमति अस्वीकृत' : 'Location permission needed', {
+                    description: isHi
                         ? 'स्थान सेवा का उपयोग करने के लिए स्थान अनुमति आवश्यक है।'
-                        : 'Location permission is required to use this feature. Please enable it in settings.'
-                );
+                        : 'Allow location access in settings to use your current location.',
+                });
                 return;
             }
 
@@ -265,10 +248,9 @@ const LocationScreen = ({ navigation }) => {
             dispatch(setSelectedAddress(loc));
             dispatch(setLocationEnabled(true));
         } catch (error) {
-            Alert.alert(
-                isHi ? 'त्रुटि' : 'Error',
-                isHi ? 'आपका स्थान प्राप्त करने में विफल रहा।' : 'Failed to get your location. Please try again.'
-            );
+            toast.error(isHi ? 'स्थान नहीं मिला' : "Couldn't get your location", {
+                description: isHi ? 'कृपया फिर से प्रयास करें।' : 'Please try again.',
+            });
             console.error('Location error:', error);
         } finally {
             dispatch(setLoading(false));
@@ -309,9 +291,9 @@ const LocationScreen = ({ navigation }) => {
         }, [])
     );
 
-    const handleSelectAddress = (address) => {
+    const handleSelectAddress = useCallback((address) => {
         dispatch(setSelectedAddress(address));
-    };
+    }, [dispatch]);
 
     const handleMapPress = async (coords) => {
         if (!coords) return;
@@ -436,1240 +418,380 @@ const LocationScreen = ({ navigation }) => {
         navigation.navigate('AddAddress');
     };
 
-    const handleOpenActionMenu = (item, index) => {
-        setSelectedAddressForAction({ ...item, listIndex: index });
-        setActionModalVisible(true);
-    };
-
-    const handleEditAddress = () => {
-        setActionModalVisible(false);
-        if (!selectedAddressForAction) return;
+    const handleEditAddress = useCallback((item, index) => {
         navigation.navigate('AddAddress', {
-            editAddress: selectedAddressForAction,
-            addressIndex: selectedAddressForAction.originalIndex ?? selectedAddressForAction.listIndex,
+            editAddress: { ...item, listIndex: index },
+            addressIndex: item.originalIndex ?? index,
         });
-    };
+    }, [navigation]);
 
-    const handleDeleteAddress = () => {
-        setActionModalVisible(false);
-        if (!selectedAddressForAction) return;
-        const targetItem = selectedAddressForAction;
+    const handleRequestDelete = useCallback((item, index) => {
+        setPendingDelete({ ...item, listIndex: index });
+    }, []);
 
-        Alert.alert(
-            isHi ? 'पता हटाएं' : 'Delete Address',
-            isHi ? 'क्या आप निश्चित रूप से इस पते को हटाना चाहते हैं?' : 'Are you sure you want to delete this address?',
-            [
-                { text: isHi ? 'रद्द करें' : 'Cancel', style: 'cancel' },
-                {
-                    text: isHi ? 'हटाएं' : 'Delete',
-                    style: 'destructive',
-                    onPress: async () => {
-                        try {
-                            setIsFetchingAddresses(true);
-                            const targetIndex = targetItem.originalIndex ?? targetItem.listIndex;
-                            await UserService.removeAddress(targetIndex);
-
-                            dispatch(removeSavedAddress(targetItem.id));
-                            await fetchSavedAddresses();
-                            Alert.alert(
-                                isHi ? 'सफलता' : 'Success',
-                                isHi ? 'पता सफलतापूर्वक हटा दिया गया।' : 'Address deleted successfully.'
-                            );
-                        } catch (error) {
-                            console.error('Delete address failed:', error);
-                            Alert.alert(
-                                isHi ? 'त्रुटि' : 'Error',
-                                isHi ? 'पता हटाने में विफल।' : 'Failed to delete address.'
-                            );
-                        } finally {
-                            setIsFetchingAddresses(false);
-                        }
-                    },
-                },
-            ]
-        );
-    };
-
-    const handleSetDefaultAddress = async () => {
-        setActionModalVisible(false);
-        if (!selectedAddressForAction) return;
-
+    const handleDeleteAddress = async () => {
+        const targetItem = pendingDelete;
+        setPendingDelete(null);
+        if (!targetItem) return;
         try {
             setIsFetchingAddresses(true);
-            const targetIndex = selectedAddressForAction.originalIndex ?? selectedAddressForAction.listIndex;
-            await UserService.updateAddress(targetIndex, {
-                ...selectedAddressForAction,
-                isDefault: true,
-            });
+            const targetIndex = targetItem.originalIndex ?? targetItem.listIndex;
+            await UserService.removeAddress(targetIndex);
+
+            dispatch(removeSavedAddress(targetItem.id));
             await fetchSavedAddresses();
+            toast.success(isHi ? 'पता हटा दिया गया' : 'Address deleted');
         } catch (error) {
-            console.error('Set default address failed:', error);
+            console.error('Delete address failed:', error);
+            toast.error(isHi ? 'पता हटाने में विफल' : "Couldn't delete the address");
         } finally {
             setIsFetchingAddresses(false);
         }
     };
 
+    // --- Swipe to delete (optimistic, with Undo) -------------------------------------------
+    const latest = useRef({ savedAddresses, selectedAddress });
+    latest.current = { savedAddresses, selectedAddress, isHi };
+
+    const commitSwipeDelete = useCallback(async (entry) => {
+        clearTimeout(entry.timer);
+        if (pendingSwipe.current === entry) pendingSwipe.current = null;
+        const { item } = entry;
+        try {
+            // Server indices shift as addresses change, so resolve this one by id right before deleting.
+            let target = item.originalIndex ?? item.listIndex;
+            if (!String(item.id).startsWith('saved-')) {
+                const profile = await UserService.getProfile();
+                const list = profile?.addresses || [];
+                const at = list.findIndex((a) => a?._id === item.id);
+                if (at < 0) return; // already gone
+                target = at;
+            }
+            await UserService.removeAddress(target);
+        } catch (error) {
+            console.error('Delete address failed:', error);
+            toast.error(latest.current.isHi ? 'पता हटाने में विफल' : "Couldn't delete the address");
+        } finally {
+            fetchSavedAddressesRef.current();
+        }
+    }, []);
+
+    const handleSwipeDelete = useCallback((item, index) => {
+        if (pendingSwipe.current) commitSwipeDelete(pendingSwipe.current);
+        const { selectedAddress: prevSelected, savedAddresses: prevList } = latest.current;
+        const wasSelected = prevSelected?.id === item.id;
+        dispatch(removeSavedAddress(item.id));
+        if (wasSelected) dispatch(setSelectedAddress(prevList.find((a) => a.id !== item.id) || null));
+
+        const entry = { item: { ...item, listIndex: index } };
+        entry.timer = setTimeout(() => commitSwipeDelete(entry), UNDO_MS);
+        pendingSwipe.current = entry;
+
+        toast.show({
+            message: isHi ? 'पता हटा दिया गया' : 'Address deleted',
+            duration: UNDO_MS,
+            bottomOffset: Math.max(0, barHeight - insets.bottom) + space.sm,
+            action: {
+                label: isHi ? 'वापस लाएं' : 'Undo',
+                onPress: () => {
+                    if (pendingSwipe.current !== entry) return;
+                    clearTimeout(entry.timer);
+                    pendingSwipe.current = null;
+                    const now = latest.current.savedAddresses.filter((a) => a.id !== item.id);
+                    const restored = [...now.slice(0, index), item, ...now.slice(index)];
+                    dispatch(setSavedAddresses(restored));
+                    if (wasSelected) dispatch(setSelectedAddress(prevSelected));
+                },
+            },
+        });
+    }, [barHeight, commitSwipeDelete, dispatch, insets.bottom, isHi]);
+
+    // Leaving the screen ends the undo window: send the pending delete now.
+    useEffect(() => () => {
+        if (pendingSwipe.current) commitSwipeDelete(pendingSwipe.current);
+    }, [commitSwipeDelete]);
+
+    const handleSetDefaultAddress = useCallback(async (item, index) => {
+        try {
+            setIsFetchingAddresses(true);
+            const targetIndex = item.originalIndex ?? index;
+            await UserService.updateAddress(targetIndex, {
+                ...item,
+                isDefault: true,
+            });
+            await fetchSavedAddressesRef.current();
+        } catch (error) {
+            console.error('Set default address failed:', error);
+        } finally {
+            setIsFetchingAddresses(false);
+        }
+    }, []);
+
     // Address list to display (no hardcoded fallbacks — show empty state instead)
     const displayAddresses = savedAddresses || [];
 
     const currentDisplayAddr = selectedAddress || displayAddresses[0] || null;
+    const deliverable = serviceArea.isServiceable(currentDisplayAddr);
+    const currentDistance = serviceArea.distanceKm(currentDisplayAddr);
+
+    const addrState = isFetchingAddresses && displayAddresses.length === 0
+        ? 'loading'
+        : displayAddresses.length === 0 ? 'empty' : 'data';
 
     return (
-        <SafeAreaView style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor="#FAF8FF" />
-
-            {/* 1. HEADER */}
-            <View style={[styles.header, { paddingTop: Math.max(insets.top, 10) }]}>
-                <TouchableOpacity
-                    style={styles.backBtn}
-                    onPress={handleBack}
-                    activeOpacity={0.8}
-                >
-                    <ArrowLeft01Icon size={20} color="#1E1B4B" strokeWidth={2.2} />
-                </TouchableOpacity>
-                <View style={styles.headerTitleGroup}>
-                    <Text style={styles.headerTitle}>
-                        {isHi ? 'स्थान चुनें' : 'Select Location'}
-                    </Text>
-                    <Text style={styles.headerSubtitle}>
-                        {isHi ? 'अपना डिलीवरी स्थान चुनें' : 'Select your delivery location'}
-                    </Text>
-                </View>
-            </View>
-
-            <ScrollView
-                style={styles.scrollView}
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={styles.scrollContent}
-            >
-                {/* 2. SEARCH BAR */}
-                <View style={styles.searchCard}>
-                    <Location01Icon size={20} color="#7C3AED" strokeWidth={2} />
-                    <TextInput
-                        style={styles.searchInput}
-                        placeholder={
-                            isHi ? 'क्षेत्र, सड़क या लैंडमार्क खोजें' : 'Search area, street or landmark'
-                        }
-                        placeholderTextColor="#9CA3AF"
-                        value={searchQuery}
-                        onChangeText={setSearchQuery}
-                        onSubmitEditing={handleSearchSubmit}
-                        returnKeyType="search"
-                    />
-                    {searchQuery.length > 0 ? (
-                        <TouchableOpacity onPress={handleClearSearch} style={styles.clearSearchBtn}>
-                            <Cancel01Icon size={18} color="#6B7280" strokeWidth={2} />
-                        </TouchableOpacity>
-                    ) : (
-                        <TouchableOpacity onPress={handleEnableLocation} activeOpacity={0.7}>
-                            <Target01Icon size={20} color="#7C3AED" strokeWidth={2} />
-                        </TouchableOpacity>
-                    )}
-                </View>
-
-                {/* 3. DYNAMIC EXPANDED SEARCH SUGGESTIONS OVERLAY */}
-                {isSearching ? (
-                    <View style={styles.suggestionsContainer}>
-                        <View style={styles.suggestionsTitleRow}>
-                            <Text style={styles.suggestionsSectionHeader}>
-                                {isHi ? 'खोज परिणाम' : 'SEARCH RESULTS'}
-                            </Text>
-                            {isSearchingLoading && (
-                                <ActivityIndicator size="small" color="#7C3AED" style={{ marginLeft: 8 }} />
-                            )}
-                        </View>
-
-                        {suggestions.length === 0 && !isSearchingLoading ? (
-                            <View style={styles.emptySuggestionsBox}>
-                                <Text style={styles.emptySuggestionsText}>
-                                    {isHi
-                                        ? 'कोई स्थान नहीं मिला। कृपया दूसरा कीवर्ड खोजें।'
-                                        : 'No matching location found.'}
-                                </Text>
-                            </View>
-                        ) : (
-                            <View style={styles.suggestionsListGroup}>
-                                {suggestions.map((item, index) => {
-                                    const dist = item.distanceKm != null
-                                        ? item.distanceKm
-                                        : (item.latitude && item.longitude
-                                            ? calculateDistanceKm(
-                                                STORE_LOCATION.latitude,
-                                                STORE_LOCATION.longitude,
-                                                item.latitude,
-                                                item.longitude
-                                            )
-                                            : null);
-
-                                    const isDeliverable = dist === null || dist <= STORE_LOCATION.maxRadiusKm;
-
-                                    return (
-                                        <TouchableOpacity
-                                            key={item.placeId || index}
-                                            disabled={!isDeliverable}
-                                            style={[
-                                                styles.zeptoSuggestionCard,
-                                                !isDeliverable && styles.zeptoSuggestionCardDisabled,
-                                            ]}
-                                            onPress={() => isDeliverable && handleSelectSuggestion(item)}
-                                            activeOpacity={isDeliverable ? 0.75 : 1}
-                                        >
-                                            <View style={[styles.greenLocationBadge, !isDeliverable && styles.redLocationBadge]}>
-                                                <Location01Icon
-                                                    size={18}
-                                                    color={isDeliverable ? '#10B981' : '#EF4444'}
-                                                    strokeWidth={2.2}
-                                                />
-                                            </View>
-
-                                            <View style={styles.zeptoSuggestionTextGroup}>
-                                                <Text
-                                                    style={[
-                                                        styles.zeptoSuggestionTitle,
-                                                        !isDeliverable && styles.disabledText,
-                                                    ]}
-                                                    numberOfLines={1}
-                                                >
-                                                    {item.name}
-                                                </Text>
-                                                <Text
-                                                    style={[
-                                                        styles.zeptoSuggestionAddress,
-                                                        !isDeliverable && styles.disabledTextSecondary,
-                                                    ]}
-                                                >
-                                                    {item.formattedAddress}
-                                                </Text>
-                                                {dist !== null && (
-                                                    <View style={styles.distanceBadgeRow}>
-                                                        <Text
-                                                            style={[
-                                                                styles.zeptoDistanceTag,
-                                                                !isDeliverable && styles.zeptoDistanceTagRed,
-                                                            ]}
-                                                        >
-                                                            📍 {dist} km {isHi ? 'स्टोर से' : 'from store'}
-                                                            {!isDeliverable && (isHi ? ' (सीमा 10 km)' : ' (Max 10 km)')}
-                                                        </Text>
-                                                    </View>
-                                                )}
-                                            </View>
-
-                                            {!isDeliverable && (
-                                                <View style={styles.zeptoNotDeliverablePill}>
-                                                    <Text style={styles.zeptoNotDeliverableText}>
-                                                        {isHi ? 'डिलीवरी अनुपलब्ध' : 'Not Deliverable'}
-                                                    </Text>
-                                                </View>
-                                            )}
-                                        </TouchableOpacity>
-                                    );
-                                })}
-                            </View>
-                        )}
-                    </View>
-                ) : (
-                    <>
-                        {/* 4. USE MY CURRENT LOCATION BANNER */}
-                        <TouchableOpacity
-                            style={styles.currentLocationCard}
-                            activeOpacity={0.9}
-                            onPress={handleEnableLocation}
-                            disabled={isLoading}
-                        >
-                            <View style={styles.currentLocationLeft}>
-                                <View style={styles.navIconBadge}>
-                                    <Navigation01Icon size={20} color="#7C3AED" strokeWidth={2.2} />
-                                </View>
-                                <View style={styles.currentLocationTextGroup}>
-                                    <Text style={styles.currentLocationTitle}>
-                                        {isHi ? 'वर्तमान स्थान का उपयोग करें' : 'Use my current location'}
-                                    </Text>
-                                    <Text style={styles.currentLocationSubtitle}>
-                                        {isHi
-                                            ? 'हम आपके वर्तमान स्थान पर डिलीवरी करेंगे'
-                                            : "We'll deliver to your current location"}
-                                    </Text>
-                                    <View style={styles.expressTagRow}>
-                                        <FlashIcon size={13} color="#7C3AED" strokeWidth={2.5} />
-                                        <Text style={styles.expressTagText}>
-                                            {isHi ? '10 मिनट में डिलीवरी' : 'Delivering in 10 minutes'}
-                                        </Text>
-                                    </View>
-                                </View>
-                            </View>
-
-                            <View style={styles.useLocationBtn}>
-                                {isLoading ? (
-                                    <ActivityIndicator size="small" color="#FFFFFF" />
-                                ) : (
-                                    <Text style={styles.useLocationBtnText} numberOfLines={1}>
-                                        {isHi ? 'उपयोग करें' : 'Use'}
-                                    </Text>
-                                )}
-                            </View>
-                        </TouchableOpacity>
-
-                        {/* 5. SAVED ADDRESSES SECTION */}
-                        <View style={styles.savedSectionHeader}>
-                            <Text style={styles.savedSectionTitle}>
-                                {isHi ? 'सहेजे गए पते' : 'Saved Addresses'}
-                            </Text>
-                            <TouchableOpacity onPress={handleAddNewAddress} activeOpacity={0.7}>
-                                <Text style={styles.addNewLinkText}>
-                                    {isHi ? '+ नया जोड़ें' : '+ Add New'}
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-
-                        {/* Grouped Addresses Card */}
-                        <View style={styles.addressCardGroup}>
-                            {isFetchingAddresses ? (
-                                <View style={styles.loadingBox}>
-                                    <ActivityIndicator size="small" color="#7C3AED" />
-                                </View>
-                            ) : displayAddresses.length === 0 ? (
-                                <View style={styles.emptyAddressBox}>
-                                    <Home01Icon size={28} color="#C4B5FD" />
-                                    <Text style={styles.emptyAddressText}>
-                                        {isHi
-                                            ? 'कोई सहेजा गया पता नहीं। नया पता जोड़ें या अपने वर्तमान स्थान का उपयोग करें।'
-                                            : 'No saved addresses. Add a new address or use your current location.'}
-                                    </Text>
-                                </View>
-                            ) : (
-                                displayAddresses.map((item, index) => {
-                                    const isSelected =
-                                        selectedAddress?.id === item.id ||
-                                        (!selectedAddress && index === 0);
-                                    const isHome = item.type?.toLowerCase() === 'home';
-
-                                    return (
-                                        <View key={item.id || index}>
-                                            <TouchableOpacity
-                                                style={[
-                                                    styles.addressRowItem,
-                                                    isSelected && styles.addressRowItemSelected,
-                                                ]}
-                                                activeOpacity={0.8}
-                                                onPress={() => dispatch(setSelectedAddress(item))}
-                                            >
-                                                {/* Icon Badge */}
-                                                <View
-                                                    style={[
-                                                        styles.addressIconBg,
-                                                        {
-                                                            backgroundColor: isHome
-                                                                ? '#F3E8FF'
-                                                                : '#FCE7F3',
-                                                        },
-                                                    ]}
-                                                >
-                                                    {isHome ? (
-                                                        <Home01Icon size={18} color="#7C3AED" strokeWidth={2.2} />
-                                                    ) : (
-                                                        <Briefcase01Icon size={18} color="#EC4899" strokeWidth={2.2} />
-                                                    )}
-                                                </View>
-
-                                                {/* Content */}
-                                                <View style={styles.addressTextContent}>
-                                                    <View style={styles.addressTitleRow}>
-                                                        <Text style={styles.addressTypeTitle}>
-                                                            {item.type || (isHome ? 'Home' : 'Office')}
-                                                        </Text>
-                                                        {item.isDefault && (
-                                                            <View style={styles.defaultPill}>
-                                                                <Text style={styles.defaultPillText}>
-                                                                    {isHi ? 'डिफ़ॉल्ट' : 'Default'}
-                                                                </Text>
-                                                            </View>
-                                                        )}
-                                                    </View>
-                                                    <Text
-                                                        style={styles.addressFullText}
-                                                        numberOfLines={1}
-                                                    >
-                                                        {item.address}
-                                                        {item.city ? `, ${item.city}` : ''}
-                                                        {item.pincode ? ` - ${item.pincode}` : ''}
-                                                    </Text>
-                                                </View>
-
-                                                {/* More Options */}
-                                                <TouchableOpacity
-                                                    style={styles.moreIconBtn}
-                                                    activeOpacity={0.6}
-                                                    onPress={() => handleOpenActionMenu(item, index)}
-                                                >
-                                                    <MoreVerticalIcon size={18} color="#9CA3AF" strokeWidth={2} />
-                                                </TouchableOpacity>
-                                            </TouchableOpacity>
-
-                                            {index < displayAddresses.length - 1 && (
-                                                <View style={styles.addressRowDivider} />
-                                            )}
-                                        </View>
-                                    );
-                                })
-                            )}
-
-                            {/* Full Width "+ Add New Address" button inside Group */}
-                            <TouchableOpacity
-                                style={styles.innerAddAddressBtn}
-                                activeOpacity={0.8}
-                                onPress={handleAddNewAddress}
-                            >
-                                <Location01Icon size={18} color="#7C3AED" strokeWidth={2.2} />
-                                <Text style={styles.innerAddAddressText}>
-                                    {isHi ? 'नया पता जोड़ें' : 'Add New Address'}
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-
-                        {/* 6. REAL MAP PREVIEW CARD WITH 3D LOCATOR & FULL ADDRESS TOOLTIP */}
-                        <View style={styles.mapCardContainer}>
-                            <View style={styles.mapCanvas}>
-                                <MapViewContainer
-                                    latitude={currentDisplayAddr?.latitude}
-                                    longitude={currentDisplayAddr?.longitude}
-                                    addressText={[
-                                        currentDisplayAddr?.address,
-                                        currentDisplayAddr?.city,
-                                        currentDisplayAddr?.pincode ? `- ${currentDisplayAddr.pincode}` : ''
-                                    ].filter(Boolean).join(', ') || 'Medical Road, Gorakhpur - 273001'}
-                                    onMapPress={handleMapPress}
-                                />
-
-                                <TouchableOpacity
-                                    style={styles.locateMeBtn}
-                                    activeOpacity={0.85}
-                                    onPress={handleEnableLocation}
-                                >
-                                    <Target01Icon size={22} color="#FFFFFF" strokeWidth={2.2} />
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    </>
-                )}
-
-                <View style={{ height: 110 }} />
-            </ScrollView>
-
-            {/* 6. BOTTOM FLOATING "DELIVER HERE?" BAR */}
-            <View style={[styles.bottomBarWrapper, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-                <TouchableOpacity
-                    style={styles.deliverHereBanner}
-                    activeOpacity={0.9}
-                    onPress={handleConfirmLocation}
-                >
-                    <View style={styles.deliverLeftContent}>
-                        <View style={styles.bagIconBox}>
-                            <ShoppingBag01Icon size={22} color="#FFFFFF" strokeWidth={2.2} />
-                        </View>
-                        <View style={styles.deliverTextGroup}>
-                            <Text style={styles.deliverTitle}>
-                                {isHi ? 'यहाँ डिलीवरी करें?' : 'Deliver here?'}
-                            </Text>
-                            <Text style={styles.deliverSubtitle} numberOfLines={1}>
-                                {currentDisplayAddr?.address || 'Medical Road, Gorakhpur'}
-                            </Text>
-                        </View>
-                    </View>
-
-                    <View style={styles.confirmBtnPill}>
-                        <Text style={styles.confirmBtnText}>
-                            {isHi ? 'स्थान की पुष्टि करें' : 'Confirm Location'}
+        <Screen edges={[]} statusBar={header.statusBar} topInsetColor={header.bg}>
+            <AnimatedScreen>
+                {/* Plain surface header with the search field */}
+                <GradientHeader style={styles.header}>
+                    <View style={styles.headerRow}>
+                        <IconButton name="arrow-left" variant="ghost" accessibilityLabel={isHi ? 'वापस जाएं' : 'Go back'} onPress={handleBack} />
+                        <Text variant="h3" accessibilityRole="header" style={styles.flex}>
+                            {isHi ? 'कहाँ डिलीवर करें?' : 'Where should we deliver?'}
                         </Text>
-                        <ArrowRight01Icon size={16} color="#7C3AED" strokeWidth={2.5} />
                     </View>
-                </TouchableOpacity>
-            </View>
+                    <GlassSurface radius="input" bordered={false} style={styles.search}>
+                        <MaterialCommunityIcons name="magnify" size={20} color={colors.inkSecondary} />
+                        <TextInput
+                            style={styles.searchInput}
+                            placeholder={isHi ? 'क्षेत्र, सड़क या लैंडमार्क खोजें' : 'Search area, street or landmark'}
+                            placeholderTextColor={colors.inkMuted}
+                            selectionColor={colors.brand}
+                            keyboardAppearance={isDark ? 'dark' : 'light'}
+                            value={searchQuery}
+                            onChangeText={setSearchQuery}
+                            onSubmitEditing={handleSearchSubmit}
+                            returnKeyType="search"
+                            accessibilityLabel={isHi ? 'स्थान खोजें' : 'Search for a location'}
+                        />
+                        {searchQuery.length > 0 ? (
+                            <IconButton
+                                name="close"
+                                size="sm"
+                                variant="ghost"
+                                accessibilityLabel={isHi ? 'खोज साफ़ करें' : 'Clear search'}
+                                onPress={handleClearSearch}
+                            />
+                        ) : null}
+                    </GlassSurface>
+                </GradientHeader>
 
-            {/* 7. 3-DOTS ACTION SHEET MODAL (EDIT / DELETE) */}
-            <Modal
-                visible={actionModalVisible}
-                transparent
-                animationType="fade"
-                onRequestClose={() => setActionModalVisible(false)}
-            >
-                <TouchableOpacity
-                    style={styles.modalOverlay}
-                    activeOpacity={1}
-                    onPress={() => setActionModalVisible(false)}
-                >
-                    <View style={styles.actionSheetCard}>
-                        <View style={styles.actionSheetHeader}>
-                            <Text style={styles.actionSheetTitle}>
-                                {selectedAddressForAction?.type || 'Address'} {isHi ? 'विकल्प' : 'Options'}
-                            </Text>
-                            <Text style={styles.actionSheetSubtitle} numberOfLines={1}>
-                                {selectedAddressForAction?.address}
-                            </Text>
+                {/* Search results ⇄ map + saved addresses crossfade (no pop) */}
+                <ContentSwap stateKey={isSearching ? 'search' : 'list'} style={styles.flex}>
+                    {isSearching ? (
+                        <View style={styles.resultsWrap}>
+                            <PlaceSuggestions
+                                loading={isSearchingLoading}
+                                items={suggestions}
+                                onSelect={handleSelectSuggestion}
+                                distanceKm={serviceArea.distanceKm}
+                                radiusKm={serviceArea.radiusKm}
+                                isHi={isHi}
+                                style={styles.results}
+                            />
                         </View>
-
-                        <TouchableOpacity
-                            style={styles.actionItemRow}
-                            onPress={handleEditAddress}
-                            activeOpacity={0.7}
+                    ) : (
+                        <ScrollView
+                            style={styles.flex}
+                            showsVerticalScrollIndicator={false}
+                            keyboardShouldPersistTaps="handled"
+                            contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 140 }]}
                         >
-                            <PencilEdit01Icon size={20} color="#7C3AED" strokeWidth={2} />
-                            <Text style={styles.actionItemText}>
-                                {isHi ? 'पता अपडेट / संपादित करें' : 'Edit / Update Address'}
-                            </Text>
-                        </TouchableOpacity>
+                            <CurrentLocationRow
+                                loading={isLoading}
+                                onPress={handleEnableLocation}
+                                etaMinutes={serviceArea.etaMinutes}
+                                isHi={isHi}
+                            />
 
-                        {!selectedAddressForAction?.isDefault && (
-                            <TouchableOpacity
-                                style={styles.actionItemRow}
-                                onPress={handleSetDefaultAddress}
-                                activeOpacity={0.7}
-                            >
-                                <CheckmarkCircle01Icon size={20} color="#059669" strokeWidth={2} />
-                                <Text style={styles.actionItemText}>
-                                    {isHi ? 'डिफ़ॉल्ट के रूप में सेट करें' : 'Set as Default Address'}
-                                </Text>
-                            </TouchableOpacity>
-                        )}
+                            {/* Map preview of the chosen spot */}
+                            <Card padding={0} style={styles.mapCard}>
+                                <View style={styles.map}>
+                                    <MapViewContainer
+                                        latitude={currentDisplayAddr?.latitude}
+                                        longitude={currentDisplayAddr?.longitude}
+                                        addressText={formatAddressLine(currentDisplayAddr, { pincode: false }) || null}
+                                        onMapPress={handleMapPress}
+                                        storeLocation={serviceArea.store}
+                                    />
+                                </View>
+                            </Card>
 
-                        <TouchableOpacity
-                            style={[styles.actionItemRow, styles.actionItemRowDelete]}
-                            onPress={handleDeleteAddress}
-                            activeOpacity={0.7}
+                            {!deliverable ? (
+                                <Animated.View entering={layout.enter} exiting={layout.exit}>
+                                    <Card padding="md">
+                                        <EmptyState
+                                            compact
+                                            mood="sad"
+                                            title={isHi ? 'हम यहाँ अभी डिलीवर नहीं करते' : "We don't deliver here yet"}
+                                            subtitle={isHi
+                                                ? `यह स्थान स्टोर से ${currentDistance} किमी दूर है। ${serviceArea.radiusKm} किमी के भीतर कोई पता चुनें।`
+                                                : `This spot is ${currentDistance} km from our store. Pick an address within ${serviceArea.radiusKm} km.`}
+                                        />
+                                    </Card>
+                                </Animated.View>
+                            ) : null}
+
+                            {/* Saved addresses — slides as the warning above comes and goes */}
+                            <Animated.View layout={sizeLayout} style={styles.section}>
+                                <View style={styles.sectionHead}>
+                                    <Text variant="h3" accessibilityRole="header">{isHi ? 'सहेजे गए पते' : 'Saved addresses'}</Text>
+                                    <Button
+                                        label={isHi ? 'नया जोड़ें' : 'Add new'}
+                                        variant="ghost"
+                                        size="sm"
+                                        onPress={handleAddNewAddress}
+                                        leftIcon={({ color, size }) => <MaterialCommunityIcons name="plus" size={size} color={color} />}
+                                    />
+                                </View>
+
+                                <ContentSwap stateKey={addrState}>
+                                    {addrState === 'loading' ? (
+                                        <SkeletonGroup style={styles.skeletons}>
+                                            <SkeletonListRow />
+                                            <SkeletonListRow />
+                                        </SkeletonGroup>
+                                    ) : addrState === 'empty' ? (
+                                        <Card>
+                                            <EmptyState
+                                                compact
+                                                title={isHi ? 'कोई सहेजा पता नहीं' : 'No saved addresses yet'}
+                                                subtitle={isHi
+                                                    ? 'नया पता जोड़ें या अपने वर्तमान स्थान का उपयोग करें।'
+                                                    : 'Add a new address or use your current location.'}
+                                                actionLabel={isHi ? 'पता जोड़ें' : 'Add address'}
+                                                onAction={handleAddNewAddress}
+                                            />
+                                        </Card>
+                                    ) : (
+                                        <View style={styles.list}>
+                                            {displayAddresses.map((item, index) => (
+                                                <Animated.View
+                                                    key={item.id || index}
+                                                    entering={layout.enterAt(index)}
+                                                    exiting={layout.exit}
+                                                    layout={layout.list}
+                                                >
+                                                    <SavedAddressCard
+                                                        item={item}
+                                                        index={index}
+                                                        selected={selectedAddress ? selectedAddress.id === item.id : index === 0}
+                                                        distanceKm={serviceArea.distanceKm(item)}
+                                                        deliverable={serviceArea.isServiceable(item)}
+                                                        onSelect={handleSelectAddress}
+                                                        onEdit={handleEditAddress}
+                                                        onDelete={handleRequestDelete}
+                                                        onSwipeDelete={handleSwipeDelete}
+                                                        onMakeDefault={handleSetDefaultAddress}
+                                                        isHi={isHi}
+                                                    />
+                                                </Animated.View>
+                                            ))}
+                                        </View>
+                                    )}
+                                </ContentSwap>
+                            </Animated.View>
+                        </ScrollView>
+                    )}
+                </ContentSwap>
+
+                {/* Deliver here bar — rides the keyboard while the search field is focused */}
+                <KeyboardLift offset={insets.bottom} style={[styles.barDock, { pointerEvents: 'box-none' }]}>
+                    {!isSearching ? (
+                        <Animated.View
+                            entering={layout.enter}
+                            exiting={layout.exit}
+                            onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)}
+                            style={[styles.bar, { paddingBottom: insets.bottom + space.md }]}
                         >
-                            <Delete02Icon size={20} color="#EF4444" strokeWidth={2} />
-                            <Text style={[styles.actionItemText, styles.actionItemTextDelete]}>
-                                {isHi ? 'पता हटाएं' : 'Delete Address'}
-                            </Text>
-                        </TouchableOpacity>
+                            <View style={styles.barRow}>
+                                <View style={[styles.barIcon, !deliverable && styles.barIconOff]}>
+                                    <MaterialCommunityIcons
+                                        name={deliverable ? 'map-marker-check-outline' : 'map-marker-off-outline'}
+                                        size={20}
+                                        color={deliverable ? colors.inkSecondary : colors.errorInk}
+                                    />
+                                </View>
+                                <View style={styles.barTexts}>
+                                    <Text variant="caption" color="muted">{isHi ? 'यहाँ डिलीवरी करें' : 'Deliver to'}</Text>
+                                    <Text variant="bodyStrong" numberOfLines={1}>
+                                        {formatAddressLine(currentDisplayAddr, { pincode: false }) || (isHi ? 'कोई स्थान नहीं चुना गया' : 'No location selected')}
+                                    </Text>
+                                </View>
+                            </View>
+                            <Button
+                                label={deliverable ? (isHi ? 'स्थान की पुष्टि करें' : 'Confirm location') : (isHi ? 'डिलीवरी उपलब्ध नहीं' : 'Not deliverable')}
+                                size="lg"
+                                fullWidth
+                                disabled={!deliverable}
+                                onPress={handleConfirmLocation}
+                            />
+                        </Animated.View>
+                    ) : null}
+                </KeyboardLift>
+            </AnimatedScreen>
 
-                        <TouchableOpacity
-                            style={styles.actionCancelBtn}
-                            onPress={() => setActionModalVisible(false)}
-                            activeOpacity={0.8}
-                        >
-                            <Text style={styles.actionCancelText}>
-                                {isHi ? 'रद्द करें' : 'Cancel'}
-                            </Text>
-                        </TouchableOpacity>
+            <BottomSheet
+                visible={!!pendingDelete}
+                onClose={() => setPendingDelete(null)}
+                title={isHi ? 'यह पता हटाएं?' : 'Delete this address?'}
+                subtitle={pendingDelete ? formatAddressLine(pendingDelete) : undefined}
+                floating
+                footer={(
+                    <View style={styles.sheetActions}>
+                        <Button label={isHi ? 'रद्द करें' : 'Cancel'} variant="outline" style={styles.flex} onPress={() => setPendingDelete(null)} />
+                        <Button label={isHi ? 'हटाएं' : 'Delete'} variant="danger" style={styles.flex} onPress={handleDeleteAddress} />
                     </View>
-                </TouchableOpacity>
-            </Modal>
-        </SafeAreaView>
+                )}
+            />
+        </Screen>
     );
 };
 
 export default LocationScreen;
 
-const styles = StyleSheet.create({
-    modalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.45)',
-        justifyContent: 'flex-end',
-    },
-    actionSheetCard: {
-        backgroundColor: '#FFFFFF',
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        padding: 20,
-        paddingBottom: 34,
-    },
-    actionSheetHeader: {
-        borderBottomWidth: 1,
-        borderBottomColor: '#F3E8FF',
-        paddingBottom: 12,
-        marginBottom: 8,
-    },
-    actionSheetTitle: {
-        fontSize: 16,
-        fontWeight: '800',
-        color: '#111827',
-    },
-    actionSheetSubtitle: {
-        fontSize: 12,
-        color: '#6B7280',
-        marginTop: 2,
-    },
-    actionItemRow: {
+const useStyles = makeStyles((t) => ({
+    flex: { flex: 1 },
+    header: { gap: space.md, paddingBottom: space.lg, marginBottom: space.md },
+    headerRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginLeft: -space.xs },
+    search: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 14,
-        paddingHorizontal: 12,
-        borderRadius: 12,
-        gap: 12,
-        marginVertical: 2,
+        gap: space.sm,
+        minHeight: 48,
+        paddingLeft: space.lg,
+        paddingRight: space.xs,
+        backgroundColor: t.colors.surfaceSunken,
     },
-    actionItemRowDelete: {
-        backgroundColor: '#FEF2F2',
-        marginTop: 6,
+    searchInput: { flex: 1, ...type.body, color: t.colors.ink, paddingVertical: space.sm, outlineStyle: 'none' },
+    resultsWrap: { flex: 1, paddingHorizontal: space.lg, paddingBottom: space.lg },
+    results: { flexShrink: 1 },
+    content: { paddingHorizontal: space.lg, gap: space.lg },
+    mapCard: { overflow: 'hidden' },
+    map: { height: 200 },
+    section: { gap: space.lg },
+    sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: space.sm },
+    skeletons: { gap: space.md },
+    list: { gap: space.md },
+    barDock: { position: 'absolute', left: 0, right: 0, bottom: 0 },
+    bar: {
+        gap: space.md,
+        paddingHorizontal: space.lg,
+        paddingTop: space.lg,
+        backgroundColor: t.colors.surface,
+        borderTopLeftRadius: radii.sheet,
+        borderTopRightRadius: radii.sheet,
+        ...t.shadows.floating,
     },
-    actionItemText: {
-        fontSize: 14.5,
-        fontWeight: '700',
-        color: '#1F2937',
-    },
-    actionItemTextDelete: {
-        color: '#DC2626',
-    },
-    actionCancelBtn: {
-        marginTop: 16,
-        backgroundColor: '#F3F4F6',
-        borderRadius: 14,
-        paddingVertical: 13,
-        alignItems: 'center',
-    },
-    actionCancelText: {
-        fontSize: 14,
-        fontWeight: '700',
-        color: '#4B5563',
-    },
-    container: {
-        flex: 1,
-        backgroundColor: '#FAF8FF',
-    },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingBottom: 14,
-        backgroundColor: '#FAF8FF',
-    },
-    backBtn: {
-        width: 38,
-        height: 38,
-        borderRadius: 19,
-        backgroundColor: '#FFFFFF',
-        borderWidth: 1,
-        borderColor: '#F3E8FF',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: 12,
-
-        shadowColor: '#000000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.04,
-        shadowRadius: 6,
-        elevation: 2,
-    },
-    headerTitleGroup: {
-        flex: 1,
-    },
-    headerTitle: {
-        fontSize: 19,
-        fontWeight: '800',
-        color: '#111827',
-        letterSpacing: -0.4,
-    },
-    headerSubtitle: {
-        fontSize: 12,
-        color: '#6B7280',
-        fontWeight: '500',
-        marginTop: 1,
-    },
-    scrollView: {
-        flex: 1,
-    },
-    scrollContent: {
-        paddingHorizontal: 16,
-        paddingTop: 4,
-    },
-
-    /* SEARCH BAR */
-    searchCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#FFFFFF',
-        borderRadius: 16,
-        paddingHorizontal: 14,
-        height: 50,
-        borderWidth: 1,
-        borderColor: '#F3E8FF',
-        marginBottom: 16,
-
-        shadowColor: '#7C3AED',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.04,
-        shadowRadius: 8,
-        elevation: 2,
-    },
-    searchInput: {
-        flex: 1,
-        fontSize: 14,
-        fontWeight: '500',
-        color: '#111827',
-        marginLeft: 10,
-        marginRight: 8,
-    },
-    clearSearchBtn: {
-        padding: 4,
-    },
-
-    /* DYNAMIC SEARCH SUGGESTIONS OVERLAY */
-    suggestionsContainer: {
-        backgroundColor: '#FFFFFF',
-        borderRadius: 20,
-        padding: 16,
-        marginBottom: 20,
-        borderWidth: 1,
-        borderColor: '#E9D5FF',
-
-        shadowColor: '#7C3AED',
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.08,
-        shadowRadius: 12,
-        elevation: 4,
-    },
-    suggestionsTitleRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 12,
-    },
-    suggestionsSectionHeader: {
-        fontSize: 12,
-        fontWeight: '800',
-        color: '#7C3AED',
-        letterSpacing: 0.8,
-    },
-    emptySuggestionsBox: {
-        paddingVertical: 20,
-        alignItems: 'center',
-    },
-    emptySuggestionsText: {
-        fontSize: 13,
-        color: '#6B7280',
-        fontWeight: '500',
-    },
-    suggestionsListGroup: {
-        gap: 10,
-    },
-    zeptoSuggestionCard: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        backgroundColor: '#FFFFFF',
-        borderRadius: 16,
-        padding: 14,
-        borderWidth: 1,
-        borderColor: '#F3E8FF',
-
-        shadowColor: '#7C3AED',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.04,
-        shadowRadius: 6,
-        elevation: 2,
-    },
-    zeptoSuggestionCardDisabled: {
-        backgroundColor: '#F9FAFB',
-        borderColor: '#E5E7EB',
-        opacity: 0.6,
-    },
-    greenLocationBadge: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        backgroundColor: '#D1FAE5',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: 12,
-        marginTop: 2,
-    },
-    redLocationBadge: {
-        backgroundColor: '#FEE2E2',
-    },
-    zeptoSuggestionTextGroup: {
-        flex: 1,
-        marginRight: 8,
-    },
-    zeptoSuggestionTitle: {
-        fontSize: 15,
-        fontWeight: '700',
-        color: '#111827',
-        lineHeight: 20,
-    },
-    zeptoSuggestionAddress: {
-        fontSize: 12.5,
-        fontWeight: '400',
-        color: '#4B5563',
-        lineHeight: 18,
-        marginTop: 3,
-    },
-    disabledText: {
-        color: '#6B7280',
-    },
-    disabledTextSecondary: {
-        color: '#9CA3AF',
-    },
-    distanceBadgeRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginTop: 5,
-    },
-    zeptoDistanceTag: {
-        fontSize: 11.5,
-        fontWeight: '700',
-        color: '#059669',
-        backgroundColor: '#ECFDF5',
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: 6,
-        overflow: 'hidden',
-    },
-    zeptoDistanceTagRed: {
-        color: '#DC2626',
-        backgroundColor: '#FEF2F2',
-    },
-    zeptoNotDeliverablePill: {
-        backgroundColor: '#FEF2F2',
-        borderWidth: 1,
-        borderColor: '#FCA5A5',
-        borderRadius: 8,
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        alignSelf: 'flex-start',
-        marginTop: 2,
-    },
-    zeptoNotDeliverableText: {
-        fontSize: 11,
-        fontWeight: '700',
-        color: '#991B1B',
-    },
-
-    /* USE CURRENT LOCATION BANNER */
-    currentLocationCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        backgroundColor: '#F5F0FF',
-        borderWidth: 1,
-        borderColor: '#E9D5FF',
-        borderRadius: 20,
-        padding: 16,
-        marginBottom: 22,
-
-        shadowColor: '#7C3AED',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.05,
-        shadowRadius: 10,
-        elevation: 2,
-    },
-    currentLocationLeft: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        flex: 1,
-        marginRight: 10,
-    },
-    navIconBadge: {
-        width: 42,
-        height: 42,
-        borderRadius: 21,
-        backgroundColor: '#FFFFFF',
-        alignItems: 'center',
-        justifyContent: 'center',
-
-        shadowColor: '#7C3AED',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 4,
-        elevation: 2,
-    },
-    currentLocationTextGroup: {
-        marginLeft: 12,
-        flex: 1,
-    },
-    currentLocationTitle: {
-        fontSize: 15,
-        fontWeight: '800',
-        color: '#111827',
-        letterSpacing: -0.2,
-    },
-    currentLocationSubtitle: {
-        fontSize: 12,
-        color: '#6B7280',
-        fontWeight: '500',
-        marginTop: 2,
-    },
-    expressTagRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        marginTop: 6,
-    },
-    expressTagText: {
-        fontSize: 12,
-        fontWeight: '800',
-        color: '#7C3AED',
-    },
-    useLocationBtn: {
-        backgroundColor: '#7C3AED',
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        borderRadius: 12,
-        maxWidth: 100,
-        alignItems: 'center',
-        justifyContent: 'center',
-
-        shadowColor: '#7C3AED',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.25,
-        shadowRadius: 6,
-        elevation: 3,
-    },
-    useLocationBtnText: {
-        fontSize: 12,
-        fontWeight: '800',
-        color: '#FFFFFF',
-    },
-
-    /* SAVED ADDRESSES SECTION */
-    savedSectionHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 12,
-    },
-    savedSectionTitle: {
-        fontSize: 16,
-        fontWeight: '800',
-        color: '#111827',
-        letterSpacing: -0.3,
-    },
-    addNewLinkText: {
-        fontSize: 13,
-        fontWeight: '800',
-        color: '#7C3AED',
-    },
-    addressCardGroup: {
-        backgroundColor: '#FFFFFF',
-        borderRadius: 20,
-        borderWidth: 1,
-        borderColor: '#F3E8FF',
-        padding: 6,
-        marginBottom: 22,
-
-        shadowColor: '#000000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.03,
-        shadowRadius: 8,
-        elevation: 2,
-    },
-    loadingBox: {
-        padding: 24,
-        alignItems: 'center',
-    },
-    emptyAddressBox: {
-        padding: 28,
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 10,
-    },
-    emptyAddressText: {
-        fontSize: 13,
-        color: '#9CA3AF',
-        textAlign: 'center',
-        lineHeight: 19,
-    },
-    addressRowItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 12,
-        borderRadius: 14,
-    },
-    addressRowItemSelected: {
-        backgroundColor: '#FAF5FF',
-    },
-    addressIconBg: {
+    barRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+    barIcon: {
         width: 40,
         height: 40,
-        borderRadius: 20,
+        borderRadius: radii.well,
+        backgroundColor: t.colors.surfaceSunken,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    addressTextContent: {
-        flex: 1,
-        marginLeft: 12,
-        marginRight: 6,
-    },
-    addressTitleRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-    },
-    addressTypeTitle: {
-        fontSize: 15,
-        fontWeight: '800',
-        color: '#111827',
-    },
-    defaultPill: {
-        backgroundColor: '#EDE9FE',
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: 6,
-    },
-    defaultPillText: {
-        fontSize: 11,
-        fontWeight: '700',
-        color: '#7C3AED',
-    },
-    addressFullText: {
-        fontSize: 12,
-        color: '#6B7280',
-        fontWeight: '500',
-        marginTop: 3,
-    },
-    moreIconBtn: {
-        padding: 6,
-    },
-    addressRowDivider: {
-        height: 1,
-        backgroundColor: '#F3E8FF',
-        marginHorizontal: 12,
-    },
-    innerAddAddressBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        backgroundColor: '#F5F0FF',
-        borderWidth: 1,
-        borderColor: '#E9D5FF',
-        borderRadius: 14,
-        paddingVertical: 12,
-        marginTop: 6,
-    },
-    innerAddAddressText: {
-        fontSize: 13.5,
-        fontWeight: '800',
-        color: '#7C3AED',
-    },
-
-    /* MAP CARD & 3D LOCATOR WITH ADDRESS TOOLTIP */
-    mapCardContainer: {
-        borderRadius: 24,
-        overflow: 'hidden',
-        borderWidth: 1.5,
-        borderColor: '#E9D5FF',
-        backgroundColor: '#F5F0FF',
-        height: 280,
-        marginBottom: 20,
-
-        shadowColor: '#7C3AED',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.12,
-        shadowRadius: 16,
-        elevation: 4,
-    },
-    mapCanvas: {
-        flex: 1,
-        backgroundColor: '#EAE5F5',
-        position: 'relative',
-    },
-    mapOverlayVignette: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(124, 58, 237, 0.03)',
-    },
-    nativeMarkerContainer: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 260,
-        padding: 4,
-    },
-    centerLocatorWrapper: {
-        position: 'absolute',
-        top: 0,
-        bottom: 0,
-        left: 0,
-        right: 0,
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 9999,
-        elevation: 9999,
-    },
-    /* FLOATING CLEAN ADDRESS (NO HEAVY CONTAINER) */
-    floatingAddressWrapper: {
-        alignItems: 'center',
-        marginBottom: 8,
-        paddingHorizontal: 12,
-        maxWidth: '92%',
-        zIndex: 10000,
-        elevation: 10000,
-    },
-    addressTypeHeaderRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        backgroundColor: '#FFFFFF',
-        paddingHorizontal: 12,
-        paddingVertical: 5,
-        borderRadius: 20,
-        borderWidth: 1.5,
-        borderColor: '#E9D5FF',
-        marginBottom: 6,
-
-        shadowColor: '#7C3AED',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.15,
-        shadowRadius: 6,
-        elevation: 4,
-    },
-    addressTypeHeaderText: {
-        fontSize: 13,
-        fontWeight: '800',
-        color: '#7C3AED',
-        letterSpacing: -0.2,
-    },
-    floatingAddressText: {
-        fontSize: 12,
-        fontWeight: '700',
-        color: '#111827',
-        textAlign: 'center',
-        lineHeight: 16,
-        backgroundColor: 'rgba(255, 255, 255, 0.95)',
-        paddingHorizontal: 12,
-        paddingVertical: 5,
-        borderRadius: 10,
-        borderWidth: 1,
-        borderColor: '#F3E8FF',
-        overflow: 'hidden',
-
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
-    },
-
-    /* PURPLE PIN MARKER (MATCHING USER REFERENCE IMAGE) */
-    simpleLocatorContainer: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        position: 'relative',
-        marginTop: 4,
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 10000,
-        elevation: 10000,
-    },
-    purplePinBadge: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: '#7C3AED',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 2.5,
-        borderColor: '#FFFFFF',
-
-        shadowColor: '#5B21B6',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.35,
-        shadowRadius: 6,
-        elevation: 6,
-    },
-    pinTipArrow: {
-        width: 0,
-        height: 0,
-        backgroundColor: 'transparent',
-        borderStyle: 'solid',
-        borderLeftWidth: 5,
-        borderRightWidth: 5,
-        borderTopWidth: 7,
-        borderLeftColor: 'transparent',
-        borderRightColor: 'transparent',
-        borderTopColor: '#7C3AED',
-        marginTop: -1,
-    },
-    groundShadowDot: {
-        width: 14,
-        height: 4,
-        borderRadius: 7,
-        backgroundColor: 'rgba(91, 33, 182, 0.4)',
-        marginTop: 2,
-    },
-    locateMeBtn: {
-        position: 'absolute',
-        bottom: 14,
-        right: 14,
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#E11D48',
-
-        shadowColor: '#E11D48',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.35,
-        shadowRadius: 6,
-        elevation: 6,
-    },
-
-    /* BOTTOM FLOATING BAR */
-    bottomBarWrapper: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        paddingHorizontal: 12,
-        backgroundColor: 'transparent',
-    },
-    deliverHereBanner: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        backgroundColor: '#7C3AED',
-        borderRadius: 22,
-        paddingVertical: 10,
-        paddingHorizontal: 12,
-
-        shadowColor: '#7C3AED',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.35,
-        shadowRadius: 14,
-        elevation: 8,
-    },
-    deliverLeftContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        flex: 1,
-        marginRight: 8,
-    },
-    bagIconBox: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: 'rgba(255, 255, 255, 0.2)',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    deliverTextGroup: {
-        marginLeft: 8,
-        flex: 1,
-    },
-    deliverTitle: {
-        fontSize: 13.5,
-        fontWeight: '800',
-        color: '#FFFFFF',
-        letterSpacing: -0.2,
-    },
-    deliverSubtitle: {
-        fontSize: 11,
-        fontWeight: '500',
-        color: '#E9D5FF',
-        marginTop: 1,
-    },
-    confirmBtnPill: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        backgroundColor: '#FFFFFF',
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 12,
-        flexShrink: 1,
-    },
-    confirmBtnText: {
-        fontSize: 11.5,
-        fontWeight: '800',
-        color: '#7C3AED',
-        flexShrink: 1,
-    },
-});
+    barIconOff: { backgroundColor: t.colors.errorTint },
+    barTexts: { flex: 1, gap: space.xxs },
+    sheetActions: { flexDirection: 'row', gap: space.md },
+}));

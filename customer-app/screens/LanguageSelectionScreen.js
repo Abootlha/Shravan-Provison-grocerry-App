@@ -1,290 +1,162 @@
-import React, { useState } from 'react';
-import {
-    View,
-    Text,
-    StyleSheet,
-    TouchableOpacity,
-    StatusBar,
-    Animated,
-    Dimensions,
-} from 'react-native';
+/**
+ * LanguageSelectionScreen — flat auth canvas: AuthBar logo, a plain "Choose your language" headline
+ * (crossfades into the picked language), two selectable language cards (surface + hairline; selected =
+ * violet border + brand tint, spring check) and a Continue button pinned above the bottom safe area.
+ * No gradient hero, no mascot, no sticker (DESIGN.md "Auth/onboarding").
+ * Opened from Profile (`params.fromSettings`) it saves and goes back instead of onboarding.
+ * Theme: canvas + surface cards in both modes.
+ */
+import React, { useEffect, useState } from 'react';
+import { View } from 'react-native';
+import Animated, {
+    interpolateColor,
+    useAnimatedStyle,
+    useReducedMotion,
+    useSharedValue,
+    withSpring,
+    withTiming,
+} from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useDispatch } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { setLanguage } from '../store/slices/languageSlice';
-import { COLORS } from '../constants';
-
-const { width, height } = Dimensions.get('window');
+import { radii, space } from '../constants/theme';
+import { makeStyles, useTheme } from '../theme';
+import { springs, durations, easings } from '../theme/motion';
+import { Button, ContentSwap, PressableScale, Screen, Text, useStaggeredEntrance } from '../components/ui';
+import { AuthBar, AuthHeading } from './auth/AuthHero';
 
 const LANGUAGES = [
-    {
-        code: 'en',
-        name: 'English',
-        nativeName: 'English',
-        icon: 'alpha-e-circle',
-        gradient: ['#667eea', '#764ba2'],
-    },
-    {
-        code: 'hi',
-        name: 'Hindi',
-        nativeName: 'हिंदी',
-        icon: 'alpha-h-circle',
-        gradient: ['#f093fb', '#f5576c'],
-    },
+    { code: 'en', glyph: 'Aa', name: 'English', hint: 'Continue in English' },
+    { code: 'hi', glyph: 'अ', name: 'हिंदी', hint: 'हिंदी में जारी रखें' },
 ];
 
-const LanguageSelectionScreen = ({ navigation }) => {
-    const dispatch = useDispatch();
-    const [selectedLanguage, setSelectedLanguage] = useState('en');
-    const [scaleAnim] = useState(new Animated.Value(1));
+function LanguageCard({ lang, selected, onPress, index }) {
+    const styles = useStyles();
+    const { colors } = useTheme();
+    const reduce = useReducedMotion();
+    const on = useSharedValue(selected ? 1 : 0);
+    const check = useSharedValue(selected ? 1 : 0);
+    const enter = useStaggeredEntrance(index + 1, { delay: 70 });
 
-    const handleLanguageSelect = (code) => {
-        setSelectedLanguage(code);
-        // Animate selection
-        Animated.sequence([
-            Animated.timing(scaleAnim, {
-                toValue: 0.95,
-                duration: 100,
-                useNativeDriver: true,
-            }),
-            Animated.spring(scaleAnim, {
-                toValue: 1,
-                friction: 3,
-                useNativeDriver: true,
-            }),
-        ]).start();
-    };
+    useEffect(() => {
+        on.value = withTiming(selected ? 1 : 0, { duration: durations.fast, easing: easings.out });
+        check.value = reduce ? (selected ? 1 : 0) : withSpring(selected ? 1 : 0, springs.bouncy);
+    }, [selected, reduce, on, check]);
+
+    const cardStyle = useAnimatedStyle(() => ({
+        borderColor: interpolateColor(on.value, [0, 1], [colors.hairline, colors.accent]),
+        backgroundColor: interpolateColor(on.value, [0, 1], [colors.surface, colors.brandTint]),
+    }));
+    const checkStyle = useAnimatedStyle(() => ({
+        opacity: Math.min(1, check.value),
+        transform: [{ scale: 0.6 + check.value * 0.4 }],
+    }));
+    const ringStyle = useAnimatedStyle(() => ({ opacity: 1 - Math.min(1, check.value) }));
+
+    return (
+        <Animated.View style={enter}>
+            <PressableScale
+                onPress={onPress}
+                haptic="selection"
+                scaleTo={0.98}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: selected }}
+                accessibilityLabel={lang.name}
+            >
+                <Animated.View style={[styles.card, cardStyle]}>
+                    <View style={styles.glyph}>
+                        <Text variant="h2" color="ink">{lang.glyph}</Text>
+                    </View>
+                    <View style={styles.cardText}>
+                        <Text variant="h3">{lang.name}</Text>
+                        <Text variant="caption" color="muted">{lang.hint}</Text>
+                    </View>
+                    <View style={styles.checkBox}>
+                        <Animated.View style={[styles.ring, ringStyle]} />
+                        <Animated.View style={[styles.check, checkStyle]}>
+                            <MaterialCommunityIcons name="check" size={18} color={colors.onAccent} />
+                        </Animated.View>
+                    </View>
+                </Animated.View>
+            </PressableScale>
+        </Animated.View>
+    );
+}
+
+const LanguageSelectionScreen = ({ navigation, route }) => {
+    const styles = useStyles();
+    const dispatch = useDispatch();
+    const insets = useSafeAreaInsets();
+    const fromSettings = Boolean(route?.params?.fromSettings);
+    const current = useSelector((state) => state.language?.currentLanguage);
+    const [selectedLanguage, setSelectedLanguage] = useState(fromSettings && current ? current : 'en');
+    const isHi = selectedLanguage === 'hi';
+    const headEnter = useStaggeredEntrance(0, { delay: 70 });
 
     const handleContinue = () => {
         dispatch(setLanguage(selectedLanguage));
+        if (fromSettings && navigation.canGoBack()) {
+            navigation.goBack();
+            return;
+        }
         navigation.replace('Onboarding');
     };
 
     return (
-        <View style={styles.container}>
-            <StatusBar barStyle="light-content" backgroundColor={COLORS.primary} />
-            
-            {/* Background Decoration */}
-            <View style={styles.decorCircle1} />
-            <View style={styles.decorCircle2} />
-            
-            <View style={styles.content}>
-                {/* Header */}
-                <View style={styles.header}>
-                    <MaterialCommunityIcons 
-                        name="translate" 
-                        size={64} 
-                        color={COLORS.accent} 
-                    />
-                    <Text style={styles.title}>
-                        {selectedLanguage === 'hi' ? 'अपनी भाषा चुनें' : 'Select Your Language'}
-                    </Text>
-                    <Text style={styles.subtitle}>
-                        {selectedLanguage === 'hi' 
-                            ? 'अपनी पसंदीदा भाषा चुनें' 
-                            : 'Choose your preferred language'}
-                    </Text>
-                </View>
-
-                {/* Language Options */}
-                <View style={styles.languageContainer}>
-                    {LANGUAGES.map((lang, index) => {
-                        const isSelected = selectedLanguage === lang.code;
-                        return (
-                            <TouchableOpacity
-                                key={lang.code}
-                                style={[
-                                    styles.languageCard,
-                                    isSelected && styles.languageCardSelected,
-                                ]}
-                                onPress={() => handleLanguageSelect(lang.code)}
-                                activeOpacity={0.7}
-                            >
-                                <View style={styles.languageCardContent}>
-                                    <View style={[
-                                        styles.iconWrapper,
-                                        { backgroundColor: isSelected ? COLORS.accent + '20' : '#f5f5f5' }
-                                    ]}>
-                                        <MaterialCommunityIcons
-                                            name={lang.icon}
-                                            size={48}
-                                            color={isSelected ? COLORS.accent : '#666'}
-                                        />
-                                    </View>
-                                    <View style={styles.languageInfo}>
-                                        <Text style={[
-                                            styles.languageName,
-                                            isSelected && styles.languageNameSelected
-                                        ]}>
-                                            {lang.name}
-                                        </Text>
-                                        <Text style={[
-                                            styles.languageNative,
-                                            isSelected && styles.languageNativeSelected
-                                        ]}>
-                                            {lang.nativeName}
-                                        </Text>
-                                    </View>
-                                    {isSelected && (
-                                        <View style={styles.checkmark}>
-                                            <MaterialCommunityIcons
-                                                name="check-circle"
-                                                size={28}
-                                                color={COLORS.accent}
-                                            />
-                                        </View>
-                                    )}
-                                </View>
-                            </TouchableOpacity>
-                        );
-                    })}
-                </View>
-
-                {/* Continue Button */}
-                <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-                    <TouchableOpacity
-                        style={styles.continueButton}
-                        onPress={handleContinue}
-                        activeOpacity={0.85}
-                    >
-                        <Text style={styles.continueButtonText}>
-                            {selectedLanguage === 'hi' ? 'जारी रखें' : 'Continue'}
-                        </Text>
-                        <MaterialCommunityIcons
-                            name="arrow-right"
-                            size={24}
-                            color="#fff"
+        <Screen edges={[]} background="canvas">
+            <AuthBar
+                onBack={fromSettings && navigation.canGoBack() ? () => navigation.goBack() : undefined}
+                backLabel={isHi ? 'वापस जाएँ' : 'Go back'}
+            />
+            <View style={styles.body}>
+                <Animated.View style={headEnter}>
+                    <ContentSwap stateKey={selectedLanguage}>
+                        <AuthHeading
+                            title={isHi ? 'अपनी भाषा चुनें' : 'Choose your language'}
+                            subtitle={isHi ? 'आप इसे बाद में प्रोफ़ाइल में बदल सकते हैं' : 'You can change this later in your profile'}
                         />
-                    </TouchableOpacity>
+                    </ContentSwap>
                 </Animated.View>
+
+                <View style={styles.list} accessibilityRole="radiogroup">
+                    {LANGUAGES.map((lang, i) => (
+                        <LanguageCard
+                            key={lang.code}
+                            lang={lang}
+                            index={i}
+                            selected={selectedLanguage === lang.code}
+                            onPress={() => setSelectedLanguage(lang.code)}
+                        />
+                    ))}
+                </View>
             </View>
-        </View>
+
+            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, space.lg) }]}>
+                <Button size="lg" fullWidth label={isHi ? 'जारी रखें' : 'Continue'} onPress={handleContinue} />
+            </View>
+        </Screen>
     );
 };
 
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#fff',
-    },
-    decorCircle1: {
-        position: 'absolute',
-        top: -100,
-        right: -100,
-        width: 300,
-        height: 300,
-        borderRadius: 150,
-        backgroundColor: COLORS.primary + '15',
-    },
-    decorCircle2: {
-        position: 'absolute',
-        bottom: -80,
-        left: -80,
-        width: 250,
-        height: 250,
-        borderRadius: 125,
-        backgroundColor: COLORS.accent + '10',
-    },
-    content: {
-        flex: 1,
-        paddingHorizontal: 24,
-        paddingTop: 80,
-        paddingBottom: 40,
-        justifyContent: 'space-between',
-    },
-    header: {
-        alignItems: 'center',
-        marginBottom: 40,
-    },
-    title: {
-        fontSize: 32,
-        fontWeight: '800',
-        color: '#1a1a1a',
-        marginTop: 24,
-        marginBottom: 8,
-        textAlign: 'center',
-    },
-    subtitle: {
-        fontSize: 16,
-        color: '#666',
-        textAlign: 'center',
-        fontWeight: '500',
-    },
-    languageContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        gap: 16,
-    },
-    languageCard: {
-        backgroundColor: '#f8f8f8',
-        borderRadius: 20,
-        padding: 20,
-        borderWidth: 2,
-        borderColor: 'transparent',
-    },
-    languageCardSelected: {
-        backgroundColor: '#fff',
-        borderColor: COLORS.accent,
-        shadowColor: COLORS.accent,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 12,
-        elevation: 8,
-    },
-    languageCardContent: {
+const useStyles = makeStyles((t) => ({
+    body: { flex: 1, paddingHorizontal: space.lg, paddingTop: space.xl, gap: space['2xl'] },
+    list: { gap: space.md },
+    card: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 16,
+        gap: space.lg,
+        minHeight: 80,
+        padding: space.lg,
+        borderRadius: radii.card,
+        borderWidth: 1.5,
     },
-    iconWrapper: {
-        width: 80,
-        height: 80,
-        borderRadius: 20,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    languageInfo: {
-        flex: 1,
-    },
-    languageName: {
-        fontSize: 22,
-        fontWeight: '700',
-        color: '#333',
-        marginBottom: 4,
-    },
-    languageNameSelected: {
-        color: '#1a1a1a',
-    },
-    languageNative: {
-        fontSize: 18,
-        color: '#666',
-        fontWeight: '500',
-    },
-    languageNativeSelected: {
-        color: COLORS.accent,
-    },
-    checkmark: {
-        marginLeft: 'auto',
-    },
-    continueButton: {
-        backgroundColor: COLORS.primary,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 18,
-        borderRadius: 16,
-        gap: 12,
-        shadowColor: COLORS.primary,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-        elevation: 6,
-    },
-    continueButtonText: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#fff',
-        letterSpacing: 0.5,
-    },
-});
+    glyph: { width: 48, height: 48, borderRadius: radii.pill, backgroundColor: t.colors.surfaceSunken, alignItems: 'center', justifyContent: 'center' },
+    cardText: { flex: 1, gap: space.xxs },
+    checkBox: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
+    ring: { position: 'absolute', width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: t.colors.borderStrong },
+    check: { width: 28, height: 28, borderRadius: 14, backgroundColor: t.colors.accent, alignItems: 'center', justifyContent: 'center' },
+    footer: { paddingHorizontal: space.lg, paddingTop: space.md },
+}));
 
 export default LanguageSelectionScreen;
