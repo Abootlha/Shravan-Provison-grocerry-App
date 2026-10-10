@@ -112,4 +112,12 @@ export class CreateProductDto {
   @IsOptional()
   @IsBoolean()
   isAvailable?: boolean;
+
+  /**
+   * Run uploaded (data URI) images through background removal + pack-shot
+   * normalisation. Defaults to true when PRODUCT_IMAGE_BG_PROVIDER != 'none'.
+   */
+  @IsOptional()
+  @IsBoolean()
+  removeBackground?: boolean;
 }

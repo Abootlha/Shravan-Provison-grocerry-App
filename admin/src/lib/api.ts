@@ -304,6 +304,13 @@ export const api = {
     },
     getProduct: (id: string) => apiRequest(PRODUCT_SERVICE, `/products/${id}`),
     lookupBarcode: (barcode: string) => apiRequest(PRODUCT_SERVICE, `/products/barcode/${barcode}`),
+    getImageProcessingConfig: (): Promise<{ provider: 'none' | 'removebg' | 'local'; enabled: boolean }> =>
+        apiRequest(PRODUCT_SERVICE, '/products/image/processing-config'),
+    previewProductImage: (image: string, removeBackground = true): Promise<{
+        image: string; width: number; height: number; bytes: number;
+        provider: string; backgroundRemoved: boolean; warnings: string[];
+    }> =>
+        apiRequest(PRODUCT_SERVICE, '/products/image/preview', { method: 'POST', body: JSON.stringify({ image, removeBackground }) }),
     createProduct: (data: any) =>
         apiRequest(PRODUCT_SERVICE, '/products', { method: 'POST', body: JSON.stringify(data) }),
     updateProduct: (id: string, data: any) =>
