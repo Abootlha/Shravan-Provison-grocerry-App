@@ -138,6 +138,18 @@ export const locationApi = createClient(LOCATION_URL);
 
 [authApi, userApi, productApi, cartApi, orderApi, locationApi].forEach(attachAuthInterceptor);
 
+// Mock backend (see mocks/README.md): dev builds with EXPO_PUBLIC_MOCK_API=1, or
+// profiling release builds with EXPO_PUBLIC_PERF_MOCK=1. Both env vars are inlined
+// at bundle time; in a production bundle (neither set, `__DEV__` false) the condition
+// folds to `false`, so this branch and the mocks/ folder are stripped. Keep the
+// condition inline here (not in a helper) or Metro can no longer drop the require.
+if ((__DEV__ && process.env.EXPO_PUBLIC_MOCK_API === '1') || process.env.EXPO_PUBLIC_PERF_MOCK === '1') {
+    require('../mocks').installMockApi(
+        [authApi, userApi, productApi, cartApi, orderApi, locationApi],
+        { apiBaseUrl: require('./config').API_BASE_URL },
+    );
+}
+
 const api = authApi;
 
 export default api;
