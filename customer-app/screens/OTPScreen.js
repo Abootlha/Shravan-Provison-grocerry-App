@@ -1,148 +1,84 @@
-import React, { useState, useRef, useEffect } from 'react';
-import {
-    View,
-    Text,
-    StyleSheet,
-    TextInput,
-    TouchableOpacity,
-    StatusBar,
-    KeyboardAvoidingView,
-    Platform,
-    Animated,
-    Dimensions,
-    Alert,
-} from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+/**
+ * OTPScreen — 4-digit code on the flat auth canvas: AuthBar, a plain "Enter the 4-digit code" headline
+ * with the number it went to, and one surface card with the boxes, the resend countdown and Verify.
+ * One hidden input feeds the boxes (typing, SMS autofill and paste all work), the 4th digit
+ * auto-submits, a wrong code shakes the row with an error haptic. Verify/token/session logic unchanged.
+ * Motion: the bar stays fixed (fade transition) while the content slides in from the right;
+ * boxes pop in staggered; on success the boxes turn green, then the app opens (~0.45 s later).
+ */
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import Animated from 'react-native-reanimated';
+import { KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
 import { useDispatch } from 'react-redux';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { radii, space } from '../constants/theme';
+import { makeStyles } from '../theme';
+import { Button, Screen, Text, haptic, toast } from '../components/ui';
 import { setTokens } from '../services/tokenStorage';
 import { loginSuccess } from '../store/slices/authSlice';
 import { AuthService } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
+import { AuthBar, AuthHeading } from './auth/AuthHero';
+import { OtpBoxes } from './auth/OtpBoxes';
+import { ResendRing } from './auth/ResendRing';
+import { useSheetSlide } from './auth/authMotion';
 
-const { width, height } = Dimensions.get('window');
-
-// Matching palette from LoginScreen
-const PALETTE = {
-    charcoal: '#1C1917',
-    warmBlack: '#0C0A09',
-    coffee: '#292524',
-    sand: '#D6D3D1',
-    cream: '#FEF3E2',
-    terracotta: '#EA580C',
-    amber: '#F59E0B',
-    warmGray: '#78716C',
-    emerald: '#10B981',
-};
+const OTP_LENGTH = 4;
+const RESEND_SECONDS = 30;
+const SUCCESS_HOLD_MS = 450; // boxes turn green, then the app opens
 
 const OTPScreen = ({ navigation, route }) => {
+    const styles = useStyles();
+    const slide = useSheetSlide({ from: 1 });
     const { phoneNumber } = route.params;
-    const { t } = useTranslation();
+    const { t, isHi } = useTranslation();
     const dispatch = useDispatch();
+    const insets = useSafeAreaInsets();
+    const inputRef = useRef(null);
 
-    const [otp, setOtp] = useState(['', '', '', '']);
-    const [timer, setTimer] = useState(30);
+    const [otp, setOtp] = useState('');
+    const [timer, setTimer] = useState(RESEND_SECONDS);
     const [canResend, setCanResend] = useState(false);
     const [isVerifying, setIsVerifying] = useState(false);
+    const [isResending, setIsResending] = useState(false);
+    const [error, setError] = useState(null);
+    const [shakeKey, setShakeKey] = useState(0);
+    const [verified, setVerified] = useState(false);
 
-    const inputRefs = [useRef(), useRef(), useRef(), useRef()];
-
-    // Staggered entrance animations
-    const bgAnim = useRef(new Animated.Value(0)).current;
-    const decorAnim = useRef(new Animated.Value(0)).current;
-    const iconAnim = useRef(new Animated.Value(0)).current;
-    const titleAnim = useRef(new Animated.Value(0)).current;
-    const otpAnim = useRef(new Animated.Value(0)).current;
-    const buttonAnim = useRef(new Animated.Value(0)).current;
-    const buttonScale = useRef(new Animated.Value(1)).current;
-    const inputPulse = useRef(new Animated.Value(1)).current;
-
-    useEffect(() => {
-        Animated.stagger(80, [
-            Animated.timing(bgAnim, {
-                toValue: 1,
-                duration: 400,
-                useNativeDriver: true,
-            }),
-            Animated.spring(decorAnim, {
-                toValue: 1,
-                friction: 8,
-                useNativeDriver: true,
-            }),
-            Animated.spring(iconAnim, {
-                toValue: 1,
-                friction: 5,
-                useNativeDriver: true,
-            }),
-            Animated.spring(titleAnim, {
-                toValue: 1,
-                friction: 8,
-                useNativeDriver: true,
-            }),
-            Animated.spring(otpAnim, {
-                toValue: 1,
-                friction: 6,
-                useNativeDriver: true,
-            }),
-            Animated.spring(buttonAnim, {
-                toValue: 1,
-                friction: 6,
-                useNativeDriver: true,
-            }),
-        ]).start();
-    }, []);
+    // Hero stays still between Login and OTP: only the sheet content moves.
+    useLayoutEffect(() => {
+        navigation.setOptions?.({ animation: 'fade', animationDuration: 220 });
+    }, [navigation]);
 
     // Countdown timer
     useEffect(() => {
         if (timer > 0) {
             const interval = setInterval(() => {
-                setTimer(prev => prev - 1);
+                setTimer((prev) => prev - 1);
             }, 1000);
             return () => clearInterval(interval);
-        } else {
-            setCanResend(true);
         }
+        setCanResend(true);
+        return undefined;
     }, [timer]);
 
-    const handleOtpChange = (value, index) => {
-        const newOtp = [...otp];
-        newOtp[index] = value;
-        setOtp(newOtp);
-
-        if (value && index < 3) {
-            inputRefs[index + 1].current?.focus();
-        }
-
-        if (newOtp.every(digit => digit !== '') && newOtp.join('').length === 4) {
-            handleVerify(newOtp.join(''));
-        }
-    };
-
-    const handleKeyPress = (e, index) => {
-        if (e.nativeEvent.key === 'Backspace' && !otp[index] && index > 0) {
-            inputRefs[index - 1].current?.focus();
+    const handleOtpChange = (digits) => {
+        setOtp(digits);
+        if (error) setError(null);
+        if (digits.length === OTP_LENGTH) {
+            handleVerify(digits);
         }
     };
 
     const handleVerify = async (otpCode) => {
         if (isVerifying) return;
-        setIsVerifying(true);
 
-        Animated.sequence([
-            Animated.timing(buttonScale, {
-                toValue: 0.95,
-                duration: 80,
-                useNativeDriver: true,
-            }),
-            Animated.timing(buttonScale, {
-                toValue: 1,
-                duration: 80,
-                useNativeDriver: true,
-            }),
-        ]).start();
+        setIsVerifying(true);
 
         try {
             const response = await AuthService.verifyOtp(phoneNumber, otpCode);
+
             const tokens = {
                 accessToken: response.accessToken || response.tokens?.accessToken || null,
                 refreshToken: response.refreshToken || response.tokens?.refreshToken || null,
@@ -165,16 +101,22 @@ const OTPScreen = ({ navigation, route }) => {
                 refreshToken: tokens.refreshToken || null,
             }));
 
-            // Navigate to main
-            navigation.reset({
-                index: 0,
-                routes: [{ name: 'Main' }],
-            });
-        } catch (error) {
-            const errorMessage = error.response?.data?.message || 'Invalid OTP. Please try again.';
-            Alert.alert('Verification Failed', errorMessage);
-            setOtp(['', '', '', '']);
-            inputRefs[0].current?.focus();
+            haptic.success();
+            setVerified(true);
+            // Let the boxes turn green, then navigate to main
+            setTimeout(() => {
+                navigation.reset({
+                    index: 0,
+                    routes: [{ name: 'Main' }],
+                });
+            }, SUCCESS_HOLD_MS);
+        } catch (err) {
+            const errorMessage = err.response?.data?.message || (isHi ? 'गलत OTP। फिर से कोशिश करें।' : 'Wrong OTP. Please try again.');
+            haptic.error();
+            setError(errorMessage);
+            setShakeKey((k) => k + 1);
+            setOtp('');
+            inputRef.current?.focus();
         } finally {
             setIsVerifying(false);
         }
@@ -182,384 +124,110 @@ const OTPScreen = ({ navigation, route }) => {
 
     const handleResend = async () => {
         if (!canResend) return;
-
+        setIsResending(true);
         try {
             await AuthService.sendOtp(phoneNumber);
-            setTimer(30);
+            setTimer(RESEND_SECONDS);
             setCanResend(false);
-            setOtp(['', '', '', '']);
-            inputRefs[0].current?.focus();
-        } catch (error) {
-            Alert.alert('Error', 'Failed to resend OTP. Please try again.');
+            setOtp('');
+            setError(null);
+            inputRef.current?.focus();
+            toast.success(isHi ? 'नया OTP भेजा गया' : 'New code sent');
+        } catch (err) {
+            toast.error(isHi ? 'OTP दोबारा नहीं भेजा जा सका' : "Couldn't resend the OTP", {
+                description: isHi ? 'कृपया फिर से कोशिश करें।' : 'Please try again.',
+            });
+        } finally {
+            setIsResending(false);
         }
     };
 
-    const isComplete = otp.every(digit => digit !== '');
+    const isComplete = otp.length === OTP_LENGTH;
+    const prettyPhone = `+91 ${phoneNumber.slice(0, 5)} ${phoneNumber.slice(5)}`;
 
     return (
-        <View style={styles.container}>
-            <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+        <Screen edges={[]} background="canvas">
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
+                <AuthBar onBack={() => navigation.goBack()} backLabel={isHi ? 'वापस जाएँ' : 'Go back'} />
+                <ScrollView
+                    contentContainerStyle={[styles.scroll, { paddingBottom: Math.max(insets.bottom, space.lg) + space.sm }]}
+                    keyboardShouldPersistTaps="handled"
+                    bounces={false}
+                    showsVerticalScrollIndicator={false}
+                >
+                    <Animated.View style={[styles.body, slide.style]}>
+                        <AuthHeading
+                            title={isHi ? `${OTP_LENGTH} अंकों का कोड डालें` : `Enter the ${OTP_LENGTH}-digit code`}
+                            subtitle={`${t('otpSentTo')} ${prettyPhone}`}
+                        />
 
-            {/* Decorative background */}
-            <Animated.View
-                style={[
-                    styles.decorCircle1,
-                    {
-                        opacity: decorAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.05] }),
-                        transform: [{ scale: decorAnim }],
-                    },
-                ]}
-            />
-            <Animated.View
-                style={[
-                    styles.decorCircle2,
-                    {
-                        opacity: decorAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.04] }),
-                        transform: [{ scale: decorAnim }],
-                    },
-                ]}
-            />
-
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={styles.keyboardView}
-            >
-                {/* Header */}
-                <Animated.View style={[styles.header, { opacity: bgAnim }]}>
-                    <TouchableOpacity
-                        style={styles.backButton}
-                        onPress={() => navigation.goBack()}
-                    >
-                        <MaterialCommunityIcons name="arrow-left" size={22} color={PALETTE.sand} />
-                    </TouchableOpacity>
-                </Animated.View>
-
-                {/* Content */}
-                <View style={styles.content}>
-                    {/* Lock Icon */}
-                    <Animated.View
-                        style={[
-                            styles.iconContainer,
-                            {
-                                opacity: iconAnim,
-                                transform: [{ scale: iconAnim }],
-                            },
-                        ]}
-                    >
-                        <View style={styles.iconWrapper}>
-                            <MaterialCommunityIcons
-                                name="shield-lock"
-                                size={Math.min(width * 0.08, 32)}
-                                color={PALETTE.charcoal}
-                            />
-                        </View>
-                    </Animated.View>
-
-                    {/* Title */}
-                    <Animated.View
-                        style={{
-                            opacity: titleAnim,
-                            transform: [{
-                                translateY: titleAnim.interpolate({
-                                    inputRange: [0, 1],
-                                    outputRange: [20, 0],
-                                }),
-                            }],
-                        }}
-                    >
-                        <Text style={styles.title}>{t('enterOTP')}</Text>
-                        <Text style={styles.subtitle}>
-                            {t('otpSentTo')}{'\n'}
-                            <Text style={styles.phoneNumber}>+91 {phoneNumber}</Text>
-                        </Text>
-                    </Animated.View>
-
-                    {/* OTP Inputs */}
-                    <Animated.View
-                        style={[
-                            styles.otpContainer,
-                            {
-                                opacity: otpAnim,
-                                transform: [{
-                                    translateY: otpAnim.interpolate({
-                                        inputRange: [0, 1],
-                                        outputRange: [30, 0],
-                                    }),
-                                }],
-                            },
-                        ]}
-                    >
-                        {otp.map((digit, index) => (
-                            <TextInput
-                                key={index}
-                                ref={inputRefs[index]}
-                                style={[
-                                    styles.otpInput,
-                                    digit && styles.otpInputFilled,
-                                ]}
-                                value={digit}
-                                onChangeText={(value) => handleOtpChange(value, index)}
-                                onKeyPress={(e) => handleKeyPress(e, index)}
-                                keyboardType="number-pad"
-                                maxLength={1}
-                                autoFocus={index === 0}
-                                selectTextOnFocus
-                            />
-                        ))}
-                    </Animated.View>
-
-                    {/* Resend */}
-                    <Animated.View style={[styles.resendContainer, { opacity: otpAnim }]}>
-                        {canResend ? (
-                            <TouchableOpacity onPress={handleResend} style={styles.resendButton}>
-                                <MaterialCommunityIcons name="refresh" size={16} color={PALETTE.terracotta} />
-                                <Text style={styles.resendLink}>{t('resend')}</Text>
-                            </TouchableOpacity>
-                        ) : (
-                            <View style={styles.timerContainer}>
-                                <Text style={styles.resendText}>{t('resend')} </Text>
-                                <View style={styles.timerBadge}>
-                                    <Text style={styles.timerText}>{timer}s</Text>
+                        <View style={styles.card}>
+                            <View style={styles.otpBlock}>
+                                <OtpBoxes
+                                    value={otp}
+                                    onChange={handleOtpChange}
+                                    length={OTP_LENGTH}
+                                    error={Boolean(error)}
+                                    success={verified}
+                                    shakeKey={shakeKey}
+                                    inputRef={inputRef}
+                                    disabled={isVerifying || verified}
+                                    accessibilityLabel={isHi ? `${OTP_LENGTH} अंकों का OTP` : `${OTP_LENGTH}-digit code`}
+                                />
+                                <View style={styles.errorSlot} accessibilityLiveRegion="assertive">
+                                    {error ? <Text variant="label" color="error" align="center" accessibilityRole="alert">{error}</Text> : null}
                                 </View>
                             </View>
-                        )}
-                    </Animated.View>
-                </View>
 
-                {/* Verify Button */}
-                <Animated.View
-                    style={[
-                        styles.footer,
-                        {
-                            opacity: buttonAnim,
-                            transform: [
-                                { scale: buttonScale },
-                                {
-                                    translateY: buttonAnim.interpolate({
-                                        inputRange: [0, 1],
-                                        outputRange: [30, 0],
-                                    }),
-                                },
-                            ],
-                        },
-                    ]}
-                >
-                    <TouchableOpacity
-                        style={[
-                            styles.verifyButton,
-                            isComplete && styles.verifyButtonActive,
-                        ]}
-                        onPress={() => handleVerify(otp.join(''))}
-                        disabled={!isComplete || isVerifying}
-                        activeOpacity={0.85}
-                    >
-                        {isVerifying ? (
-                            <Text style={[styles.verifyText, styles.verifyTextActive]}>
-                                {t('verify')}...
-                            </Text>
-                        ) : (
-                            <>
-                                <Text style={[
-                                    styles.verifyText,
-                                    isComplete && styles.verifyTextActive,
-                                ]}>
-                                    {t('verify')}
-                                </Text>
-                                <View style={[
-                                    styles.checkWrapper,
-                                    isComplete && styles.checkWrapperActive,
-                                ]}>
-                                    <MaterialCommunityIcons
-                                        name="check"
-                                        size={18}
-                                        color={isComplete ? PALETTE.charcoal : PALETTE.warmGray}
-                                    />
-                                </View>
-                            </>
-                        )}
-                    </TouchableOpacity>
-                </Animated.View>
+                            <Button
+                                size="lg"
+                                fullWidth
+                                label={t('verify')}
+                                loading={isVerifying || verified}
+                                disabled={!isComplete || verified}
+                                onPress={() => handleVerify(otp)}
+                            />
+
+                            <ResendRing
+                                seconds={timer}
+                                total={RESEND_SECONDS}
+                                onResend={handleResend}
+                                loading={isResending}
+                                label={isHi ? 'OTP दोबारा भेजें' : 'Resend code'}
+                                waitingLabel={isHi ? 'दोबारा भेजें' : 'Resend code in'}
+                            />
+                        </View>
+
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            label={isHi ? 'नंबर बदलें' : 'Change number'}
+                            onPress={() => navigation.goBack()}
+                            style={styles.center}
+                        />
+                    </Animated.View>
+                </ScrollView>
             </KeyboardAvoidingView>
-        </View>
+        </Screen>
     );
 };
 
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: PALETTE.warmBlack,
-        overflow: 'hidden',
-    },
-    decorCircle1: {
-        position: 'absolute',
-        top: -height * 0.12,
-        right: -width * 0.25,
-        width: width * 0.7,
-        height: width * 0.7,
-        borderRadius: width * 0.35,
-        backgroundColor: PALETTE.emerald,
-    },
-    decorCircle2: {
-        position: 'absolute',
-        bottom: height * 0.25,
-        left: -width * 0.35,
-        width: width * 0.6,
-        height: width * 0.6,
-        borderRadius: width * 0.3,
-        backgroundColor: PALETTE.terracotta,
-    },
-    keyboardView: {
-        flex: 1,
-    },
-    header: {
-        paddingHorizontal: width * 0.05,
-        paddingTop: height * 0.07,
-        paddingBottom: height * 0.02,
-    },
-    backButton: {
-        width: Math.min(width * 0.12, 44),
-        height: Math.min(width * 0.12, 44),
-        borderRadius: 14,
-        backgroundColor: PALETTE.coffee,
-        alignItems: 'center',
-        justifyContent: 'center',
+const useStyles = makeStyles((t) => ({
+    flex: { flex: 1 },
+    scroll: { flexGrow: 1, paddingHorizontal: space.lg, paddingTop: space.lg },
+    body: { gap: space.xl },
+    card: {
+        backgroundColor: t.colors.surface,
+        borderRadius: radii.card,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
+        borderColor: t.colors.hairline,
+        padding: space.lg,
+        paddingTop: space.xl,
+        gap: space.md,
     },
-    content: {
-        flex: 1,
-        paddingHorizontal: width * 0.07,
-        justifyContent: 'center',
-    },
-    iconContainer: {
-        alignItems: 'center',
-        marginBottom: height * 0.03,
-    },
-    iconWrapper: {
-        width: Math.min(width * 0.16, 64),
-        height: Math.min(width * 0.16, 64),
-        borderRadius: 20,
-        backgroundColor: PALETTE.emerald,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    title: {
-        fontSize: Math.min(width * 0.065, 26),
-        fontWeight: '900',
-        color: PALETTE.cream,
-        textAlign: 'center',
-        marginBottom: height * 0.01,
-        letterSpacing: -0.5,
-    },
-    subtitle: {
-        fontSize: Math.min(width * 0.038, 15),
-        color: PALETTE.warmGray,
-        textAlign: 'center',
-        lineHeight: 22,
-        marginBottom: height * 0.04,
-    },
-    phoneNumber: {
-        color: PALETTE.cream,
-        fontWeight: '700',
-    },
-    otpContainer: {
-        flexDirection: 'row',
-        justifyContent: 'center',
-        gap: width * 0.035,
-        marginBottom: height * 0.035,
-    },
-    otpInput: {
-        width: Math.min(width * 0.16, 64),
-        height: Math.min(width * 0.16, 64),
-        borderRadius: 16,
-        backgroundColor: PALETTE.coffee,
-        borderWidth: 2,
-        borderColor: 'rgba(255,255,255,0.08)',
-        fontSize: Math.min(width * 0.065, 26),
-        fontWeight: '800',
-        textAlign: 'center',
-        color: PALETTE.cream,
-    },
-    otpInputFilled: {
-        borderColor: PALETTE.emerald,
-        backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    },
-    resendContainer: {
-        alignItems: 'center',
-    },
-    resendButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        paddingVertical: 10,
-        paddingHorizontal: 16,
-    },
-    resendText: {
-        fontSize: Math.min(width * 0.035, 14),
-        color: PALETTE.warmGray,
-    },
-    resendLink: {
-        fontSize: Math.min(width * 0.035, 14),
-        color: PALETTE.terracotta,
-        fontWeight: '700',
-    },
-    timerContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    timerBadge: {
-        backgroundColor: PALETTE.coffee,
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
-    },
-    timerText: {
-        fontSize: Math.min(width * 0.035, 14),
-        color: PALETTE.amber,
-        fontWeight: '700',
-    },
-    footer: {
-        paddingHorizontal: width * 0.07,
-        paddingBottom: height * 0.05,
-    },
-    verifyButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: PALETTE.coffee,
-        paddingVertical: height * 0.022,
-        paddingHorizontal: width * 0.02,
-        borderRadius: 16,
-        gap: width * 0.03,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.06)',
-    },
-    verifyButtonActive: {
-        backgroundColor: PALETTE.emerald,
-        borderColor: PALETTE.emerald,
-    },
-    verifyText: {
-        fontSize: Math.min(width * 0.043, 17),
-        fontWeight: '800',
-        color: PALETTE.warmGray,
-        letterSpacing: 0.5,
-    },
-    verifyTextActive: {
-        color: PALETTE.cream,
-    },
-    checkWrapper: {
-        width: Math.min(width * 0.08, 32),
-        height: Math.min(width * 0.08, 32),
-        borderRadius: 10,
-        backgroundColor: 'rgba(255,255,255,0.08)',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    checkWrapperActive: {
-        backgroundColor: PALETTE.cream,
-    },
-});
+    otpBlock: { gap: space.sm },
+    center: { alignSelf: 'center' },
+    errorSlot: { minHeight: 20 },
+}));
 
 export default OTPScreen;

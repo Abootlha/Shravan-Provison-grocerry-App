@@ -98,6 +98,10 @@ export default function ProductsManager() {
     const [scannerReady, setScannerReady] = useState(false);
     const [imageMode, setImageMode] = useState<'url' | 'file'>('url');
     const [imagePreview, setImagePreview] = useState<string>('');
+    // Background removal ("pack shot") for uploaded images, done by the backend on save.
+    const [bgConfig, setBgConfig] = useState<{ provider: string; enabled: boolean } | null>(null);
+    const [removeBg, setRemoveBg] = useState(false);
+    const [bgPreview, setBgPreview] = useState<{ before: string; after?: string; loading: boolean; error?: string }>({ before: '', loading: false });
     const scannerRef = useRef<Html5QrcodeInstance | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -128,6 +132,36 @@ export default function ProductsManager() {
     useEffect(() => {
         fetchData();
     }, [categoryFilter, page]);
+
+    useEffect(() => {
+        api.getImageProcessingConfig()
+            .then(cfg => setBgConfig(cfg))
+            .catch(() => setBgConfig({ provider: 'none', enabled: false }));
+    }, []);
+
+    function resetBgState() {
+        setRemoveBg(!!bgConfig?.enabled);
+        setBgPreview({ before: '', loading: false });
+    }
+
+    async function runBgPreview(source: string, enabled = removeBg) {
+        if (!enabled || !source.startsWith('data:')) {
+            setBgPreview({ before: source, loading: false });
+            return;
+        }
+        setBgPreview({ before: source, loading: true });
+        try {
+            const res = await api.previewProductImage(source, true);
+            setBgPreview({
+                before: source,
+                after: res.image,
+                loading: false,
+                error: res.backgroundRemoved ? undefined : (res.warnings?.[0] || 'Background could not be removed; the image will only be trimmed and squared.'),
+            });
+        } catch (err: any) {
+            setBgPreview({ before: source, loading: false, error: err?.message || 'Preview failed' });
+        }
+    }
 
     // Fetch subcategories when category changes
     useEffect(() => {
@@ -194,6 +228,7 @@ export default function ProductsManager() {
         });
         setImagePreview('');
         setImageMode('url');
+        resetBgState();
         setAvailableSubcategories([]);
         setAvailableItemGroups([]);
         setShowModal(true);
@@ -231,6 +266,7 @@ export default function ProductsManager() {
         });
         setImagePreview(product.image || '');
         setImageMode('url');
+        resetBgState();
         setShowModal(true);
     }
 
@@ -278,6 +314,8 @@ export default function ProductsManager() {
                     transFat: Number(form.transFat) || 0,
                 },
                 isAvailable: true,
+                // Uploaded images go through background removal + square pack-shot on the server.
+                removeBackground: !!bgConfig?.enabled && removeBg,
             };
             if (editProduct?._id) {
                 await api.updateProduct(editProduct._id, data);
@@ -320,6 +358,7 @@ export default function ProductsManager() {
                 const base64 = reader.result as string;
                 setImagePreview(base64);
                 setForm({ ...form, image: base64, images: [...(form.images || []), base64] });
+                runBgPreview(base64);
             };
             reader.readAsDataURL(file);
         }
@@ -1178,6 +1217,73 @@ export default function ProductsManager() {
                                                         ))}
                                                     </div>
                                                 )}
+
+                                                {/* Background removal */}
+                                                <div className="rounded-lg p-3 space-y-3" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
+                                                    <label className="flex items-start gap-3" style={{ cursor: bgConfig?.enabled ? 'pointer' : 'not-allowed' }}>
+                                                        <input
+                                                            type="checkbox"
+                                                            className="mt-0.5 h-4 w-4"
+                                                            checked={!!bgConfig?.enabled && removeBg}
+                                                            disabled={!bgConfig?.enabled}
+                                                            onChange={(e) => {
+                                                                setRemoveBg(e.target.checked);
+                                                                const latest = bgPreview.before;
+                                                                if (latest) runBgPreview(latest, e.target.checked);
+                                                            }}
+                                                        />
+                                                        <span className="text-sm">
+                                                            <span className="font-medium" style={{ color: bgConfig?.enabled ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                                                                Remove background
+                                                            </span>
+                                                            <span className="block text-xs" style={{ color: 'var(--text-muted)' }}>
+                                                                {bgConfig === null
+                                                                    ? 'Checking image processing settings…'
+                                                                    : bgConfig.enabled
+                                                                        ? 'Uploaded images are cut out, trimmed and centred on a square transparent canvas when you save. Image URLs are kept as they are.'
+                                                                        : 'Not configured on the server. Set PRODUCT_IMAGE_BG_PROVIDER (removebg or local) in the backend to enable it.'}
+                                                            </span>
+                                                        </span>
+                                                    </label>
+
+                                                    {bgPreview.before && !!bgConfig?.enabled && removeBg && (
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <figure className="space-y-1">
+                                                                <img
+                                                                    src={bgPreview.before}
+                                                                    alt="Before background removal"
+                                                                    className="w-full h-40 object-contain rounded-lg"
+                                                                    style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
+                                                                />
+                                                                <figcaption className="text-xs text-center" style={{ color: 'var(--text-muted)' }}>Before</figcaption>
+                                                            </figure>
+                                                            <figure className="space-y-1">
+                                                                <div
+                                                                    className="w-full h-40 rounded-lg flex items-center justify-center overflow-hidden"
+                                                                    style={{
+                                                                        border: '1px solid var(--border)',
+                                                                        backgroundColor: '#f4f1fb',
+                                                                        backgroundImage: 'linear-gradient(45deg, #e6e0f5 25%, transparent 25%), linear-gradient(-45deg, #e6e0f5 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e6e0f5 75%), linear-gradient(-45deg, transparent 75%, #e6e0f5 75%)',
+                                                                        backgroundSize: '16px 16px',
+                                                                        backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0',
+                                                                    }}
+                                                                >
+                                                                    {bgPreview.loading ? (
+                                                                        <span className="text-xs" style={{ color: '#5b5470' }}>Processing…</span>
+                                                                    ) : bgPreview.after ? (
+                                                                        <img src={bgPreview.after} alt="After background removal" className="w-full h-full object-contain" />
+                                                                    ) : (
+                                                                        <span className="text-xs px-2 text-center" style={{ color: '#5b5470' }}>No preview</span>
+                                                                    )}
+                                                                </div>
+                                                                <figcaption className="text-xs text-center" style={{ color: 'var(--text-muted)' }}>After (saved version)</figcaption>
+                                                            </figure>
+                                                            {bgPreview.error && (
+                                                                <p className="col-span-2 text-xs" style={{ color: 'var(--warning, #b45309)' }}>{bgPreview.error}</p>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
 
                                                 <div className="flex gap-2">
                                                     <button

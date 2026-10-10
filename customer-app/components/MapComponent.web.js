@@ -1,184 +1,138 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { COLORS } from '../constants';
-import { getMapmyIndiaMapUrl } from '../services/mapService';
+/**
+ * MapComponent (web) — embedded map with a fixed centre pin. Tap anywhere on the map
+ * to move the pin there: the pin lifts, the map recentres and the pin drops back.
+ * Same props as MapComponent.native.js; onMapPress receives { nativeEvent: { coordinate } }.
+ */
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { IconButton } from './ui';
+import { radii, space } from '../constants/theme';
+import { makeStyles, useTheme } from '../theme';
+import { getMapmyIndiaMapUrl, isMapMyIndiaConfigured } from '../services/mapService';
+import { DeliveryPin, DELIVERY_PIN_TIP } from '../screens/address/MapPins';
+import { WEB_DARK_MAP_FILTER } from './mapTheme';
 
-const DEFAULT_CENTER = {
-    latitude: 28.6139,
-    longitude: 77.2090,
+const DEFAULT_CENTER = { latitude: 26.6926, longitude: 83.4687 };
+const DEG_PER_PX = 0.0000175; // ≈ zoom 16
+
+// Tap point inside `node` (a DOM element on web), from a Pressable press event.
+const pointIn = (node, e) => {
+    const ev = e?.nativeEvent || {};
+    const x = ev.clientX ?? ev.pageX;
+    const y = ev.clientY ?? ev.pageY;
+    if (!node?.getBoundingClientRect || x == null || y == null) return null;
+    const r = node.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return { x: x - r.left, y: y - r.top, w: r.width, h: r.height };
 };
 
-const iframeBaseStyle = {
-    border: 0,
-    width: '100%',
-    height: '100%',
-};
+const iframeStyle = { border: 0, width: '100%', height: '100%', pointerEvents: 'none' };
+// Dark: the embeds have no dark layer, so re-tone them (see mapTheme.js).
+const iframeDarkStyle = { ...iframeStyle, filter: WEB_DARK_MAP_FILTER };
 
 const MapComponent = ({
     region,
     selectedLocation,
-    addressDetails,
     isLoading,
+    onMapPress,
     onCurrentLocationPress,
+    title,
+    hint,
 }) => {
+    const styles = useStyles();
+    const { colors, isDark } = useTheme();
     const center = selectedLocation || region || DEFAULT_CENTER;
-    const mapUrl = getMapmyIndiaMapUrl(
-        {
-            latitude: center.latitude,
-            longitude: center.longitude,
-        },
-        selectedLocation ? 16 : 13,
-        900,
-        420
-    );
+    const [size, setSize] = useState({ w: 0, h: 0 });
+    const [lifted, setLifted] = useState(false);
+    const dropTimer = useRef(null);
+    const boxRef = useRef(null);
+    useEffect(() => () => clearTimeout(dropTimer.current), []);
+
+    const cosLat = Math.cos((center.latitude * Math.PI) / 180);
+    const halfLng = (size.w / 2) * DEG_PER_PX;
+    const halfLat = (size.h / 2) * DEG_PER_PX * cosLat;
+
+    const url = isMapMyIndiaConfigured()
+        ? getMapmyIndiaMapUrl(center, 16, Math.round(size.w) || 600, Math.round(size.h) || 360)
+        : size.w
+            ? `https://www.openstreetmap.org/export/embed.html?bbox=${center.longitude - halfLng}%2C${center.latitude - halfLat}%2C${center.longitude + halfLng}%2C${center.latitude + halfLat}&layer=mapnik`
+            : null;
+
+    const handlePress = (e) => {
+        const p = pointIn(boxRef.current, e);
+        if (!onMapPress || !p) return;
+        const longitude = center.longitude + (p.x - p.w / 2) * DEG_PER_PX;
+        const latitude = center.latitude - (p.y - p.h / 2) * DEG_PER_PX * cosLat;
+        setLifted(true);
+        clearTimeout(dropTimer.current);
+        dropTimer.current = setTimeout(() => setLifted(false), 160);
+        onMapPress({ nativeEvent: { coordinate: { latitude, longitude } } });
+    };
 
     return (
-        <View style={styles.container}>
-            <View style={styles.previewShell}>
-                {mapUrl ? (
-                    <iframe
-                        key={`${center.latitude}-${center.longitude}`}
-                        src={mapUrl}
-                        title="ShravanKirana Delivery Map"
-                        style={iframeBaseStyle}
-                        loading="lazy"
-                        referrerPolicy="no-referrer-when-downgrade"
-                    />
-                ) : (
-                    <View style={styles.webNotice}>
-                        <MaterialCommunityIcons name="map-marker-radius" size={48} color="#E91E63" />
-                        <Text style={styles.webNoticeTitle}>Map is preparing</Text>
-                        <Text style={styles.webNoticeText}>
-                            We are loading the embedded Mappls view for this location.
-                        </Text>
-                    </View>
-                )}
+        <View ref={boxRef} style={styles.container} onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
+            {url ? (
+                <iframe
+                    key={`${center.latitude.toFixed(5)}-${center.longitude.toFixed(5)}-${Math.round(size.w)}`}
+                    src={url}
+                    title="Delivery location map"
+                    style={isDark ? iframeDarkStyle : iframeStyle}
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                />
+            ) : null}
 
+            <Pressable
+                onPress={handlePress}
+                style={StyleSheet.absoluteFill}
+                accessibilityRole="button"
+                accessibilityLabel="Map. Tap to move the delivery pin"
+            />
 
+            <View style={[styles.pinLayer, { pointerEvents: 'none' }]}>
+                <DeliveryPin lifted={lifted} title={title} hint={hint} />
             </View>
 
-            <TouchableOpacity style={styles.webGpsButton} onPress={onCurrentLocationPress}>
-                <MaterialCommunityIcons name="crosshairs-gps" size={20} color="#E91E63" />
-                <Text style={styles.webGpsButtonText}>Use Current Location</Text>
-            </TouchableOpacity>
-
-            {isLoading && (
-                <View style={styles.webLoadingContainer}>
-                    <ActivityIndicator size="large" color="#E91E63" />
-                    <Text style={styles.webLoadingText}>Getting location...</Text>
-                </View>
-            )}
+            <View style={styles.gps}>
+                {isLoading ? (
+                    <View style={styles.loading}>
+                        <ActivityIndicator size="small" color={colors.brandText} />
+                    </View>
+                ) : (
+                    <IconButton
+                        name="crosshairs-gps"
+                        variant="floating"
+                        size="lg"
+                        color={colors.brandText}
+                        accessibilityLabel="Use current location"
+                        onPress={onCurrentLocationPress}
+                    />
+                )}
+            </View>
         </View>
     );
 };
 
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        paddingHorizontal: 16,
-    },
-    previewShell: {
-        height: 350,
-        borderRadius: 18,
-        overflow: 'hidden',
-        backgroundColor: '#FFF8FA',
-        borderWidth: 1,
-        borderColor: '#FCE4EC',
-        marginBottom: 8,
-        position: 'relative',
-    },
-    webNotice: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 20,
-    },
-    webNoticeTitle: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: COLORS.text,
-        marginTop: 12,
-    },
-    webNoticeText: {
-        fontSize: 14,
-        color: COLORS.textSecondary,
-        textAlign: 'center',
-        marginTop: 8,
-        lineHeight: 20,
-    },
-    selectionPill: {
+const useStyles = makeStyles((t) => ({
+    container: { flex: 1, overflow: 'hidden', backgroundColor: t.colors.surfaceSunken },
+    pinLayer: {
         position: 'absolute',
-        left: 12,
-        top: 12,
-        flexDirection: 'row',
+        left: 0,
+        right: 0,
+        bottom: '50%',
+        marginBottom: -DELIVERY_PIN_TIP,
         alignItems: 'center',
-        gap: 6,
-        backgroundColor: 'rgba(255,255,255,0.94)',
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#F8BBD9',
     },
-    selectionPillText: {
-        fontSize: 12,
-        fontWeight: '700',
-        color: '#E91E63',
-    },
-    webLocationCard: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        padding: 16,
-        backgroundColor: '#FFF8FA',
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#FCE4EC',
-        marginBottom: 16,
-    },
-    webLocationDetails: {
-        flex: 1,
-        marginLeft: 12,
-    },
-    webLocationTitle: {
-        fontSize: 15,
-        fontWeight: '600',
-        color: COLORS.text,
-    },
-    webLocationSubtitle: {
-        fontSize: 13,
-        color: COLORS.textSecondary,
-        marginTop: 2,
-    },
-    webLocationCoords: {
-        fontSize: 11,
-        color: COLORS.textLight,
-        marginTop: 4,
-    },
-    webGpsButton: {
-        flexDirection: 'row',
+    gps: { position: 'absolute', right: space.lg, bottom: space['3xl'] + space.lg },
+    loading: {
+        width: 48,
+        height: 48,
+        borderRadius: radii.pill,
+        backgroundColor: t.colors.surface,
+        ...t.shadows.md,
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 14,
-        backgroundColor: '#FCE4EC',
-        borderRadius: 12,
-        gap: 8,
-        marginBottom: 12,
     },
-    webGpsButtonText: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#E91E63',
-    },
-    webLoadingContainer: {
-        alignItems: 'center',
-        paddingVertical: 30,
-    },
-    webLoadingText: {
-        fontSize: 14,
-        color: COLORS.textSecondary,
-        marginTop: 12,
-    },
-});
+}));
 
 export default MapComponent;

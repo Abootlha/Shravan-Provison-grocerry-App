@@ -1,105 +1,63 @@
-import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Animated } from 'react-native';
-
 /**
- * Animated Pulse Skeleton Card Placeholder for Progressive Horizontal Loading
+ * ProductCardSkeleton — bones that mirror ProductCard's geometry exactly (same outer size,
+ * square well, ADD overhang, price row, two name lines, meta row), so content swaps in
+ * without a jump.
+ *
+ * Props: variant ('default'|'regular'|'compact'|'large'), style (e.g. { width: '100%' }).
+ * Wrap several in one <SkeletonGroup> to share a shimmer clock; a lone skeleton makes its own.
  */
-const ProductCardSkeleton = () => {
-    const fadeAnim = useRef(new Animated.Value(0.4)).current;
+import React, { memo } from 'react';
+import { View } from 'react-native';
+import { Skeleton, SkeletonGroup } from './ui';
+import { space } from '../constants/theme';
+import { useTheme, makeStyles } from '../theme';
+import { PRODUCT_CARD_SIZES, CARD_PAD, CARD_RADIUS, WELL_RADIUS } from './ProductCard';
 
-    useEffect(() => {
-        const pulse = Animated.loop(
-            Animated.sequence([
-                Animated.timing(fadeAnim, {
-                    toValue: 0.9,
-                    duration: 650,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(fadeAnim, {
-                    toValue: 0.4,
-                    duration: 650,
-                    useNativeDriver: true,
-                }),
-            ])
-        );
-        pulse.start();
-        return () => pulse.stop();
-    }, [fadeAnim]);
-
+function ProductCardSkeleton({ variant = 'default', style }) {
+    const styles = useStyles();
+    const { colors } = useTheme();
+    const size = PRODUCT_CARD_SIZES[variant] || PRODUCT_CARD_SIZES.regular;
     return (
-        <View style={styles.container}>
-            {/* Image Placeholder */}
-            <Animated.View style={[styles.imageWrapper, { opacity: fadeAnim }]} />
-
-            {/* Details Section Placeholder */}
-            <View style={styles.details}>
-                {/* Price Row */}
-                <Animated.View style={[styles.pricePlaceholder, { opacity: fadeAnim }]} />
-                {/* Savings Pill */}
-                <Animated.View style={[styles.savingsPlaceholder, { opacity: fadeAnim }]} />
-                {/* Title Lines */}
-                <Animated.View style={[styles.titleLine1, { opacity: fadeAnim }]} />
-                <Animated.View style={[styles.titleLine2, { opacity: fadeAnim }]} />
-                {/* Unit */}
-                <Animated.View style={[styles.unitPlaceholder, { opacity: fadeAnim }]} />
+        <SkeletonGroup style={[styles.card, { width: size.width }, style]} accessibilityLabel="Loading product">
+            <View style={styles.well}>
+                <Skeleton width="100%" height="100%" radius={WELL_RADIUS} tint={colors.imageWell} />
             </View>
-        </View>
+            <View style={styles.body}>
+                <View style={styles.row}>
+                    <Skeleton width={40} height={14} />
+                    <Skeleton width={28} height={10} />
+                </View>
+                <View style={styles.lines}>
+                    <Skeleton width="92%" height={11} />
+                    <Skeleton width="60%" height={11} />
+                </View>
+                <View style={styles.meta}>
+                    <Skeleton width="48%" height={10} />
+                </View>
+            </View>
+        </SkeletonGroup>
     );
-};
+}
 
-const styles = StyleSheet.create({
-    container: {
-        width: 155,
-        height: 260,
-        backgroundColor: '#FFFFFF',
-        borderRadius: 14,
-        marginRight: 10,
-        marginBottom: 10,
+const useStyles = makeStyles((t) => ({
+    card: {
+        backgroundColor: t.colors.surface,
+        borderRadius: CARD_RADIUS,
         borderWidth: 1,
-        borderColor: '#F1F5F9',
-        overflow: 'hidden',
-        justifyContent: 'space-between',
+        borderColor: t.colors.hairline,
+        padding: CARD_PAD - 1,
+        marginRight: space.sm + 2,
+        marginBottom: space.sm + 2,
     },
-    imageWrapper: {
-        width: '100%',
-        height: 145,
-        backgroundColor: '#E2E8F0',
+    well: { width: '100%', aspectRatio: 1 },
+    body: {
+        paddingHorizontal: space.xs,
+        paddingTop: space.lg,
+        paddingBottom: space.xs,
     },
-    details: {
-        padding: 10,
-        gap: 6,
-    },
-    pricePlaceholder: {
-        width: '50%',
-        height: 16,
-        backgroundColor: '#E2E8F0',
-        borderRadius: 4,
-    },
-    savingsPlaceholder: {
-        width: '40%',
-        height: 12,
-        backgroundColor: '#F1F5F9',
-        borderRadius: 4,
-    },
-    titleLine1: {
-        width: '90%',
-        height: 12,
-        backgroundColor: '#E2E8F0',
-        borderRadius: 4,
-    },
-    titleLine2: {
-        width: '65%',
-        height: 12,
-        backgroundColor: '#E2E8F0',
-        borderRadius: 4,
-    },
-    unitPlaceholder: {
-        width: '35%',
-        height: 10,
-        backgroundColor: '#F1F5F9',
-        borderRadius: 4,
-        marginTop: 2,
-    },
-});
+    row: { flexDirection: 'row', alignItems: 'flex-end', gap: space.xs + 2, height: 20, paddingBottom: 3 },
+    lines: { gap: 7, marginTop: space.xxs, height: 36, justifyContent: 'center' },
+    meta: { height: 16, marginTop: space.xs, justifyContent: 'center' },
+}));
 
-export default ProductCardSkeleton;
+export default memo(ProductCardSkeleton);

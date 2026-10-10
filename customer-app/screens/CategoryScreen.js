@@ -1,36 +1,75 @@
-import React, { useState, useEffect } from 'react';
-import {
-    View,
-    Text,
-    FlatList,
-    StyleSheet,
-    TouchableOpacity,
-    SafeAreaView,
-    StatusBar,
-    ActivityIndicator,
-    ScrollView,
-    Image,
-} from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import React, { createContext, forwardRef, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
+import Animated from 'react-native-reanimated';
 import { useSelector } from 'react-redux';
-import { Header, ProductCard, FloatingCartBar } from '../components';
-import { COLORS, SHADOWS } from '../constants';
+import { AnimatedScreen, Chip, ContentSwap, EmptyState, GradientHeader, IconButton, Screen, SkeletonGroup, SkeletonProductTile, Text } from '../components/ui';
+import { ProductCard, FloatingCartBar } from '../components';
+import { space } from '../constants/theme';
+import { layout, stagger } from '../theme/motion';
+import { makeStyles, useTheme } from '../theme';
 import { ProductService } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
 import { translateToHindi } from '../services/translationService';
+import SubcategoryRail, { RAIL_WIDTH } from './categories/SubcategoryRail';
+import { discountOf, headerThemeFor, nameOf, toCardProduct } from './home/catalog';
+
+const GRID_PAD = space.md;
+const GRID_GAP = space.sm + space.xxs; // 10 — Part C #7 (8–10)
+
+const SORTS = [
+    { id: 'relevance', en: 'Relevance', hi: 'प्रासंगिक' },
+    { id: 'priceAsc', en: 'Price: low to high', hi: 'कम कीमत पहले' },
+    { id: 'priceDesc', en: 'Price: high to low', hi: 'ज़्यादा कीमत पहले' },
+    { id: 'discount', en: 'Biggest discount', hi: 'सबसे ज़्यादा छूट' },
+];
+
+const STAGGER_WINDOW = 600; // ms after a grid swap during which newly mounted cells stagger in
+
+/**
+ * Sort reorder: while `true`, every grid cell carries a LinearTransition, so changing the sort slides
+ * each card to its new slot (FlashList keeps one cell per product id once recycling is paused).
+ * Off the rest of the time, so FlashList's own measuring passes never animate.
+ */
+const ReorderContext = createContext(false);
+const ReorderCell = forwardRef((props, ref) => {
+    const reorder = useContext(ReorderContext);
+    return <Animated.View ref={ref} {...props} layout={reorder ? layout.list : undefined} />;
+});
+
+const GridItem = React.memo(({ item, index, width, language, onProductPress, enterAt }) => {
+    const styles = useStyles();
+    const product = useMemo(() => toCardProduct(item, language), [item, language]);
+    const onPress = useCallback(() => onProductPress(item), [onProductPress, item]);
+    // first screenful of a fresh grid staggers in (35ms apart, capped); later cells appear instantly
+    const [entering] = useState(() => (enterAt && index <= stagger.maxItems ? layout.enterAt(index) : undefined));
+    return (
+        <Animated.View entering={entering} style={[styles.cell, { width }]}>
+            <ProductCard product={product} onPress={onPress} style={{ width }} />
+        </Animated.View>
+    );
+});
 
 const CategoryScreen = ({ route, navigation }) => {
     const { category } = route.params;
-    const { currentLanguage } = useTranslation();
+    const { currentLanguage, isHi, t } = useTranslation();
+    const styles = useStyles();
+    const themeT = useTheme();
+    const { gradients } = themeT;
+    const { width } = useWindowDimensions();
+    const listRef = useRef(null);
+    const [reorder, setReorder] = useState(false);
+    const reorderTimer = useRef(null);
     const [selectedSubcategory, setSelectedSubcategory] = useState(null);
     const [subcategories, setSubcategories] = useState([]);
     const [products, setProducts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [sort, setSort] = useState('relevance');
+    const [inStockOnly, setInStockOnly] = useState(false);
 
-    // Get cart and location from Redux
+    // Get cart from Redux
     const cartItems = useSelector((state) => state.cart.totalItems);
-    const { selectedAddress } = useSelector((state) => state.location);
 
     useEffect(() => {
         fetchData();
@@ -65,8 +104,8 @@ const CategoryScreen = ({ route, navigation }) => {
                     subcats = await Promise.all(
                         subcats.map(async (subcat) => ({
                             ...subcat,
-                            translatedName: subcat.nameHi || await translateToHindi(subcat.name)
-                        }))
+                            translatedName: subcat.nameHi || (await translateToHindi(subcat.name)),
+                        })),
                     );
                 } catch (translationErr) {
                     console.error('Translation error during fetch:', translationErr);
@@ -95,9 +134,7 @@ const CategoryScreen = ({ route, navigation }) => {
             setLoading(true);
 
             // Fetch products for this subcategory or category
-            const params = isCategory
-                ? { categoryId: subcategoryId, limit: 100 }
-                : { subcategoryId, limit: 100 };
+            const params = isCategory ? { categoryId: subcategoryId, limit: 100 } : { subcategoryId, limit: 100 };
 
             const productsData = await ProductService.getProducts(params);
             let finalProducts = productsData.products || [];
@@ -108,8 +145,8 @@ const CategoryScreen = ({ route, navigation }) => {
                     finalProducts = await Promise.all(
                         finalProducts.map(async (prod) => ({
                             ...prod,
-                            translatedName: prod.nameHi || await translateToHindi(prod.name)
-                        }))
+                            translatedName: prod.nameHi || (await translateToHindi(prod.name)),
+                        })),
                     );
                 } catch (translationErr) {
                     console.error('Translation error during product fetch:', translationErr);
@@ -126,431 +163,214 @@ const CategoryScreen = ({ route, navigation }) => {
         }
     };
 
-    const handleProductPress = (product) => {
-        navigation.navigate('ProductDetail', { product });
-    };
+    const handleProductPress = useCallback((product) => navigation.navigate('ProductDetail', { product }), [navigation]);
+    const handleBackPress = () => navigation.goBack();
+    const handleSearchPress = () => navigation.navigate('Main', { screen: 'Search' });
+    const handleCartPress = () => navigation.navigate('Main', { screen: 'Cart' });
 
-    const handleBackPress = () => {
-        navigation.goBack();
-    };
+    // ---------------- presentation ----------------
 
-    const handleLocationPress = () => {
-        navigation.navigate('Location');
-    };
+    const theme = headerThemeFor(category, 0, themeT);
+    const title = nameOf(category, currentLanguage);
+    const gridW = width - (subcategories.length ? RAIL_WIDTH : 0);
+    const cardW = Math.floor((gridW - GRID_PAD * 2 - GRID_GAP) / 2);
 
-    const handleSearchPress = () => {
-        navigation.navigate('Main', { screen: 'Search' });
-    };
+    const visible = useMemo(() => {
+        let list = inStockOnly ? products.filter((p) => p.isAvailable && p.stock > 0) : products;
+        if (sort === 'priceAsc') list = [...list].sort((a, b) => (a.price || 0) - (b.price || 0));
+        else if (sort === 'priceDesc') list = [...list].sort((a, b) => (b.price || 0) - (a.price || 0));
+        else if (sort === 'discount') list = [...list].sort((a, b) => discountOf(b) - discountOf(a));
+        return list;
+    }, [products, sort, inStockOnly]);
 
-    const handleCartPress = () => {
-        navigation.navigate('Main', { screen: 'Cart' });
-    };
+    // Grid states crossfade through ContentSwap (6px rise): skeleton -> grid, and a new subcategory or
+    // stock filter is a new state. A sort change is NOT: the same cards slide to their new slots (ReorderCell).
+    const gridKey = loading ? 'loading' : `grid-${selectedSubcategory?._id || 'all'}-${inStockOnly ? 'stock' : 'any'}`;
+    const staggerUntil = useRef(0);
+    const lastGridKey = useRef(gridKey);
+    if (lastGridKey.current !== gridKey) {
+        lastGridKey.current = gridKey;
+        if (!loading) staggerUntil.current = Date.now() + STAGGER_WINDOW;
+    }
 
-    const CartBadge = () => (
-        <TouchableOpacity style={styles.cartButton} onPress={handleCartPress} activeOpacity={0.85}>
-            <View style={styles.cartIconWrapper}>
-                <MaterialCommunityIcons name="cart-outline" size={22} color={COLORS.text} />
-            </View>
-            {cartItems > 0 && (
-                <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{cartItems}</Text>
-                </View>
-            )}
-        </TouchableOpacity>
+    const onSortPress = useCallback(
+        (id) => {
+            if (id === sort) return;
+            clearTimeout(reorderTimer.current);
+            listRef.current?.prepareForLayoutAnimationRender?.();
+            setReorder(true);
+            // let the cells pick up their layout transition before they move
+            requestAnimationFrame(() => setSort(id));
+            reorderTimer.current = setTimeout(() => setReorder(false), 700);
+        },
+        [sort],
+    );
+    useEffect(() => () => clearTimeout(reorderTimer.current), []);
+
+    const renderItem = useCallback(
+        ({ item, index }) => (
+            <GridItem
+                item={item}
+                index={index}
+                width={cardW}
+                language={currentLanguage}
+                onProductPress={handleProductPress}
+                enterAt={Date.now() < staggerUntil.current}
+            />
+        ),
+        [cardW, currentLanguage, handleProductPress],
     );
 
-    const SearchButton = () => (
-        <TouchableOpacity style={styles.searchButton} onPress={handleSearchPress} activeOpacity={0.85}>
-            <View style={styles.searchIconWrapper}>
-                <MaterialCommunityIcons name="magnify" size={22} color={COLORS.text} />
-            </View>
-        </TouchableOpacity>
-    );
+    const subtitle = loading
+        ? isHi
+            ? 'लोड हो रहा है…'
+            : 'Loading…'
+        : `${visible.length} ${isHi ? 'आइटम' : visible.length === 1 ? 'item' : 'items'}${selectedSubcategory ? ` · ${nameOf(selectedSubcategory, currentLanguage)}` : ''}`;
 
-    const renderSubcategory = ({ item }) => {
-        const isSelected = selectedSubcategory?._id === item._id;
-        const displayName = currentLanguage === 'hi' && item.translatedName
-            ? item.translatedName
-            : item.name;
-
-        // Check if icon is a valid image URL or base64
-        // Skip base64 images that are too large (over 100KB)
-        const hasValidImage = item.icon && (
-            item.icon.startsWith('http') ||
-            (item.icon.startsWith('data:image/') && item.icon.length < 100000)
-        );
-
-        // Warn about large base64 images
-        if (item.icon && item.icon.startsWith('data:image/') && item.icon.length > 100000) {
-            console.warn(`Base64 image too large for ${item.name}: ${Math.round(item.icon.length / 1024)}KB. Please use an image URL or compress the image.`);
-        }
-
-        return (
-            <TouchableOpacity
-                style={[
-                    styles.subcategoryItem,
-                    isSelected && styles.subcategoryItemActive,
-                ]}
-                onPress={() => setSelectedSubcategory(item)}
-                activeOpacity={0.7}
-            >
-                {/* Subcategory Icon/Image */}
-                {hasValidImage ? (
-                    <Image
-                        source={{ uri: item.icon }}
-                        style={styles.subcategoryIcon}
-                        resizeMode="contain"
-                        onError={(e) => {
-                            console.log('Image load error for:', item.name);
-                        }}
+    const header = (
+        <GradientHeader gradient={gradients.header} rounded={false} style={styles.top}>
+            <View style={styles.topRow}>
+                <IconButton name="arrow-left" variant="floating" accessibilityLabel={isHi ? 'वापस जाएँ' : 'Go back'} onPress={handleBackPress} />
+                <View style={styles.topActions}>
+                    <IconButton name="magnify" variant="floating" accessibilityLabel={t('search')} onPress={handleSearchPress} />
+                    <IconButton
+                        name="shopping-outline"
+                        variant="floating"
+                        accessibilityLabel={`${t('cart')}${cartItems ? `, ${cartItems}` : ''}`}
+                        badge={cartItems}
+                        onPress={handleCartPress}
                     />
-                ) : (
-                    <View style={[
-                        styles.subcategoryIconPlaceholder,
-                        isSelected && styles.subcategoryIconPlaceholderActive
-                    ]}>
-                        <MaterialCommunityIcons
-                            name="package-variant"
-                            size={24}
-                            color={isSelected ? COLORS.secondary : COLORS.textSecondary}
-                        />
-                    </View>
-                )}
-
-                {/* Subcategory Name */}
-                <Text
-                    style={[
-                        styles.subcategoryText,
-                        isSelected && styles.subcategoryTextActive,
-                    ]}
-                    numberOfLines={2}
-                >
-                    {displayName}
-                </Text>
-
-                {/* Active Indicator */}
-                {isSelected && <View style={styles.activeIndicator} />}
-            </TouchableOpacity>
-        );
-    };
-
-    const renderProduct = ({ item }) => {
-        const displayName = currentLanguage === 'hi' && item.translatedName
-            ? item.translatedName
-            : item.name;
-
-        return (
-            <View style={styles.productWrapper}>
-                <ProductCard
-                    product={{
-                        id: item._id,
-                        name: displayName,
-                        price: item.price,
-                        originalPrice: item.originalPrice,
-                        unit: item.unit,
-                        image: item.image,
-                        categoryId: item.categoryId?._id || item.categoryId,
-                        inStock: item.isAvailable && item.stock > 0,
-                        discount: item.originalPrice > item.price
-                            ? Math.round((1 - item.price / item.originalPrice) * 100)
-                            : 0
-                    }}
-                    onPress={() => handleProductPress(item)}
-                />
+                </View>
             </View>
-        );
-    };
+            <View style={styles.titles}>
+                <Text variant="h1" color={theme.ink} numberOfLines={2} accessibilityRole="header">
+                    {title}
+                </Text>
+                <Text variant="caption" weight="medium" color={theme.inkSecondary} numberOfLines={1} style={styles.subtitle}>
+                    {subtitle}
+                </Text>
+            </View>
+        </GradientHeader>
+    );
 
     if (error) {
         return (
-            <View style={styles.container}>
-                <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
-                <Header
-                    showLocation
-                    showBack
-                    location={selectedAddress?.type || 'Home'}
-                    subtitle={selectedAddress ? `${selectedAddress.address}` : 'Select your location'}
-                    deliveryTime="10 mins"
-                    onBackPress={handleBackPress}
-                    onLocationPress={handleLocationPress}
-                    showProfileAndWallet={false}
-                    showCart={true}
-                    cartItems={cartItems}
-                    onCartPress={handleCartPress}
-                    bgImages={[
-                        require('../assets/basket1.png'),
-                        require('../assets/snacks.png'),
-                        require('../assets/personal-care.png'),
-                        require('../assets/rashan.png')
-                    ]}
-                    bgImageStyle={{ width: '100%', height: '100%' }}
-                >
-                    <View style={{ height: 25 }} />
-                </Header>
-                <View style={styles.errorContainer}>
-                    <MaterialCommunityIcons name="alert-circle-outline" size={64} color={COLORS.textSecondary} />
-                    <Text style={styles.errorText}>{error}</Text>
-                    <TouchableOpacity style={styles.retryButton} onPress={fetchData}>
-                        <Text style={styles.retryButtonText}>Retry</Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
+            <Screen edges={[]} statusBar={theme.statusBar} topInsetColor={theme.bg}>
+                {header}
+                <AnimatedScreen>
+                    <EmptyState
+                        mood="sad"
+                        title={isHi ? 'यह श्रेणी लोड नहीं हुई' : 'Couldn’t load this aisle'}
+                        subtitle={isHi ? 'इंटरनेट जाँचें और फिर कोशिश करें।' : 'Check your connection and try again.'}
+                        actionLabel={t('retry')}
+                        onAction={fetchData}
+                        style={styles.state}
+                    />
+                </AnimatedScreen>
+            </Screen>
         );
     }
 
     return (
-        <View style={styles.container}>
-            <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
-
-            {/* Reusable Header with Location and Back Button */}
-            <Header
-                showLocation
-                showBack
-                location={selectedAddress?.type || 'Home'}
-                subtitle={selectedAddress ? `${selectedAddress.address}` : 'Select your location'}
-                deliveryTime="10 mins"
-                onBackPress={handleBackPress}
-                onLocationPress={handleLocationPress}
-                showProfileAndWallet={false}
-                showCart={true}
-                cartItems={cartItems}
-                onCartPress={handleCartPress}
-                bgImages={[
-                    require('../assets/basket1.png'),
-                    require('../assets/snacks.png'),
-                    require('../assets/personal-care.png'),
-                    require('../assets/rashan.png')
-                ]}
-                bgImageStyle={{ width: '100%', height: '100%' }}
-            >
-                <View style={{ height: 25 }} />
-            </Header>
-
-            <View style={styles.content}>
-                {/* Left Sidebar - Subcategories */}
-                <View style={styles.sidebar}>
-                    <FlatList
-                        data={subcategories}
-                        renderItem={renderSubcategory}
-                        keyExtractor={(item) => item._id}
-                        showsVerticalScrollIndicator={false}
-                        contentContainerStyle={styles.subcategoryList}
+        <Screen edges={[]} statusBar={theme.statusBar} topInsetColor={theme.bg}>
+            {header}
+            <AnimatedScreen style={styles.content}>
+                {subcategories.length ? (
+                    <SubcategoryRail
+                        items={subcategories}
+                        selectedId={selectedSubcategory?._id}
+                        language={currentLanguage}
+                        onSelect={setSelectedSubcategory}
                     />
-                </View>
+                ) : null}
 
-                {/* Right Content - Products */}
-                <View style={styles.productsContainer}>
-                    {loading ? (
-                        <View style={styles.loadingContainer}>
-                            <ActivityIndicator size="large" color={COLORS.secondary} />
-                            <Text style={styles.loadingText}>Loading products...</Text>
-                        </View>
-                    ) : (
-                        <FlatList
-                            data={products}
-                            renderItem={renderProduct}
-                            keyExtractor={(item) => item._id}
-                            numColumns={2}
-                            contentContainerStyle={styles.productGrid}
-                            showsVerticalScrollIndicator={false}
-                            ListEmptyComponent={
-                                <View style={styles.emptyContainer}>
-                                    <MaterialCommunityIcons name="package-variant" size={64} color={COLORS.textSecondary} />
-                                    <Text style={styles.emptyText}>No products found</Text>
-                                    <Text style={styles.emptySubtext}>Check back later for new items</Text>
-                                </View>
-                            }
-                        />
-                    )}
-                </View>
-            </View>
+                <View style={styles.right}>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} style={styles.chipBar}>
+                        {SORTS.map((s) => (
+                            <Chip
+                                key={s.id}
+                                size="sm"
+                                label={isHi ? s.hi : s.en}
+                                selected={sort === s.id}
+                                onPress={() => onSortPress(s.id)}
+                            />
+                        ))}
+                        <Chip size="sm" label={isHi ? 'स्टॉक में' : 'In stock'} selected={inStockOnly} onPress={() => setInStockOnly((v) => !v)} />
+                    </ScrollView>
 
-            {/* Premium Floating Cart Bar */}
+                    <ContentSwap stateKey={gridKey} style={styles.grid}>
+                        {loading ? (
+                            <SkeletonGroup style={styles.skeletonGrid}>
+                                {Array.from({ length: 6 }).map((_, i) => (
+                                    <SkeletonProductTile key={i} width={cardW} />
+                                ))}
+                            </SkeletonGroup>
+                        ) : (
+                            <ReorderContext.Provider value={reorder}>
+                                <FlashList
+                                    ref={listRef}
+                                    data={visible}
+                                    renderItem={renderItem}
+                                    keyExtractor={productKey}
+                                    numColumns={2}
+                                    extraData={cardW}
+                                    CellRendererComponent={ReorderCell}
+                                    contentContainerStyle={styles.gridContent}
+                                    showsVerticalScrollIndicator={false}
+                                    ListEmptyComponent={
+                                        <EmptyState
+                                            compact
+                                            title={t('noProducts')}
+                                            subtitle={
+                                                inStockOnly
+                                                    ? isHi
+                                                        ? 'स्टॉक फ़िल्टर हटाकर देखें।'
+                                                        : 'Everything here is sold out right now. Clear the stock filter to see it all.'
+                                                    : isHi
+                                                      ? 'जल्द ही नया स्टॉक आएगा।'
+                                                      : 'New stock lands here soon. Try another aisle.'
+                                            }
+                                            actionLabel={inStockOnly ? (isHi ? 'फ़िल्टर हटाएँ' : 'Clear filter') : undefined}
+                                            onAction={inStockOnly ? () => setInStockOnly(false) : undefined}
+                                            style={styles.state}
+                                        />
+                                    }
+                                />
+                            </ReorderContext.Provider>
+                        )}
+                    </ContentSwap>
+                </View>
+            </AnimatedScreen>
+
+            {/* Floating cart bar (owned by the cart flow) */}
             <FloatingCartBar onPress={handleCartPress} />
-        </View>
+        </Screen>
     );
 };
 
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: COLORS.white,
-    },
-    headerRight: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    searchButton: {
-        marginRight: 6,
-    },
-    searchIconWrapper: {
-        width: 38,
-        height: 38,
-        borderRadius: 12,
-        backgroundColor: COLORS.white,
-        alignItems: 'center',
-        justifyContent: 'center',
-        ...SHADOWS.light,
-    },
-    cartButton: {
-        position: 'relative',
-    },
-    cartIconWrapper: {
-        width: 38,
-        height: 38,
-        borderRadius: 12,
-        backgroundColor: COLORS.white,
-        alignItems: 'center',
-        justifyContent: 'center',
-        ...SHADOWS.light,
-    },
-    badge: {
-        position: 'absolute',
-        top: -3,
-        right: -3,
-        backgroundColor: '#E53935',
-        borderRadius: 10,
-        minWidth: 18,
-        height: 18,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 4,
-        borderWidth: 1.5,
-        borderColor: COLORS.white,
-    },
-    badgeText: {
-        color: COLORS.white,
-        fontSize: 11,
-        fontWeight: '700',
-    },
+const productKey = (item) => String(item._id);
+
+const useStyles = makeStyles((t) => ({
+    top: { paddingHorizontal: space.gutter, paddingBottom: space.lg },
+    topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    topActions: { flexDirection: 'row', gap: space.sm },
+    titles: { marginTop: space.md },
+    subtitle: { marginTop: space.xxs },
     content: {
         flex: 1,
         flexDirection: 'row',
+        backgroundColor: t.colors.canvas,
+        borderTopWidth: StyleSheet.hairlineWidth * 2,
+        borderTopColor: t.colors.hairline,
     },
-    sidebar: {
-        width: 100,
-        backgroundColor: '#F8F8F8',
-        borderRightWidth: 1,
-        borderRightColor: COLORS.border,
-    },
-    subcategoryList: {
-        paddingVertical: 8,
-    },
-    subcategoryItem: {
-        paddingVertical: 16,
-        paddingHorizontal: 8,
-        alignItems: 'center',
-        justifyContent: 'center',
-        position: 'relative',
-        backgroundColor: 'transparent',
-    },
-    subcategoryItemActive: {
-        backgroundColor: COLORS.white,
-    },
-    subcategoryIcon: {
-        width: 48,
-        height: 48,
-        marginBottom: 8,
-        borderRadius: 8,
-    },
-    subcategoryIconPlaceholder: {
-        width: 48,
-        height: 48,
-        marginBottom: 8,
-        borderRadius: 8,
-        backgroundColor: '#F0F0F0',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    subcategoryIconPlaceholderActive: {
-        backgroundColor: '#E8F5E9',
-    },
-    subcategoryText: {
-        fontSize: 11,
-        fontWeight: '500',
-        color: COLORS.textSecondary,
-        textAlign: 'center',
-        lineHeight: 14,
-    },
-    subcategoryTextActive: {
-        color: COLORS.secondary,
-        fontWeight: '600',
-    },
-    activeIndicator: {
-        position: 'absolute',
-        left: 0,
-        top: '50%',
-        marginTop: -20,
-        width: 3,
-        height: 40,
-        backgroundColor: COLORS.secondary,
-        borderTopRightRadius: 3,
-        borderBottomRightRadius: 3,
-    },
-    productsContainer: {
-        flex: 1,
-        backgroundColor: COLORS.white,
-    },
-    productGrid: {
-        padding: 8,
-    },
-    productWrapper: {
-        flex: 1,
-        padding: 8,
-        maxWidth: '50%',
-    },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingVertical: 60,
-    },
-    loadingText: {
-        marginTop: 12,
-        fontSize: 14,
-        color: COLORS.textSecondary,
-    },
-    errorContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: 20,
-    },
-    errorText: {
-        marginTop: 12,
-        fontSize: 14,
-        color: COLORS.textSecondary,
-        textAlign: 'center',
-    },
-    retryButton: {
-        marginTop: 16,
-        paddingHorizontal: 24,
-        paddingVertical: 12,
-        backgroundColor: COLORS.secondary,
-        borderRadius: 12,
-    },
-    retryButtonText: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: COLORS.white,
-    },
-    emptyContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingVertical: 60,
-    },
-    emptyText: {
-        marginTop: 12,
-        fontSize: 16,
-        fontWeight: '600',
-        color: COLORS.text,
-    },
-    emptySubtext: {
-        marginTop: 4,
-        fontSize: 14,
-        color: COLORS.textSecondary,
-    },
-});
+    right: { flex: 1 },
+    chipBar: { flexGrow: 0 },
+    chips: { gap: space.sm, paddingHorizontal: GRID_PAD, paddingTop: space.md, paddingBottom: space.sm },
+    grid: { flex: 1 },
+    gridContent: { paddingHorizontal: GRID_PAD - GRID_GAP / 2, paddingTop: space.xs, paddingBottom: 160 },
+    cell: { marginHorizontal: GRID_GAP / 2, marginBottom: GRID_GAP },
+    skeletonGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: GRID_GAP, paddingHorizontal: GRID_PAD },
+    state: { paddingTop: space['3xl'], paddingHorizontal: space.lg },
+}));
 
 export default CategoryScreen;

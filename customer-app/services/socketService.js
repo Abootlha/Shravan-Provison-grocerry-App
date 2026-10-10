@@ -43,7 +43,13 @@ class SocketService {
 
         store.dispatch(setConnectionStatus('connecting'));
 
-        this.socket = io(socketUrl, {
+        // Mock mode (dev, or EXPO_PUBLIC_PERF_MOCK profiling builds) plays back fake
+        // tracking events (mocks/mockSocket.js). Keep the condition inline; see services/api.js.
+        const createSocket = (__DEV__ && process.env.EXPO_PUBLIC_MOCK_API === '1') || process.env.EXPO_PUBLIC_PERF_MOCK === '1'
+            ? require('../mocks').createMockSocket
+            : io;
+
+        this.socket = createSocket(socketUrl, {
             auth: {
                 token: token,
             },
@@ -195,7 +201,8 @@ class SocketService {
         this.currentOrderId = orderId;
 
         if (!this.socket?.connected) {
-            console.warn('Cannot join order room: socket not connected (will join upon connection)');
+            // Expected on first mount: the room is joined from the connect handler.
+            if (__DEV__) console.log('Order room queued: socket not connected yet (joins on connect)');
             return;
         }
 
