@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { ItemGroupsController } from './item-groups.controller';
+import {
+  AdminItemGroupsController,
+  ItemGroupsController,
+} from './item-groups.controller';
 import { ItemGroupsService } from './item-groups.service';
 import { ItemGroup, ItemGroupSchema } from './schemas/item-group.schema';
 import {
@@ -15,7 +18,7 @@ import {
       { name: Subcategory.name, schema: SubcategorySchema },
     ]),
   ],
-  controllers: [ItemGroupsController],
+  controllers: [ItemGroupsController, AdminItemGroupsController],
   providers: [ItemGroupsService],
   exports: [ItemGroupsService],
 })

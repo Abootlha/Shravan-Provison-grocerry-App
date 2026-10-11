@@ -91,4 +91,67 @@ describe('OrdersGateway auth', () => {
     await gateway.handleJoinOrder(client as any, 'ORD-1');
     expect(client.join).not.toHaveBeenCalled();
   });
+
+  describe('admin:orders room', () => {
+    it('auto-joins admins and managers, not customers', async () => {
+      for (const [role, joins] of [
+        ['admin', true],
+        ['manager', true],
+        ['customer', false],
+        ['rider', false],
+      ] as const) {
+        jwtService.verifyAsync.mockResolvedValue({ sub: ownerId, role });
+        const client = makeClient({ auth: { token: 't' } });
+        await gateway.handleConnection(client as any);
+        if (joins) {
+          expect(client.join).toHaveBeenCalledWith('admin:orders');
+        } else {
+          expect(client.join).not.toHaveBeenCalled();
+        }
+      }
+    });
+
+    it('rejects refresh tokens', async () => {
+      jwtService.verifyAsync.mockResolvedValue({
+        sub: ownerId,
+        role: 'admin',
+        type: 'refresh',
+      });
+      const client = makeClient({ auth: { token: 't' } });
+      await gateway.handleConnection(client as any);
+      expect(client.disconnect).toHaveBeenCalledWith(true);
+      expect(client.join).not.toHaveBeenCalled();
+    });
+
+    it('joinAdminOrders requires a staff role', async () => {
+      const customer = makeClient({}, { userId: ownerId, role: 'customer' });
+      await expect(
+        gateway.handleJoinAdminOrders(customer as any),
+      ).resolves.toMatchObject({ event: 'error' });
+      expect(customer.join).not.toHaveBeenCalled();
+
+      const admin = makeClient({}, { userId: ownerId, role: 'admin' });
+      await expect(
+        gateway.handleJoinAdminOrders(admin as any),
+      ).resolves.toMatchObject({ event: 'joinedAdminOrders' });
+      expect(admin.join).toHaveBeenCalledWith('admin:orders');
+    });
+
+    it('relays order:new / order:updated to the admin room only', () => {
+      const emit = jest.fn();
+      const to = jest.fn().mockReturnValue({ emit });
+      gateway.server = { to } as any;
+
+      gateway.relayAdminEvent(
+        JSON.stringify({ event: 'order:new', order: { orderId: 'ORD-1' } }),
+      );
+      expect(to).toHaveBeenCalledWith('admin:orders');
+      expect(emit).toHaveBeenCalledWith('order:new', { orderId: 'ORD-1' });
+
+      emit.mockClear();
+      gateway.relayAdminEvent(JSON.stringify({ event: 'other', order: {} }));
+      gateway.relayAdminEvent('not json');
+      expect(emit).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -14,6 +14,7 @@ import { RidersService } from './riders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { UserRole } from '../users/schemas/user.schema';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 import { IsString, IsNotEmpty, Length, IsOptional } from 'class-validator';
 
@@ -59,6 +60,7 @@ export class RidersController {
 
   @Post()
   @UseGuards(AdminGuard)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   async createRider(@Body() dto: CreateRiderDto) {
     const rider = await this.ridersService.createRider(dto);
     return { rider, message: 'Rider created successfully' };
@@ -114,6 +116,7 @@ export class RidersController {
 
   @Get()
   @UseGuards(AdminGuard)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   async getRiders(@Query('status') status?: string) {
     const riders = await this.ridersService.findAll(status);
     return { riders };
@@ -121,6 +124,7 @@ export class RidersController {
 
   @Get('available')
   @UseGuards(AdminGuard)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   async getAvailableRiders() {
     const riders = await this.ridersService.findAvailableRiders();
     return { riders };
@@ -128,6 +132,7 @@ export class RidersController {
 
   @Get(':id')
   @UseGuards(AdminGuard)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   async getRider(@Param('id') id: string) {
     const rider = await this.ridersService.findById(id);
     return { rider };

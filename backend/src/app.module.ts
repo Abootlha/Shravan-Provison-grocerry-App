@@ -20,6 +20,9 @@ import { ItemGroupsModule } from './modules/item-groups/item-groups.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { MapsModule } from './modules/maps/maps.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { BannersModule } from './modules/banners/banners.module';
+import { AuditModule } from './modules/audit/audit.module';
+import { TeamModule } from './modules/team/team.module';
 import { RedisModule } from './common/utils/redis.module';
 import { HttpThrottlerGuard } from './modules/auth/guards/http-throttler.guard';
 import { AppController } from './app.controller';
@@ -27,6 +30,7 @@ import { AppService } from './app.service';
 
 // Config
 import configuration from './config/configuration';
+import { redisConnectionOptions } from './config/redis-options';
 
 @Module({
   imports: [
@@ -77,11 +81,8 @@ import configuration from './config/configuration';
     BullModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('redis.host'),
-          port: configService.get<number>('redis.port'),
-          password: configService.get<string>('redis.password'),
-        },
+        // Includes REDIS_DB, so each environment has its own BullMQ queues.
+        connection: redisConnectionOptions(configService),
       }),
       inject: [ConfigService],
     }),
@@ -102,6 +103,9 @@ import configuration from './config/configuration';
     JobsModule,
     MapsModule,
     PaymentsModule,
+    BannersModule,
+    TeamModule,
+    AuditModule,
   ],
   // Root routes: GET /api/v1 and the GET /api/v1/health probe used by deploys.
   controllers: [AppController],

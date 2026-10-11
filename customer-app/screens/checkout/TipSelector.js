@@ -8,7 +8,6 @@ import { layout, makeStyles, useTheme } from '../../theme';
 import { GROUP_RADIUS, ICON_CIRCLE } from './layout';
 
 const PRESETS = [20, 30, 50];
-const MOST_TIPPED = 30;
 
 /**
  * Tip for the delivery partner. The order API has no tip field, so the tip is
@@ -64,7 +63,6 @@ function TipSelectorBase({ tip, onChange, isHi }) {
                     <Chip
                         key={amt}
                         label={`₹${amt}`}
-                        caption={amt === MOST_TIPPED ? (isHi ? 'सबसे ज़्यादा' : 'Most tipped') : undefined}
                         selected={!custom && tip === amt}
                         onPress={() => pickPreset(amt)}
                         style={styles.chip}

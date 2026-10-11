@@ -1,24 +1,14 @@
-import {
-  Injectable,
-  CanActivate,
-  ExecutionContext,
-  ForbiddenException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { UserRole } from '../../users/schemas/user.schema';
+import { RolesGuard } from './roles.guard';
 
+/**
+ * Staff guard. Admin-only by default; a route (or controller) can open itself
+ * to managers with @Roles(UserRole.ADMIN, UserRole.MANAGER).
+ */
 @Injectable()
-export class AdminGuard implements CanActivate {
-  constructor(private reflector: Reflector) {}
-
-  canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest();
-    const user = request.user;
-
-    if (!user || user.role !== UserRole.ADMIN) {
-      throw new ForbiddenException('Admin access required');
-    }
-
-    return true;
+export class AdminGuard extends RolesGuard {
+  constructor(reflector: Reflector) {
+    super(reflector);
   }
 }

@@ -9,6 +9,7 @@ import {
   UseGuards,
   BadRequestException,
   HttpCode,
+  Request,
 } from '@nestjs/common';
 import { ProductsService } from './products.service';
 import { BarcodeService } from './barcode.service';
@@ -21,6 +22,10 @@ import { PreviewImageDto } from './dto/preview-image.dto';
 import { ImageProcessingService } from './image-processing/image-processing.service';
 import { ImageInputError } from './image-processing/product-image-pipeline';
 import { Types } from 'mongoose';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../users/schemas/user.schema';
+import { AdminProductsService } from './admin-products.service';
+import { ProductStatus, productStatusOf } from './schemas/product.schema';
 
 const MAX_PAGE_SIZE = 100;
 const DEFAULT_PAGE_SIZE = 20;
@@ -37,6 +42,7 @@ export class ProductsController {
     private readonly productsService: ProductsService,
     private readonly barcodeService: BarcodeService,
     private readonly imageProcessing: ImageProcessingService,
+    private readonly adminProducts: AdminProductsService,
   ) {}
 
   @Get()
@@ -66,6 +72,7 @@ export class ProductsController {
 
   @Get('barcode/:barcode')
   @UseGuards(JwtAuthGuard, AdminGuard)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   async lookupBarcode(@Param('barcode') barcode: string) {
     if (!/^[0-9]{8,14}$/.test(barcode)) {
       throw new BadRequestException('Barcode must be 8-14 digits');
@@ -115,6 +122,11 @@ export class ProductsController {
   @Get(':id')
   async findOne(@Param('id') id: string) {
     const product = await this.productsService.findById(id);
+    // Drafts and archived products are not part of the public catalogue
+    // (GET /admin/products/:id returns them).
+    if (product && productStatusOf(product) !== ProductStatus.ACTIVE) {
+      return { product: null };
+    }
     return { product };
   }
 
@@ -166,10 +178,19 @@ export class ProductsController {
     return { product };
   }
 
+  /** Legacy: adds `quantity` to stock; recorded as a restock adjustment. */
   @Put(':id/stock')
   @UseGuards(JwtAuthGuard, AdminGuard)
-  async updateStock(@Param('id') id: string, @Body() data: UpdateStockDto) {
-    await this.productsService.updateStock(id, data.quantity);
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  async updateStock(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body() data: UpdateStockDto,
+  ) {
+    await this.adminProducts.restock(id, data.quantity, {
+      userId: req.user?.userId,
+      role: req.user?.role,
+    });
     return { message: 'Stock updated' };
   }
 }

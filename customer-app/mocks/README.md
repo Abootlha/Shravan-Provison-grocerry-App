@@ -23,7 +23,9 @@ If Expo fails with a react-navigation check error, also set
 Restart with `--clear` after toggling the variable, because `EXPO_PUBLIC_*`
 values are inlined at bundle time.
 
-Log in with any 10-digit phone and any 4-digit OTP (e.g. `1234`). The browser
+Log in with any 10-digit phone and any 4-digit OTP (e.g. `1234`). Like the
+backend, send-otp returns `otpLength`; set `EXPO_PUBLIC_MOCK_OTP_LENGTH=6`
+before starting to preview the 6-digit flow (any 6 digits work). The browser
 console shows a purple `[mock api] ENABLED` banner and one line per request.
 
 ## Login sessions
@@ -202,3 +204,12 @@ backend's `local` provider), normalise it the same way, then add a row below.
 | toorDal | Open Food Facts, product 8904064662124 | CC-BY-SA 3.0 | https://world.openfoodfacts.org/product/8904064662124 |
 | vimBar | Unsplash photo 1607006344152-62699f97b42c | Unsplash Licence | https://images.unsplash.com/photo-1607006344152-62699f97b42c |
 | vimGel | Open Beauty Facts, product 8901030760624 | CC-BY-SA 3.0 | https://world.openbeautyfacts.org/product/8901030760624 |
+
+## Checkout bill
+
+`GET /settings/store` carries `fees` and `isOpen`/`nextOpenAt`; `POST /orders/quote` and
+`POST /orders` price the lines from the catalogue with the backend's formula
+(`orders/pricing.ts`), so the slide-to-pay amount and the created order always match.
+A cart line whose product is missing, not `active`, unavailable or unpriced is refused
+with the backend's 400 message. Web flags: `?store=closed` previews the closed store,
+`?mockQuote=fail` makes the quote fail (payment is blocked behind a Retry).

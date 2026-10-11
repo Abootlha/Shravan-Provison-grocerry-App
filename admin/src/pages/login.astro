@@ -1,171 +1,53 @@
 ---
 import "../styles/global.css";
-import { getApiBaseUrl } from "../lib/config";
-
-const apiBase = getApiBaseUrl();
+import LoginForm from "../components/login/LoginForm";
+import { THEME_INIT_SCRIPT } from "../lib/theme";
 ---
 
 <!doctype html>
-<html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Login | ShravanKirana Admin</title>
-    </head>
-    <body>
-        <div class="min-h-screen flex items-center justify-center p-4" style="background: var(--bg-primary);">
-            <div class="w-full max-w-md">
-                <div class="text-center mb-8">
-                    <div
-                        class="inline-flex items-center justify-center w-16 h-16 rounded-2xl shadow-lg mb-4"
-                        style="background: var(--accent-gradient);"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--bg-primary);">
-                            <circle cx="8" cy="21" r="1"></circle>
-                            <circle cx="19" cy="21" r="1"></circle>
-                            <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"></path>
-                        </svg>
-                    </div>
-                    <h1 class="text-2xl font-bold" style="color: var(--text-primary);">ShravanKirana</h1>
-                    <p class="mt-1" style="color: var(--text-muted);">Admin Console</p>
-                </div>
-
-                <div class="shadow-xl rounded-2xl" style="background: var(--bg-secondary); border: 1px solid var(--border);">
-                    <div class="text-center px-6 pt-6 pb-2">
-                        <h2 class="text-xl font-semibold" style="color: var(--text-primary);">Admin Login</h2>
-                        <p style="color: var(--text-muted);">Enter your credentials to access the admin panel</p>
-                    </div>
-                    <div class="px-6 pb-6 pt-4">
-                        <div
-                            id="login-error"
-                            class="px-4 py-3 rounded-lg mb-4 text-sm font-medium hidden"
-                            style="background: var(--danger-light); color: var(--danger); border: 1px solid var(--danger);"
-                        ></div>
-
-                        <form id="login-form" class="space-y-4">
-                            <div>
-                                <label class="text-sm font-medium mb-2 block" style="color: var(--text-secondary);">
-                                    Username / Email
-                                </label>
-                                <input
-                                    id="username"
-                                    type="text"
-                                    class="flex h-12 w-full rounded-xl border bg-[var(--bg-tertiary)] border-[var(--border)] px-4 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:border-[var(--accent)] transition-all duration-200"
-                                    placeholder="Enter username or email"
-                                    autocomplete="username"
-                                    required
-                                />
-                            </div>
-
-                            <div>
-                                <label class="text-sm font-medium mb-2 block" style="color: var(--text-secondary);">
-                                    Password
-                                </label>
-                                <input
-                                    id="password"
-                                    type="password"
-                                    class="flex h-12 w-full rounded-xl border bg-[var(--bg-tertiary)] border-[var(--border)] px-4 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:border-[var(--accent)] transition-all duration-200"
-                                    placeholder="Enter password"
-                                    autocomplete="current-password"
-                                    required
-                                />
-                            </div>
-
-                            <button
-                                id="login-button"
-                                type="submit"
-                                class="w-full h-12 text-base rounded-xl font-semibold"
-                                style="background: var(--accent-gradient); color: var(--bg-primary);"
-                            >
-                                Login
-                            </button>
-                        </form>
-                    </div>
-                </div>
-
-            </div>
+<html lang="en-IN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Sign in · Shravan Kirana Admin</title>
+    <script is:inline set:html={THEME_INIT_SCRIPT} />
+    <script is:inline>
+      // Skip the form only for a token that is still valid (JWT exp claim). An expired token
+      // stays put so the guard on protected pages can try a refresh.
+      (function () {
+        try {
+          var token = localStorage.getItem("adminToken");
+          var part = token && token.split(".")[1];
+          if (!part) return;
+          var claims = JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/")));
+          if (typeof claims.exp === "number" && Date.now() < claims.exp * 1000) {
+            window.location.replace("/");
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <main class="flex min-h-dvh flex-col items-center justify-center px-4 py-10">
+      <div class="flex w-full max-w-sm flex-col gap-6">
+        <div class="flex items-center gap-3">
+          <span class="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+            <svg xmlns="http://www.w3.org/2000/svg" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m15 11-1 9"></path><path d="m19 11-4-7"></path><path d="M2 11h20"></path><path d="m3.5 11 1.6 7.4a2 2 0 0 0 2 1.6h9.8a2 2 0 0 0 2-1.6l1.7-7.4"></path><path d="M4.5 15.5h15"></path><path d="m5 11 4-7"></path><path d="m9 11 1 9"></path>
+            </svg>
+          </span>
+          <div class="leading-tight">
+            <p class="text-base font-bold tracking-tight">Shravan Kirana</p>
+            <p class="text-sm text-muted-foreground">Store admin</p>
+          </div>
         </div>
-
-        <script define:vars={{ apiBase }}>
-            // Only skip the login form for a token that is still valid (JWT exp claim).
-            // An expired token stays put so AdminLayout's guard can try a refresh.
-            const token = localStorage.getItem('adminToken');
-            const tokenIsValid = (() => {
-                try {
-                    const part = token && token.split('.')[1];
-                    if (!part) return false;
-                    const claims = JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/')));
-                    return typeof claims.exp === 'number' && Date.now() < claims.exp * 1000;
-                } catch {
-                    return false;
-                }
-            })();
-            if (tokenIsValid) {
-                window.location.replace('/');
-            }
-
-            const form = document.getElementById('login-form');
-            const button = document.getElementById('login-button');
-            const errorBox = document.getElementById('login-error');
-            const usernameInput = document.getElementById('username');
-            const passwordInput = document.getElementById('password');
-            const API_BASE = apiBase;
-
-            // Sent here by the session guard / API client: say why (see lib/api.ts).
-            const SESSION_END_MESSAGES = {
-                SESSION_EXPIRED: 'Your session has ended. Please log in again.',
-                SESSION_REVOKED: 'You were signed out. Please log in again.',
-                REFRESH_REUSED: 'For your security you were signed out because this session was used elsewhere. Please log in again.',
-                USER_NOT_FOUND: 'This account no longer exists.',
-            };
-            const reason = new URLSearchParams(window.location.search).get('reason');
-            if (reason && errorBox) {
-                errorBox.textContent = SESSION_END_MESSAGES[reason] || SESSION_END_MESSAGES.SESSION_EXPIRED;
-                errorBox.classList.remove('hidden');
-                window.history.replaceState(null, '', window.location.pathname);
-            }
-
-            form?.addEventListener('submit', async (event) => {
-                event.preventDefault();
-
-                const username = usernameInput?.value?.trim() || '';
-                const password = passwordInput?.value || '';
-
-                if (!username || !password) {
-                    errorBox.textContent = 'Please enter username and password.';
-                    errorBox.classList.remove('hidden');
-                    return;
-                }
-
-                button.setAttribute('disabled', 'true');
-                errorBox.classList.add('hidden');
-                errorBox.textContent = '';
-
-                try {
-                    const response = await fetch(`${API_BASE}/auth/admin/login`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ username, password }),
-                    });
-
-                    const data = await response.json();
-
-                    if (!response.ok) {
-                        throw new Error(data.message || 'Login failed');
-                    }
-
-                    localStorage.setItem('adminToken', data.accessToken);
-                    localStorage.setItem('adminUser', JSON.stringify(data.user));
-                    localStorage.setItem('adminRefreshToken', data.refreshToken);
-                    localStorage.setItem('adminLoginTime', Date.now().toString());
-
-                    window.location.replace('/');
-                } catch (error) {
-                    errorBox.textContent = error?.message || 'Login failed. Please check your credentials.';
-                    errorBox.classList.remove('hidden');
-                    button.removeAttribute('disabled');
-                }
-            });
-        </script>
-    </body>
+        <LoginForm client:load />
+        <p class="text-center text-xs text-muted-foreground">
+          Trouble signing in? Ask the store owner to reset your password.
+        </p>
+      </div>
+    </main>
+  </body>
 </html>

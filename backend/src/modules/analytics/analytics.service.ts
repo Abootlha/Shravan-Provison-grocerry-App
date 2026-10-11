@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import dayjs from 'dayjs';
@@ -174,7 +174,8 @@ export class AnalyticsService {
       { $unwind: '$items' },
       {
         $group: {
-          _id: '$items.productId',
+          // Legacy items store productId as a string; group both forms together.
+          _id: { $toString: '$items.productId' },
           name: { $first: '$items.name' },
           totalQuantity: { $sum: '$items.quantity' },
           totalRevenue: {
@@ -187,7 +188,29 @@ export class AnalyticsService {
     ]);
   }
 
+  /**
+   * Revenue per category for orders created in [startDate, endDate],
+   * excluding cancelled orders. Line revenue is price x quantity as charged.
+   *
+   * Order items written before the schema fix hold productId as a string,
+   * and some catalogue rows hold categoryId as a string, so both joins
+   * compare ObjectIds after converting either side.
+   */
   async getRevenueByCategory(startDate: Date, endDate: Date): Promise<any[]> {
+    if (
+      !(startDate instanceof Date) ||
+      !(endDate instanceof Date) ||
+      Number.isNaN(startDate.getTime()) ||
+      Number.isNaN(endDate.getTime())
+    ) {
+      throw new BadRequestException(
+        'startDate and endDate must be valid ISO dates',
+      );
+    }
+    const toObjectId = (input: string) => ({
+      $convert: { input, to: 'objectId', onError: null, onNull: null },
+    });
+
     return this.orderModel.aggregate([
       {
         $match: {
@@ -199,8 +222,11 @@ export class AnalyticsService {
       {
         $lookup: {
           from: 'products',
-          localField: 'items.productId',
-          foreignField: '_id',
+          let: { productId: toObjectId('$items.productId') },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$_id', '$$productId'] } } },
+            { $project: { categoryId: 1 } },
+          ],
           as: 'product',
         },
       },
@@ -208,8 +234,11 @@ export class AnalyticsService {
       {
         $lookup: {
           from: 'categories',
-          localField: 'product.categoryId',
-          foreignField: '_id',
+          let: { categoryId: toObjectId('$product.categoryId') },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$_id', '$$categoryId'] } } },
+            { $project: { name: 1 } },
+          ],
           as: 'category',
         },
       },

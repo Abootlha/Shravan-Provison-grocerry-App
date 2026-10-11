@@ -24,6 +24,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
     let error = 'Internal Server Error';
     // Machine-readable reason (e.g. SESSION_EXPIRED on /auth/refresh).
     let code: string | undefined;
+    // Extra fields of a structured (coded) error, e.g. nextOpenAt for STORE_CLOSED.
+    let extra: Record<string, unknown> = {};
 
     // Handle HTTP exceptions
     if (exception instanceof HttpException) {
@@ -36,7 +38,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
         message = (exceptionResponse as any).message || message;
         error = (exceptionResponse as any).error || error;
         const rawCode = (exceptionResponse as any).code;
-        if (typeof rawCode === 'string') code = rawCode;
+        if (typeof rawCode === 'string') {
+          code = rawCode;
+          const rest = { ...(exceptionResponse as Record<string, unknown>) };
+          for (const key of ['statusCode', 'message', 'error', 'code']) {
+            delete rest[key];
+          }
+          extra = rest;
+        }
       }
     }
     // Handle MongoDB errors
@@ -102,7 +111,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       path: request.url,
       message,
       error,
-      ...(code ? { code } : {}),
+      ...(code ? { ...extra, code } : {}),
     });
   }
 }

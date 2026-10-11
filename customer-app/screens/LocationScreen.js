@@ -42,6 +42,11 @@ import { CurrentLocationRow } from './address/CurrentLocationRow';
 import { useServiceArea } from './address/useServiceArea';
 import { formatAddressLine } from './address/addressUtils';
 
+/** Reverse geocoding found no street address for a GPS fix. */
+class AddressLookupError extends Error {
+    name = 'AddressLookupError';
+}
+
 // How long a swiped-away address can be restored before the delete reaches the server.
 const UNDO_MS = 4000;
 // Reanimated web scales a container whose size changes (text distorts): native-only there.
@@ -203,19 +208,21 @@ const LocationScreen = ({ navigation }) => {
         const location = await Location.getCurrentPositionAsync({});
         const { latitude, longitude } = location.coords;
 
-        let addressText = 'Medical Road, Gorakhpur';
-        let city = 'Gorakhpur';
-        let pincode = '273001';
+        // No invented fallback: without a real street address this spot can't be used as-is.
+        let addressText = '';
+        let city = '';
+        let pincode = '';
         try {
             const [address] = await Location.reverseGeocodeAsync({ latitude, longitude });
             if (address) {
-                addressText = `${address.name || ''} ${address.street || ''}`.trim() || addressText;
-                city = address.city || address.subregion || city;
-                pincode = address.postalCode || pincode;
+                addressText = `${address.name || ''} ${address.street || ''}`.trim();
+                city = address.city || address.subregion || '';
+                pincode = address.postalCode || '';
             }
         } catch (err) {
-            console.log('Reverse geocode error during location detect:', err);
+            if (__DEV__) console.log('Reverse geocode error during location detect:', err);
         }
+        if (!addressText) throw new AddressLookupError();
 
         return {
             id: `current-${Date.now()}`,
@@ -229,6 +236,11 @@ const LocationScreen = ({ navigation }) => {
             coords: { latitude, longitude },
         };
     }, [isHi]);
+
+    const showLookupFailed = () =>
+        toast.error(isHi ? 'इस जगह का पता नहीं मिला' : 'Couldn’t find an address here', {
+            description: isHi ? 'नया पता जोड़ें और उसे हाथ से लिखें।' : 'Add a new address and type it in instead.',
+        });
 
     const handleEnableLocation = async () => {
         dispatch(setLoading(true));
@@ -248,6 +260,10 @@ const LocationScreen = ({ navigation }) => {
             dispatch(setSelectedAddress(loc));
             dispatch(setLocationEnabled(true));
         } catch (error) {
+            if (error?.name === 'AddressLookupError') {
+                showLookupFailed();
+                return;
+            }
             toast.error(isHi ? 'स्थान नहीं मिला' : "Couldn't get your location", {
                 description: isHi ? 'कृपया फिर से प्रयास करें।' : 'Please try again.',
             });
@@ -300,11 +316,13 @@ const LocationScreen = ({ navigation }) => {
         const { latitude, longitude } = coords;
         try {
             const [res] = await Location.reverseGeocodeAsync({ latitude, longitude });
-            const addressText = res
-                ? [res.name, res.street, res.district].filter(Boolean).join(', ')
-                : 'Medical Road, Gorakhpur';
-            const city = res?.city || res?.subregion || 'Gorakhpur';
-            const pincode = res?.postalCode || '273001';
+            const addressText = res ? [res.name, res.street, res.district].filter(Boolean).join(', ') : '';
+            if (!addressText) {
+                showLookupFailed();
+                return;
+            }
+            const city = res?.city || res?.subregion || '';
+            const pincode = res?.postalCode || '';
 
             const formattedAddress = {
                 id: `map-${Date.now()}`,
@@ -320,7 +338,8 @@ const LocationScreen = ({ navigation }) => {
 
             dispatch(setSelectedAddress(formattedAddress));
         } catch (err) {
-            console.log('Map press reverse geocode error:', err);
+            if (__DEV__) console.log('Map press reverse geocode error:', err);
+            showLookupFailed();
         }
     };
 
@@ -461,7 +480,7 @@ const LocationScreen = ({ navigation }) => {
             // Server indices shift as addresses change, so resolve this one by id right before deleting.
             let target = item.originalIndex ?? item.listIndex;
             if (!String(item.id).startsWith('saved-')) {
-                const profile = await UserService.getProfile();
+                const profile = await UserService.getProfile(undefined, { fresh: true });
                 const list = profile?.addresses || [];
                 const at = list.findIndex((a) => a?._id === item.id);
                 if (at < 0) return; // already gone

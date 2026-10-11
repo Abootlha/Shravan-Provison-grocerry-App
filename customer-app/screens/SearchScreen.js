@@ -100,7 +100,7 @@ const SearchScreen = ({ navigation, route }) => {
                 value={query}
                 onChangeText={setQuery}
                 onSubmit={onSubmit}
-                onBack={navigation.goBack}
+                onBack={navigation.getState?.()?.type === 'tab' ? undefined : navigation.goBack}
                 onClear={onClear}
                 isHi={isHi}
                 fromRect={route?.params?.fromRect}

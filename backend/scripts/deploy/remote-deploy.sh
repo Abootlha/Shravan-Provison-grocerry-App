@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Deploys or rolls back the backend on the production server. Runs ON the
-# server as the deploy user (called over SSH by .github/workflows/deploy-backend.yml).
+# Deploys or rolls back the backend on the server. Runs ON the server as the
+# deploy user (called over SSH by .github/workflows/deploy-backend.yml).
+# Production and the development instance are separate targets on the same
+# server: each has its own DEPLOY_PATH, APP_NAME (PM2 app) and shared/.env.
 #
 # Usage:
 #   remote-deploy.sh deploy <release.tar.gz> <git-sha>
@@ -8,25 +10,42 @@
 #
 # Layout under $DEPLOY_PATH:
 #   releases/<UTC timestamp>-<sha>/   one directory per release (newest 5 kept)
-#   shared/.env                       production config, linked into every release
+#   shared/.env                       this target's config, linked into every release
 #   shared/logs/                      PM2 log files
 #   current -> releases/<release>     the live release
 #   DEPLOYED_SHA                      commit of the live release
+#   APP_NAME                          PM2 app that owns this DEPLOY_PATH (written on deploy)
 #
 # Optional environment:
 #   DEPLOY_PATH           default /var/www/shravan-backend
 #   HEALTHCHECK_URL       default http://127.0.0.1:<PORT from shared/.env, else 3000>/api/v1/health
-#   PM2_APP_NAME          default shravan-backend (must match ecosystem.config.js)
+#   APP_NAME              PM2 app name, default shravan-backend (production).
+#                         The development target uses e.g. shravan-backend-dev.
+#                         Exported to ecosystem.config.js as PM2_APP_NAME.
+#                         (PM2_APP_NAME is accepted as an older alias.)
 #   KEEP_RELEASES         default 5
 #   HEALTHCHECK_ATTEMPTS  default 30
 #   HEALTHCHECK_INTERVAL  default 2 (seconds)
 #   LOCK_TIMEOUT          default 600 (seconds to wait for a running deploy)
 set -euo pipefail
 
+DEPLOY_PATH_WAS_SET="${DEPLOY_PATH:+yes}"
 DEPLOY_PATH="${DEPLOY_PATH:-/var/www/shravan-backend}"
 DEPLOY_PATH="${DEPLOY_PATH%/}"
 export DEPLOY_PATH
-PM2_APP_NAME="${PM2_APP_NAME:-shravan-backend}"
+APP_NAME="${APP_NAME:-${PM2_APP_NAME:-shravan-backend}}"
+[[ "$APP_NAME" =~ ^[A-Za-z0-9._-]+$ ]] || {
+  printf '[deploy] ERROR: invalid APP_NAME: %s\n' "$APP_NAME" >&2
+  exit 1
+}
+# The default DEPLOY_PATH is production's; any other app must name its own.
+if [[ "$APP_NAME" != shravan-backend && -z "$DEPLOY_PATH_WAS_SET" ]]; then
+  printf '[deploy] ERROR: APP_NAME=%s needs an explicit DEPLOY_PATH\n' "$APP_NAME" >&2
+  exit 1
+fi
+# ecosystem.config.js names the PM2 app from this.
+PM2_APP_NAME="$APP_NAME"
+export PM2_APP_NAME
 KEEP_RELEASES="${KEEP_RELEASES:-5}"
 HEALTHCHECK_ATTEMPTS="${HEALTHCHECK_ATTEMPTS:-30}"
 HEALTHCHECK_INTERVAL="${HEALTHCHECK_INTERVAL:-2}"
@@ -35,6 +54,7 @@ LOCK_TIMEOUT="${LOCK_TIMEOUT:-600}"
 RELEASES_DIR="$DEPLOY_PATH/releases"
 SHARED_DIR="$DEPLOY_PATH/shared"
 CURRENT_LINK="$DEPLOY_PATH/current"
+APP_NAME_FILE="$DEPLOY_PATH/APP_NAME"
 
 # Set while a new release directory is being prepared; removed if we exit early.
 PREPARING_DIR=""
@@ -154,6 +174,11 @@ pm2_reload() {
   if [[ -n "$instances" && -z "${PM2_INSTANCES:-}" ]]; then
     export PM2_INSTANCES="$instances"
   fi
+  # NODE_ENV from this target's shared/.env (ecosystem.config.js falls back to
+  # production for anything other than "development").
+  DEPLOY_NODE_ENV="$(env_value NODE_ENV)"
+  export DEPLOY_NODE_ENV
+  log "PM2 app $PM2_APP_NAME (NODE_ENV=$([[ "$DEPLOY_NODE_ENV" == development ]] && echo development || echo production))"
   (cd "$CURRENT_LINK" && pm2 startOrReload ecosystem.config.js --env production --update-env) || return 1
   pm2 save || return 1
 }
@@ -200,12 +225,27 @@ prune_releases() {
   done < <(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -r)
 }
 
+# One DEPLOY_PATH belongs to exactly one PM2 app. Stops a development deploy
+# from replacing the production release (or the reverse) through a wrong
+# DEPLOY_PATH/APP_NAME pair.
+check_app_name() {
+  local owner
+  if [[ -f "$APP_NAME_FILE" ]]; then
+    owner="$(tr -d '[:space:]' <"$APP_NAME_FILE")"
+    [[ "$owner" == "$APP_NAME" ]] ||
+      die "$DEPLOY_PATH belongs to PM2 app '$owner', not '$APP_NAME'. Check DEPLOY_PATH and APP_NAME."
+  else
+    printf '%s\n' "$APP_NAME" >"$APP_NAME_FILE"
+  fi
+}
+
 check_layout() {
   if [[ -e "$CURRENT_LINK" && ! -L "$CURRENT_LINK" ]]; then
     die "$CURRENT_LINK exists but is not a symlink; move it away first (see docs/DEPLOYMENT.md)"
   fi
   [[ -f "$SHARED_DIR/.env" ]] || die "missing $SHARED_DIR/.env (see docs/DEPLOYMENT.md)"
   mkdir -p "$RELEASES_DIR" "$SHARED_DIR/logs"
+  check_app_name
 }
 
 resolve_healthcheck_url() {

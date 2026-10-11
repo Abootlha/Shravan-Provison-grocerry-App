@@ -33,7 +33,7 @@
  *   style
  */
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, View, useWindowDimensions } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useIsFocused } from '@react-navigation/native';
@@ -51,6 +51,9 @@ import { PressableScale, Text } from './ui';
 import { radii, space } from '../constants/theme';
 import { makeStyles, useTheme } from '../theme';
 import { springs, easings, press, signature } from '../theme/motion';
+import { useContentWidth } from '../hooks/useContentWidth';
+
+const MAX_BANNER_HEIGHT = 280;
 
 const SEGMENT_W = 18;
 const ACTIVE_STRETCH = 1.6; // the active segment is longer so the eye finds it
@@ -119,7 +122,15 @@ const Slide = memo(({ banner, index, width, height, onPress, x, scrollY, paralla
             style={[styles.slide, { width, height, backgroundColor: blockColor }]}
         >
             <Animated.View style={[styles.image, artStyle]}>
-                <Image source={banner.image} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} accessible={false} />
+                <Image
+                    source={banner.image}
+                    style={StyleSheet.absoluteFill}
+                    contentFit="cover"
+                    transition={150}
+                    cachePolicy="memory-disk"
+                    recyclingKey={String(banner.id ?? index)}
+                    accessible={false}
+                />
             </Animated.View>
             {banner.title ? (
                 <Animated.View
@@ -150,9 +161,11 @@ const Slide = memo(({ banner, index, width, height, onPress, x, scrollY, paralla
 
 const BannerCarousel = ({ banners = [], onPress, autoPlayInterval = 4500, width: widthProp, aspectRatio = 16 / 9, scrollY, style }) => {
     const styles = useStyles();
-    const { width: windowWidth } = useWindowDimensions();
+    const windowWidth = useContentWidth();
     const width = widthProp || windowWidth - space.gutter * 2;
-    const height = Math.round(width / aspectRatio);
+    // the width already stops at the content column (560); the height cap keeps a wide window from
+    // turning the banner into a wall
+    const height = Math.min(Math.round(width / aspectRatio), MAX_BANNER_HEIGHT);
     const count = banners.length;
     const reduce = useReducedMotion();
 

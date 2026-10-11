@@ -31,11 +31,11 @@ import { press } from '../theme/motion';
 import { hydrateCart, removeFromCart } from '../store/slices/cartSlice';
 import { useCheckout } from './checkout/useCheckout';
 import { DeliveryEtaCard } from './checkout/DeliveryEtaCard';
-import { useServiceArea } from './address/useServiceArea';
 import { CheckoutItemRow } from './checkout/CheckoutItemRow';
 import { OffersCard } from './checkout/OffersCard';
 import { GROUP_RADIUS, ICON_CIRCLE } from './checkout/layout';
 import { FreeDeliveryNudge } from './checkout/FreeDeliveryNudge';
+import { UnavailableItemsCard } from './checkout/UnavailableItemsCard';
 import { SuggestionsRail } from './checkout/SuggestionsRail';
 import { TipSelector } from './checkout/TipSelector';
 import { DeliveryInstructionsCard } from './checkout/DeliveryInstructionsCard';
@@ -58,7 +58,9 @@ const CheckoutScreen = ({ navigation, route }) => {
     const insets = useSafeAreaInsets();
     const c = useCheckout({ navigation, route });
     const { isHi } = c;
-    const { etaMinutes } = useServiceArea(); // store settings estimatedDeliveryMinutes, 10 until it loads
+    // Delivery time only from the store settings (null while unknown) and only while the store is open.
+    const etaMinutes = c.store.isOpen ? c.store.etaMinutes : null;
+    const closedLine = c.store.isOpen ? null : c.store.closedLine(isHi);
 
     const [addressSheet, setAddressSheet] = useState(false);
     const [paymentSheet, setPaymentSheet] = useState(false);
@@ -104,8 +106,9 @@ const CheckoutScreen = ({ navigation, route }) => {
 
     // Amount shown in the status overlay. Frozen while the overlay is up, because
     // a successful payment clears the cart underneath it.
-    const amountRef = useRef(c.hasItems ? c.bill.grandTotal : null);
-    if (!c.isProcessingPayment && c.hasItems) amountRef.current = c.bill.grandTotal;
+    const amountRef = useRef(c.hasItems ? c.payableAmount : null);
+    if (!c.isProcessingPayment && c.hasItems) amountRef.current = c.payableAmount;
+    const refusedById = Object.fromEntries(c.refusedItems.map((r) => [r.id, r.reason]));
 
     // Slide-to-pay springs back whenever the flow ends without leaving the screen.
     const sliderRef = useRef(null);
@@ -179,7 +182,12 @@ const CheckoutScreen = ({ navigation, route }) => {
 
     const header = (
         <View style={styles.header}>
-            <IconButton name="arrow-left" variant="ghost" accessibilityLabel={isHi ? 'वापस जाएं' : 'Go back'} onPress={goBack} />
+            {/* the Cart tab is a root: no back arrow there (the pushed Checkout keeps it) */}
+            {inTab ? (
+                <View style={styles.headerSpacer} />
+            ) : (
+                <IconButton name="arrow-left" variant="ghost" accessibilityLabel={isHi ? 'वापस जाएं' : 'Go back'} onPress={goBack} />
+            )}
             <Text variant="h3" accessibilityRole="header" style={styles.headerTitle}>
                 {isHi ? 'चेकआउट' : 'Checkout'}
             </Text>
@@ -199,7 +207,15 @@ const CheckoutScreen = ({ navigation, route }) => {
         <View style={[styles.empty, { paddingBottom: barOffset }]}>
             <EmptyState
                 title={isHi ? 'आपकी कार्ट खाली है' : 'Your cart is empty'}
-                subtitle={isHi ? 'अभी कुछ नहीं जोड़ा गया। आज की ज़रूरत का सामान जोड़ें, हम लगभग 10 मिनट में पहुँचा देंगे।' : 'Nothing added yet. Add today’s essentials and we’ll deliver in about 10 minutes.'}
+                subtitle={
+                    etaMinutes
+                        ? isHi
+                            ? `अभी कुछ नहीं जोड़ा गया। आज की ज़रूरत का सामान जोड़ें, हम लगभग ${etaMinutes} मिनट में पहुँचा देंगे।`
+                            : `Nothing added yet. Add today’s essentials and we’ll deliver in about ${etaMinutes} minutes.`
+                        : isHi
+                          ? 'अभी कुछ नहीं जोड़ा गया। आज की ज़रूरत का सामान जोड़ें।'
+                          : 'Nothing added yet. Add today’s essentials to get started.'
+                }
                 actionLabel={isHi ? 'खरीदारी शुरू करें' : 'Start shopping'}
                 onAction={goShopping}
             />
@@ -215,10 +231,23 @@ const CheckoutScreen = ({ navigation, route }) => {
                 keyboardShouldPersistTaps="handled"
             >
                 <View style={styles.gutter}>
-                    <DeliveryEtaCard minutes={etaMinutes} itemCount={c.totalItems} isHi={isHi}>
-                        <FreeDeliveryNudge itemTotal={c.bill.itemTotal} gap={c.bill.freeDeliveryGap} isHi={isHi} />
+                    <DeliveryEtaCard minutes={etaMinutes} closedLine={closedLine} itemCount={c.totalItems} isHi={isHi}>
+                        {c.bill ? (
+                            <FreeDeliveryNudge
+                                itemTotal={c.bill.itemTotal}
+                                gap={c.bill.freeDeliveryGap}
+                                threshold={c.bill.freeDeliveryThreshold}
+                                isHi={isHi}
+                            />
+                        ) : null}
                     </DeliveryEtaCard>
                 </View>
+
+                {c.refusedItems.length ? (
+                    <Animated.View entering={layout.enter} exiting={layout.exit} layout={sizeLayout} style={styles.gutter}>
+                        <UnavailableItemsCard items={c.refusedItems} onRemove={c.removeRefusedItems} isHi={isHi} />
+                    </Animated.View>
+                ) : null}
 
                 <View style={styles.gutter}>
                     {/* Grouped items card. Its height springs with the rows (layout.list) instead of jumping. */}
@@ -235,6 +264,7 @@ const CheckoutScreen = ({ navigation, route }) => {
                                 item={item}
                                 index={index}
                                 showDivider={index > 0}
+                                refusedReason={refusedById[item.id]}
                                 onRemove={onRemoveItem}
                                 isHi={isHi}
                             />
@@ -266,7 +296,7 @@ const CheckoutScreen = ({ navigation, route }) => {
                 </Animated.View>
 
                 <Animated.View layout={sizeLayout} style={[styles.gutter, styles.stack]}>
-                    <OffersCard discount={c.bill.discount} isHi={isHi} />
+                    <OffersCard discount={c.bill?.discount} rate={c.bill?.discountRate} isHi={isHi} />
                     <TipSelector tip={c.tip} onChange={c.setTip} isHi={isHi} />
                     <DeliveryInstructionsCard
                         selected={c.selectedInstructions}
@@ -275,7 +305,7 @@ const CheckoutScreen = ({ navigation, route }) => {
                         onChangeNote={c.setCustomInstruction}
                         isHi={isHi}
                     />
-                    <BillSummary bill={c.bill} tip={c.tip} isHi={isHi} />
+                    <BillSummary bill={c.bill} tip={c.tip} state={c.billState} isHi={isHi} />
                     <View style={styles.policy}>
                         <MaterialCommunityIcons name="shield-check-outline" size={16} color={colors.inkMuted} />
                         <Text variant="caption" color="muted" style={styles.flex}>
@@ -300,9 +330,12 @@ const CheckoutScreen = ({ navigation, route }) => {
                     onChangeAddress={() => setAddressSheet(true)}
                     paymentOption={c.paymentOption}
                     onChangePayment={() => setPaymentSheet(true)}
-                    amount={c.bill.grandTotal}
+                    amount={c.payableAmount}
+                    billState={c.billState}
+                    onRetryQuote={c.retryQuote}
                     isCod={c.selectedPayment === 'cod'}
                     onConfirm={onConfirm}
+                    closedLabel={closedLine}
                     bottomPad={barBottomPad}
                     isHi={isHi}
                 />
@@ -339,7 +372,7 @@ const CheckoutScreen = ({ navigation, route }) => {
                         onClose={() => setPaymentSheet(false)}
                         selected={c.selectedPayment}
                         onSelect={c.setSelectedPayment}
-                        amount={c.bill.grandTotal}
+                        amount={c.payableAmount}
                         isHi={isHi}
                     />
 

@@ -17,6 +17,7 @@ import { springs, durations, easings } from '../theme/motion';
 import { Image } from 'expo-image';
 import { Button, IconButton, Screen, Text, toast } from '../components/ui';
 import { AuthService } from '../services';
+import { describeError, friendlyError } from '../services/normalize';
 import { useTranslation } from '../hooks/useTranslation';
 import { AuthBar, AuthHeading } from './auth/AuthHero';
 import { useFromSplashHandoff, useSheetSlide } from './auth/authMotion';
@@ -67,10 +68,13 @@ const LoginScreen = ({ navigation, route }) => {
             const response = await AuthService.sendOtp(phoneNumber);
             if (response.message) {
                 slide.leave(-1);
-                navigation.navigate('OTP', { phoneNumber });
+                navigation.navigate('OTP', { phoneNumber, otpLength: response.otpLength });
             }
         } catch (error) {
-            const errorMessage = error.response?.data?.message || error.message || 'Failed to send OTP. Please try again.';
+            if (__DEV__) console.warn('[login] send OTP failed', describeError(error));
+            // a 4xx carries a message written for people (e.g. "Invalid phone number"); anything else gets friendly copy
+            const serverMsg = error?.response?.status < 500 ? error.response?.data?.message : null;
+            const errorMessage = (typeof serverMsg === 'string' && serverMsg) || friendlyError(error, isHi);
             toast.error(isHi ? 'OTP नहीं भेजा जा सका' : "Couldn't send the OTP", { description: errorMessage });
         } finally {
             setIsLoading(false);

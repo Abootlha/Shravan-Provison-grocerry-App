@@ -26,10 +26,11 @@ export class CreateSubcategoryDto {
   @IsImageSource({ allowPlainIcon: true })
   icon!: string;
 
+  /** Optional tile colour; omitted means no colour. */
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MaxLength(30)
-  color!: string;
+  color?: string;
 
   @IsOptional()
   @IsString()
@@ -77,9 +78,9 @@ export class UpdateSubcategoryDto {
   @IsImageSource({ allowPlainIcon: true })
   icon?: string;
 
+  /** `""` clears the colour. */
   @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MaxLength(30)
   color?: string;
 

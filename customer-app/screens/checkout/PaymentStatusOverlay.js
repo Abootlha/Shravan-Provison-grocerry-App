@@ -120,7 +120,7 @@ export function PaymentStatusOverlay({
     onRetry,
     onPayOnDelivery,
     onDismissFailure,
-    etaMinutes = 10,
+    etaMinutes = null,
     isHi,
 }) {
     const styles = useStyles();
@@ -189,7 +189,7 @@ export function PaymentStatusOverlay({
                             {copy.body ? <Text variant="body" color="secondary" align="center">{copy.body}</Text> : null}
                         </FadeSwap>
 
-                        {approved ? (
+                        {approved && etaMinutes ? (
                             <EtaLine show={celebrated || reduce}>
                                 <Text variant="body" color="secondary" align="center">
                                     {isHi ? 'पहुँचने में ' : 'Arriving in '}

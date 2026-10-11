@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { SubcategoriesController } from './subcategories.controller';
+import {
+  AdminSubcategoriesController,
+  SubcategoriesController,
+} from './subcategories.controller';
 import { SubcategoriesService } from './subcategories.service';
 import { Subcategory, SubcategorySchema } from './schemas/subcategory.schema';
 import { RedisModule } from '../../common/utils/redis.module';
@@ -12,7 +15,7 @@ import { RedisModule } from '../../common/utils/redis.module';
     ]),
     RedisModule,
   ],
-  controllers: [SubcategoriesController],
+  controllers: [SubcategoriesController, AdminSubcategoriesController],
   providers: [SubcategoriesService],
   exports: [SubcategoriesService],
 })

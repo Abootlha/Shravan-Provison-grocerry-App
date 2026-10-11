@@ -1,1741 +1,667 @@
-import { useState, useEffect, useRef } from 'react';
-import { api } from '../lib/api';
-import Papa from 'papaparse';
+import * as React from 'react';
+import type { ColumnDef, PaginationState, RowSelectionState, SortingState } from '@tanstack/react-table';
+import { useMutation } from '@tanstack/react-query';
+import { Archive, ArchiveRestore, Copy, FilePen, MoreHorizontal, PackagePlus, Pencil, Search, SearchX, Send, Upload, X } from 'lucide-react';
+import { toast } from 'sonner';
 import {
-    validateProductRows, runWithConcurrency, MAX_IMPORT_ROWS, MAX_IMPORT_FILE_BYTES, IMPORT_CONCURRENCY,
-    type ValidProductRow, type RowError,
-} from '../lib/productCsv';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Badge } from './ui/badge';
-import { Skeleton } from './ui/Skeleton';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/Tabs';
-import { EmptyState } from './ui/EmptyState';
+    DataTable,
+    DataTableColumnHeader,
+    DateTime,
+    EmptyState,
+    Money,
+    PageContainer,
+    PageHeader,
+    selectColumn,
+    StatusBadge,
+    useConfirm,
+    withProviders,
+} from '@/components/shared';
+import { registerCommands, registerSearchProvider } from '@/components/shell/command-registry';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
-    Plus, Pencil, Search, Package, X, Scan, Camera, StopCircle, Upload, Link, ImageIcon,
-    Filter, ChevronLeft, ChevronRight, MoreHorizontal, Eye, Trash2, CheckCircle, XCircle, Boxes,
-    Download, UploadCloud, AlertCircle, Loader2
-} from 'lucide-react';
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { errorMessage, http } from '@/lib/http';
+import { formatNumber } from '@/lib/format';
+import { cn } from '@/lib/utils';
+import { AdjustStockDialog, type StockTarget } from './inventory/AdjustStockDialog';
+import {
+    canEditCatalogue,
+    fetchProducts,
+    invalidateProducts,
+    useCategories,
+    useProductCounts,
+    useProducts,
+    useSubcategories,
+    type ProductListParams,
+} from './products/data';
+import { duplicateToForm } from './products/editorSchema';
+import { ImportWizard } from './products/ImportWizard';
+import { IssueBadges, ProductThumb, StockCell } from './products/ProductBits';
+import { ProductEditor, type EditorTarget } from './products/ProductEditor';
+import {
+    productImage,
+    productMrp,
+    productPrice,
+    productStatus,
+    productUnit,
+    refId,
+    refName,
+    type AdminProduct,
+    type ProductStatus,
+} from './products/types';
 
-type Html5QrcodeInstance = {
-    start: (
-        cameraConfig: { facingMode: string },
-        config: { fps: number; qrbox: { width: number; height: number } },
-        onSuccess: (decodedText: string) => void,
-        onError?: (errorMessage: string) => void
-    ) => Promise<void>;
-    stop: () => Promise<void>;
-};
+type View = 'all' | ProductStatus;
+type Flag = 'attention' | 'low' | 'out' | null;
 
-interface Product {
-    _id: string;
-    name: string;
-    price: number;
-    originalPrice: number;
-    unit: string;
-    stock: number;
-    isAvailable: boolean;
-    barcode?: string;
-    image?: string;
-    images?: string[];
-    description?: string;
-    brand?: string;
-    gst?: number;
-    shelfLife?: number;
-    storageType?: string;
-    nutrition?: {
-        protein?: number;
-        carbs?: number;
-        sugar?: number;
-        fat?: number;
-        transFat?: number;
+const SORTABLE = new Set(['name', 'price', 'stock', 'updatedAt']);
+
+/** Reads initial filters from the URL so links like /products?status=draft or ?attention=1 work. */
+function readUrl() {
+    if (typeof window === 'undefined') return { view: 'all' as View, flag: null as Flag, q: '', categoryId: '', subcategoryId: '' };
+    const p = new URLSearchParams(window.location.search);
+    const status = p.get('status');
+    const stock = p.get('stock') ?? p.get('filter');
+    return {
+        view: (status === 'active' || status === 'draft' || status === 'archived' ? status : 'all') as View,
+        flag: (p.get('attention') === '1' ? 'attention' : stock === 'low' || stock === 'out' ? stock : null) as Flag,
+        q: p.get('q') ?? '',
+        categoryId: p.get('category') ?? '',
+        subcategoryId: p.get('subcategory') ?? '',
     };
-    categoryId: { _id: string; name: string; type?: string } | string;
 }
 
-interface Category {
-    _id: string;
-    name: string;
-    type: 'beverage' | 'non-beverage';
+function useDebounced<T>(value: T, delay = 300) {
+    const [v, setV] = React.useState(value);
+    React.useEffect(() => {
+        const t = setTimeout(() => setV(value), delay);
+        return () => clearTimeout(t);
+    }, [value, delay]);
+    return v;
 }
 
-// Unit options based on category type
-const BEVERAGE_UNITS = ['100ml', '200ml', '250ml', '500ml', '750ml', '1L', '1.5L', '2L', '5L'];
-const NON_BEVERAGE_UNITS = [
-    '50g', '100g', '200g', '250g', '500g', '1kg', '2kg', '5kg', '10kg',
-    '50ml', '100ml', '200ml', '250ml', '500ml', '1L', '2L', '5L',
-    '1pc', '2pcs', '3pcs', '6pcs', '12pcs', '1 dozen',
-    '1 pack', '2 pack', '6 pack'
-];
+function ProductsManager() {
+    const initial = React.useMemo(readUrl, []);
+    const [view, setView] = React.useState<View>(initial.view);
+    const [flag, setFlag] = React.useState<Flag>(initial.flag);
+    const [search, setSearch] = React.useState(initial.q);
+    const [categoryId, setCategoryId] = React.useState(initial.categoryId);
+    const [subcategoryId, setSubcategoryId] = React.useState(initial.subcategoryId);
+    const [pagination, setPagination] = React.useState<PaginationState>({ pageIndex: 0, pageSize: 20 });
+    const [sorting, setSorting] = React.useState<SortingState>([]);
+    const [selection, setSelection] = React.useState<RowSelectionState>({});
+    const [editor, setEditor] = React.useState<EditorTarget | null>(null);
+    const [importOpen, setImportOpen] = React.useState(false);
+    const [stockTarget, setStockTarget] = React.useState<StockTarget | null>(null);
+    const confirm = useConfirm();
+    const editable = canEditCatalogue();
+    const q = useDebounced(search.trim());
 
-const STORAGE_TYPES = ['Ambient', 'Refrigerated', 'Frozen'];
+    const sort = sorting[0] && SORTABLE.has(sorting[0].id) ? `${sorting[0].desc ? '-' : ''}${sorting[0].id}` : undefined;
+    const params: ProductListParams = {
+        page: pagination.pageIndex + 1,
+        limit: pagination.pageSize,
+        q: q || undefined,
+        status: view === 'all' ? undefined : view,
+        categoryId: categoryId || undefined,
+        subcategoryId: subcategoryId || undefined,
+        stock: flag === 'low' || flag === 'out' ? flag : undefined,
+        needsAttention: flag === 'attention' || undefined,
+        sort,
+    };
+    const products = useProducts(params);
+    const counts = useProductCounts();
+    const categories = useCategories();
+    const subcategories = useSubcategories();
 
-export default function ProductsManager() {
-    const [products, setProducts] = useState<Product[]>([]);
-    const [categories, setCategories] = useState<Category[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [showModal, setShowModal] = useState(false);
-    const [editProduct, setEditProduct] = useState<Partial<Product> | null>(null);
-    const [activeTab, setActiveTab] = useState('basic');
-    const [viewProduct, setViewProduct] = useState<Product | null>(null);
-    const [showViewModal, setShowViewModal] = useState(false);
+    // Back to page 1 and a clean selection whenever the filters change.
+    const filterKey = JSON.stringify([view, flag, q, categoryId, subcategoryId, sort]);
+    const firstFilter = React.useRef(true);
+    React.useEffect(() => {
+        if (firstFilter.current) {
+            firstFilter.current = false;
+            return;
+        }
+        setPagination((p) => ({ ...p, pageIndex: 0 }));
+        setSelection({});
+    }, [filterKey]);
 
-    // Filters
-    const [search, setSearch] = useState('');
-    const [categoryFilter, setCategoryFilter] = useState('');
-    const [stockFilter, setStockFilter] = useState<'all' | 'in-stock' | 'low-stock' | 'out-of-stock'>('all');
-    const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
-    const [showFilters, setShowFilters] = useState(false);
+    // Mirror filters into the URL (replaceState: no history spam) so a view can be shared.
+    React.useEffect(() => {
+        const url = new URL(window.location.href);
+        const set = (k: string, v: string | null) => (v ? url.searchParams.set(k, v) : url.searchParams.delete(k));
+        set('status', view === 'all' ? null : view);
+        set('attention', flag === 'attention' ? '1' : null);
+        set('stock', flag === 'low' || flag === 'out' ? flag : null);
+        set('filter', null);
+        set('q', q || null);
+        set('category', categoryId || null);
+        set('subcategory', subcategoryId || null);
+        window.history.replaceState(window.history.state, '', url);
+    }, [view, flag, q, categoryId, subcategoryId]);
 
-    // Pagination
-    const [page, setPage] = useState(1);
-    const [totalPages, setTotalPages] = useState(1);
-    const ITEMS_PER_PAGE = 10;
-
-    // Scanner
-    const [showScanner, setShowScanner] = useState(false);
-    const [scannerReady, setScannerReady] = useState(false);
-    const [imageMode, setImageMode] = useState<'url' | 'file'>('url');
-    const [imagePreview, setImagePreview] = useState<string>('');
-    // Background removal ("pack shot") for uploaded images, done by the backend on save.
-    const [bgConfig, setBgConfig] = useState<{ provider: string; enabled: boolean } | null>(null);
-    const [removeBg, setRemoveBg] = useState(false);
-    const [bgPreview, setBgPreview] = useState<{ before: string; after?: string; loading: boolean; error?: string }>({ before: '', loading: false });
-    const scannerRef = useRef<Html5QrcodeInstance | null>(null);
-    const fileInputRef = useRef<HTMLInputElement>(null);
-
-    const [form, setForm] = useState({
-        name: '', price: '', originalPrice: '', unit: '', stock: '', categoryId: '',
-        subcategoryId: '', itemGroupId: '',
-        description: '', highlights: '', image: '', images: [] as string[], barcode: '', customUnit: '', brand: '',
-        mrp: '', gst: '', shelfLife: '', storageType: '',
-        protein: '', carbs: '', sugar: '', fat: '', transFat: ''
-    });
-
-    // Bulk Import States
-    const [showBulkImportModal, setShowBulkImportModal] = useState(false);
-    const [isBulkImporting, setIsBulkImporting] = useState(false);
-    const [bulkImportProgress, setBulkImportProgress] = useState({ current: 0, total: 0, success: 0, failed: 0 });
-    const bulkFileInputRef = useRef<HTMLInputElement>(null);
-    // Validated-but-not-yet-imported CSV, shown as a summary before anything is sent.
-    const [bulkPreview, setBulkPreview] = useState<{ fileName: string; valid: ValidProductRow[]; invalid: RowError[] } | null>(null);
-    const [bulkImportErrors, setBulkImportErrors] = useState<RowError[]>([]);
-    const [bulkFileError, setBulkFileError] = useState('');
-
-    const [availableSubcategories, setAvailableSubcategories] = useState<Category[]>([]);
-    const [availableItemGroups, setAvailableItemGroups] = useState<any[]>([]);
-
-    const selectedCategory = categories.find(c => c._id === form.categoryId);
-    const unitOptions = selectedCategory?.type === 'beverage' ? BEVERAGE_UNITS : NON_BEVERAGE_UNITS;
-
-    useEffect(() => {
-        fetchData();
-    }, [categoryFilter, page]);
-
-    useEffect(() => {
-        api.getImageProcessingConfig()
-            .then(cfg => setBgConfig(cfg))
-            .catch(() => setBgConfig({ provider: 'none', enabled: false }));
+    // Deep links: ?action=new (⌘K "New product"), ?action=import, ?id=<product>.
+    React.useEffect(() => {
+        const url = new URL(window.location.href);
+        const action = url.searchParams.get('action');
+        const id = url.searchParams.get('id');
+        if (action === 'new') setEditor({ mode: 'create', key: Date.now() });
+        else if (action === 'import' || action === 'add-import') setImportOpen(true);
+        else if (id && /^[a-f0-9]{24}$/i.test(id)) setEditor({ mode: 'edit', id });
+        if (action) {
+            url.searchParams.delete('action');
+            window.history.replaceState(window.history.state, '', url);
+        }
     }, []);
 
-    function resetBgState() {
-        setRemoveBg(!!bgConfig?.enabled);
-        setBgPreview({ before: '', loading: false });
-    }
+    const openEditor = (target: EditorTarget | null) => {
+        setEditor(target);
+        const url = new URL(window.location.href);
+        if (target?.mode === 'edit') url.searchParams.set('id', target.id);
+        else url.searchParams.delete('id');
+        window.history.replaceState(window.history.state, '', url);
+    };
 
-    async function runBgPreview(source: string, enabled = removeBg) {
-        if (!enabled || !source.startsWith('data:')) {
-            setBgPreview({ before: source, loading: false });
-            return;
-        }
-        setBgPreview({ before: source, loading: true });
-        try {
-            const res = await api.previewProductImage(source, true);
-            setBgPreview({
-                before: source,
-                after: res.image,
-                loading: false,
-                error: res.backgroundRemoved ? undefined : (res.warnings?.[0] || 'Background could not be removed; the image will only be trimmed and squared.'),
-            });
-        } catch (err: any) {
-            setBgPreview({ before: source, loading: false, error: err?.message || 'Preview failed' });
-        }
-    }
-
-    // Fetch subcategories when category changes
-    useEffect(() => {
-        if (form.categoryId) {
-            api.getSubcategories(form.categoryId).then(data => {
-                setAvailableSubcategories(data.subcategories || []);
-                // Reset subcategory and item group when category changes
-                if (form.subcategoryId) {
-                    setForm(prev => ({ ...prev, subcategoryId: '', itemGroupId: '' }));
-                }
-            }).catch(err => {
-                console.error('Error fetching subcategories:', err);
-                setAvailableSubcategories([]);
-            });
-        } else {
-            setAvailableSubcategories([]);
-            setAvailableItemGroups([]);
-        }
-    }, [form.categoryId]);
-
-    // Fetch item groups when subcategory changes
-    useEffect(() => {
-        if (form.subcategoryId) {
-            api.getItemGroups(form.subcategoryId).then(data => {
-                setAvailableItemGroups(data.itemGroups || []);
-                // Reset item group when subcategory changes
-                if (form.itemGroupId) {
-                    setForm(prev => ({ ...prev, itemGroupId: '' }));
-                }
-            }).catch(err => {
-                console.error('Error fetching item groups:', err);
-                setAvailableItemGroups([]);
-            });
-        } else {
-            setAvailableItemGroups([]);
-        }
-    }, [form.subcategoryId]);
-
-    async function fetchData() {
-        try {
-            const [productsData, categoriesData] = await Promise.all([
-                api.getAllProducts({ categoryId: categoryFilter || undefined }),
-                api.getCategories(),
-            ]);
-            setProducts(productsData.products || []);
-            setTotalPages(Math.ceil((productsData.products?.length || 0) / ITEMS_PER_PAGE));
-            setCategories(categoriesData.categories || []);
-        } catch (error) {
-            console.error('Error:', error);
-        } finally {
-            setLoading(false);
-        }
-    }
-
-    function openAddModal() {
-        setEditProduct(null);
-        setActiveTab('basic');
-        setForm({
-            name: '', price: '', originalPrice: '', unit: '', stock: '', categoryId: '',
-            subcategoryId: '', itemGroupId: '',
-            description: '', highlights: '', image: '', images: [], barcode: '', customUnit: '', brand: '',
-            mrp: '', gst: '', shelfLife: '', storageType: '',
-            protein: '', carbs: '', sugar: '', fat: '', transFat: ''
-        });
-        setImagePreview('');
-        setImageMode('url');
-        resetBgState();
-        setAvailableSubcategories([]);
-        setAvailableItemGroups([]);
-        setShowModal(true);
-    }
-
-    function openEditModal(product: Product) {
-        setEditProduct(product);
-        setActiveTab('basic');
-        const categoryId = typeof product.categoryId === 'string' ? product.categoryId : product.categoryId?._id || '';
-        setForm({
-            name: product.name,
-            price: String(product.price),
-            originalPrice: String(product.originalPrice || ''),
-            mrp: String(product.originalPrice || ''),
-            unit: product.unit,
-            stock: String(product.stock),
-            categoryId,
-            subcategoryId: (product as any).subcategoryId?._id || (product as any).subcategoryId || '',
-            itemGroupId: (product as any).itemGroupId?._id || (product as any).itemGroupId || '',
-            description: product.description || '',
-            highlights: (product as any).highlights || '',
-            image: product.image || '',
-            images: product.images || (product.image ? [product.image] : []),
-            customUnit: '',
-            barcode: product.barcode || '',
-            brand: product.brand || '',
-            gst: String(product.gst || ''),
-            shelfLife: String(product.shelfLife || ''),
-            storageType: product.storageType || '',
-            protein: String(product.nutrition?.protein || ''),
-            carbs: String(product.nutrition?.carbs || ''),
-            sugar: String(product.nutrition?.sugar || ''),
-            fat: String(product.nutrition?.fat || ''),
-            transFat: String(product.nutrition?.transFat || ''),
-        });
-        setImagePreview(product.image || '');
-        setImageMode('url');
-        resetBgState();
-        setShowModal(true);
-    }
-
-    async function handleSubmit(e: React.FormEvent) {
-        e.preventDefault();
-        try {
-            // Validate required hierarchy fields
-            if (!form.categoryId) {
-                alert('Please select a category');
-                return;
-            }
-            if (!form.subcategoryId) {
-                alert('Please select a subcategory');
-                return;
-            }
-            if (!form.itemGroupId) {
-                alert('Please select an item group');
-                return;
-            }
-
-            const finalUnit = form.unit === 'custom' ? form.customUnit : form.unit;
-            const data = {
-                name: form.name,
-                price: Number(form.price),
-                originalPrice: Number(form.mrp) || Number(form.price),
-                unit: finalUnit,
-                stock: Number(form.stock),
-                categoryId: form.categoryId,
-                subcategoryId: form.subcategoryId,
-                itemGroupId: form.itemGroupId,
-                barcode: form.barcode,
-                description: form.description,
-                highlights: form.highlights,
-                image: form.images && form.images.length > 0 ? form.images[0] : (form.image || imagePreview),
-                images: form.images && form.images.length > 0 ? form.images.filter(Boolean) : (form.image ? [form.image] : (imagePreview ? [imagePreview] : [])),
-                brand: form.brand,
-                gst: Number(form.gst) || 0,
-                shelfLife: Number(form.shelfLife) || 0,
-                storageType: form.storageType,
-                nutrition: {
-                    protein: Number(form.protein) || 0,
-                    carbs: Number(form.carbs) || 0,
-                    sugar: Number(form.sugar) || 0,
-                    fat: Number(form.fat) || 0,
-                    transFat: Number(form.transFat) || 0,
-                },
-                isAvailable: true,
-                // Uploaded images go through background removal + square pack-shot on the server.
-                removeBackground: !!bgConfig?.enabled && removeBg,
-            };
-            if (editProduct?._id) {
-                await api.updateProduct(editProduct._id, data);
-            } else {
-                await api.createProduct(data);
-            }
-            setShowModal(false);
-            fetchData();
-        } catch (error: any) {
-            console.error('Error saving product:', error);
-            const errorMessage = error?.message || error?.toString() || 'Unknown error';
-            alert(`Error saving product: ${errorMessage}`);
-        }
-    }
-
-    function handleImageUrlChange(index: number, url: string) {
-        const newImages = [...(form.images || [])];
-        if (newImages.length === 0 && form.image) {
-            newImages.push(form.image);
-        }
-        newImages[index] = url;
-        setForm({ ...form, images: newImages, image: newImages[0] || '' });
-    }
-
-    function handleAddImageUrl() {
-        setForm({ ...form, images: [...(form.images || []), ''] });
-    }
-
-    function handleRemoveImage(index: number) {
-        const newImages = [...(form.images || [])];
-        newImages.splice(index, 1);
-        setForm({ ...form, images: newImages, image: newImages[0] || '' });
-    }
-
-    function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-        const file = e.target.files?.[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const base64 = reader.result as string;
-                setImagePreview(base64);
-                setForm({ ...form, image: base64, images: [...(form.images || []), base64] });
-                runBgPreview(base64);
-            };
-            reader.readAsDataURL(file);
-        }
-    }
-
-    function clearImage() {
-        setImagePreview('');
-        setForm({ ...form, image: '', images: [] });
-        if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-
-    function downloadCsvTemplate() {
-        const csvContent = "Barcode,Name,Brand,Price,OriginalPrice,Stock,Unit,Category,Subcategory,ItemGroup,Description,Highlights,Images,ImageURL1,ImageURL2\n1234567890123,Sample Product,Brand A,100,120,50,1pc,Category Name,Subcategory_ID,ItemGroup_ID,Product Details here,High quality,https://example.com/img1.jpg|https://example.com/img2.jpg,,";
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement("a");
-        const url = URL.createObjectURL(blob);
-        link.setAttribute("href", url);
-        link.setAttribute("download", "shravan_kirana_products_template.csv");
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    }
-
-    function resetBulkImport() {
-        setBulkPreview(null);
-        setBulkImportErrors([]);
-        setBulkFileError('');
-        setBulkImportProgress({ current: 0, total: 0, success: 0, failed: 0 });
-        if (bulkFileInputRef.current) bulkFileInputRef.current.value = '';
-    }
-
-    // Step 1: parse + validate the file and show a per-row summary. Nothing is imported yet.
-    function handleBulkImport(e: React.ChangeEvent<HTMLInputElement>) {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        resetBulkImport();
-
-        if (file.size > MAX_IMPORT_FILE_BYTES) {
-            setBulkFileError(`File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is ${MAX_IMPORT_FILE_BYTES / 1024 / 1024} MB.`);
-            return;
-        }
-
-        Papa.parse(file, {
-            header: true,
-            skipEmptyLines: true,
-            complete: (results) => {
-                const rows = results.data as Record<string, unknown>[];
-                if (rows.length === 0) {
-                    setBulkFileError('The CSV file has no data rows.');
-                    return;
-                }
-                if (rows.length > MAX_IMPORT_ROWS) {
-                    setBulkFileError(`The CSV has ${rows.length} rows. Split it into files of at most ${MAX_IMPORT_ROWS} rows.`);
-                    return;
-                }
-                if (categories.length === 0) {
-                    setBulkFileError('No categories exist yet. Create categories before importing products.');
-                    return;
-                }
-                const { valid, invalid } = validateProductRows(rows, categories);
-                setBulkPreview({ fileName: file.name, valid, invalid });
+    // ⌘K: live product search plus page actions while this page is open.
+    React.useEffect(() => {
+        const offSearch = registerSearchProvider({
+            id: 'products',
+            group: 'Products',
+            minQueryLength: 2,
+            search: async (query, signal) => {
+                const res = await fetchProducts({ page: 1, limit: 8, q: query }, signal);
+                return res.products.map((p) => ({
+                    id: `product-${p._id}`,
+                    label: p.name,
+                    group: 'Products',
+                    hint: [productUnit(p), productStatus(p) !== 'active' ? productStatus(p) : ''].filter(Boolean).join(' · '),
+                    run: () => openEditor({ mode: 'edit', id: p._id }),
+                }));
             },
-            error: (error) => {
-                console.error("CSV Parse Error:", error);
-                setBulkFileError('Failed to read CSV file.');
-            }
         });
-    }
+        const offCommands = editable
+            ? registerCommands([
+                  { id: 'products-import', label: 'Import products from CSV', group: 'Actions', icon: Upload, keywords: ['csv', 'bulk', 'upload'], run: () => setImportOpen(true) },
+                  { id: 'products-attention', label: 'Products that need attention', group: 'Actions', keywords: ['missing', 'issues', 'fix'], run: () => setFlag('attention') },
+              ])
+            : () => {};
+        return () => {
+            offSearch();
+            offCommands();
+        };
+    }, [editable]);
 
-    // Step 2: import the valid rows, a few requests at a time.
-    async function confirmBulkImport() {
-        if (!bulkPreview || bulkPreview.valid.length === 0) return;
-        const rows = bulkPreview.valid;
-
-        setIsBulkImporting(true);
-        setBulkImportErrors([]);
-        setBulkImportProgress({ current: 0, total: rows.length, success: 0, failed: 0 });
-
-        const failures: RowError[] = [];
-        await runWithConcurrency(rows, IMPORT_CONCURRENCY, async ({ row, data }) => {
-            let ok = false;
-            try {
-                await api.createProduct(data);
-                ok = true;
-            } catch (error: any) {
-                console.error(`Error importing row ${row}:`, error);
-                failures.push({ row, name: String(data.name), errors: [error?.message || 'Request failed'] });
-            }
-            setBulkImportProgress(prev => ({
-                ...prev,
-                current: prev.current + 1,
-                success: prev.success + (ok ? 1 : 0),
-                failed: prev.failed + (ok ? 0 : 1),
-            }));
-        });
-
-        setBulkImportErrors(failures.sort((a, b) => a.row - b.row));
-        setBulkPreview(null);
-        setIsBulkImporting(false);
-        fetchData(); // Refresh list after import
-    }
-
-    async function startScanner() {
-        setShowScanner(true);
-        setScannerReady(false);
-        try {
-            const { Html5Qrcode } = await import('html5-qrcode');
-            scannerRef.current = new Html5Qrcode('barcode-reader');
-            await scannerRef.current.start(
-                { facingMode: 'environment' },
-                { fps: 10, qrbox: { width: 250, height: 100 } },
-                onScanSuccess,
-                () => { }
-            );
-            setScannerReady(true);
-        } catch (err) {
-            console.error('Scanner failed to start:', err);
-            alert('Could not access camera.');
-            setShowScanner(false);
-        }
-    }
-
-    async function stopScanner() {
-        if (scannerRef.current) {
-            try { await scannerRef.current.stop(); scannerRef.current = null; } catch { }
-        }
-        setShowScanner(false);
-        setScannerReady(false);
-    }
-
-    async function onScanSuccess(barcode: string) {
-        await stopScanner();
-        setForm(prev => ({ ...prev, barcode }));
-    }
-
-    // Filter products
-    const filteredProducts = products.filter(p => {
-        const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
-            (p.barcode && p.barcode.includes(search));
-        const matchesStock = stockFilter === 'all' ||
-            (stockFilter === 'out-of-stock' && p.stock === 0) ||
-            (stockFilter === 'low-stock' && p.stock > 0 && p.stock < 10) ||
-            (stockFilter === 'in-stock' && p.stock >= 10);
-        const matchesStatus = statusFilter === 'all' ||
-            (statusFilter === 'active' && p.isAvailable) ||
-            (statusFilter === 'inactive' && !p.isAvailable);
-        return matchesSearch && matchesStock && matchesStatus;
+    const setStatus = useMutation({
+        mutationFn: (v: { product: AdminProduct; status: ProductStatus }) => http.patch(`/admin/products/${v.product._id}/status`, { status: v.status }),
+        onSuccess: (_d, v) => {
+            const verb = v.status === 'archived' ? 'Archived' : v.status === 'draft' ? 'Moved to drafts' : 'Published';
+            toast.success(verb, { description: v.product.name });
+            invalidateProducts();
+        },
+        onError: (e) => toast.error('Status not changed', { description: errorMessage(e) }),
     });
 
-    const paginatedProducts = filteredProducts.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
-    const actualTotalPages = Math.ceil(filteredProducts.length / ITEMS_PER_PAGE) || 1;
+    const changeStatus = async (product: AdminProduct, status: ProductStatus) => {
+        if (status === 'archived') {
+            const ok = await confirm({
+                title: `Archive “${product.name}”?`,
+                description: 'It disappears from the app and search. Past orders keep their copy, and you can restore it from the Archived tab.',
+                confirmLabel: 'Archive',
+                tone: 'destructive',
+                onConfirm: () => setStatus.mutateAsync({ product, status }),
+            });
+            return ok;
+        }
+        if (status === 'active' && product.issues?.length) {
+            return confirm({
+                title: `Publish “${product.name}” with problems?`,
+                description: `Customers will see it although it has: ${product.issues.map((i) => i.replace(/_/g, ' ')).join(', ')}. Fixing it first is better.`,
+                confirmLabel: 'Publish anyway',
+                onConfirm: () => setStatus.mutateAsync({ product, status }),
+            });
+        }
+        setStatus.mutate({ product, status });
+    };
 
-    if (loading) {
-        return (
-            <div className="dashboard-bg min-h-screen">
-                <div className="relative z-10 p-6 lg:p-8 space-y-8">
-                    <div className="flex justify-between">
-                        <Skeleton className="h-12 w-64" />
-                        <Skeleton className="h-10 w-40" />
-                    </div>
-                    <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-                        <div className="p-4 space-y-4">
-                            {[...Array(8)].map((_, i) => (
-                                <div key={i} className="flex items-center gap-4">
-                                    <Skeleton className="w-12 h-12 rounded-xl" />
-                                    <div className="flex-1 space-y-2">
-                                        <Skeleton className="h-4 w-48" />
-                                        <Skeleton className="h-3 w-24" />
-                                    </div>
-                                    <Skeleton className="h-6 w-20" />
-                                    <Skeleton className="h-6 w-16" />
-                                </div>
-                            ))}
+    const bulkStatus = async (rows: AdminProduct[], status: ProductStatus, clear: () => void) => {
+        const ids = rows.map((r) => r._id);
+        const label = status === 'archived' ? 'Archive' : status === 'draft' ? 'Move to drafts' : 'Publish';
+        const withIssues = status === 'active' ? rows.filter((r) => r.issues?.length).length : 0;
+        const ok = await confirm({
+            title: `${label} ${formatNumber(ids.length)} product${ids.length === 1 ? '' : 's'}?`,
+            description:
+                status === 'archived'
+                    ? 'They disappear from the app. You can restore them from the Archived tab.'
+                    : status === 'draft'
+                      ? 'They are hidden from the app until published again.'
+                      : withIssues
+                        ? `${formatNumber(withIssues)} of them still need attention (missing price, image or unit) and will go live as they are.`
+                        : 'They become visible in the app.',
+            confirmLabel: label,
+            tone: status === 'archived' ? 'destructive' : 'default',
+            onConfirm: async () => {
+                for (let i = 0; i < ids.length; i += 200) {
+                    await http.post('/admin/products/bulk-status', { ids: ids.slice(i, i + 200), status });
+                }
+            },
+        });
+        if (ok) {
+            const done = status === 'archived' ? 'Archived' : status === 'draft' ? 'Moved to drafts:' : 'Published';
+            toast.success(`${done} ${formatNumber(ids.length)} product${ids.length === 1 ? '' : 's'}`);
+            clear();
+            invalidateProducts();
+        }
+    };
+
+    const columns = React.useMemo<ColumnDef<AdminProduct>[]>(() => {
+        const cols: ColumnDef<AdminProduct>[] = [
+            {
+                id: 'name',
+                accessorKey: 'name',
+                header: ({ column }) => <DataTableColumnHeader column={column} title="Product" />,
+                enableHiding: false,
+                meta: { className: 'min-w-[13rem] max-w-[26rem] whitespace-normal py-2', label: 'Product' },
+                cell: ({ row }) => {
+                    const p = row.original;
+                    const unit = productUnit(p).replace(/\s+/g, ' ');
+                    return (
+                        <div className="flex items-center gap-3">
+                            <ProductThumb src={productImage(p)} alt="" size={44} />
+                            <div className="min-w-0 space-y-0.5">
+                                <p className="line-clamp-2 leading-snug font-medium text-foreground">{p.name}</p>
+                                <p className="truncate text-xs text-muted-foreground">{[p.brand, unit].filter(Boolean).join(' · ') || '—'}</p>
+                                <IssueBadges product={p} className="pt-0.5" />
+                                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 pt-0.5 text-xs text-muted-foreground tabular-nums sm:hidden">
+                                    {productPrice(p) ? <Money value={productPrice(p)} className="font-semibold text-foreground" /> : <span className="text-warning">No price</span>}
+                                    <span>{formatNumber(p.stock)} in stock</span>
+                                    <StatusBadge kind="product" status={productStatus(p)} />
+                                </p>
+                            </div>
                         </div>
-                    </div>
-                </div>
-            </div>
-        );
-    }
+                    );
+                },
+            },
+            {
+                id: 'category',
+                header: 'Category',
+                enableSorting: false,
+                meta: { label: 'Category', className: 'hidden max-w-[14rem] md:table-cell', headerClassName: 'hidden md:table-cell' },
+                cell: ({ row }) => {
+                    const cat = refName(row.original.categoryId);
+                    const sub = refName(row.original.subcategoryId);
+                    return (
+                        <div className="min-w-0 text-sm">
+                            <p className="truncate">{cat || <span className="text-muted-foreground">—</span>}</p>
+                            {sub ? <p className="truncate text-xs text-muted-foreground">{sub}</p> : null}
+                        </div>
+                    );
+                },
+            },
+            {
+                id: 'price',
+                accessorFn: (p) => productPrice(p),
+                header: ({ column }) => <DataTableColumnHeader column={column} title="Price" />,
+                meta: { align: 'right', label: 'Price', className: 'hidden sm:table-cell', headerClassName: 'hidden sm:table-cell' },
+                cell: ({ row }) => {
+                    const price = productPrice(row.original);
+                    const mrp = productMrp(row.original);
+                    if (!price) return <span className="font-medium text-warning">Not set</span>;
+                    return (
+                        <div className="leading-tight">
+                            <Money value={price} className="font-semibold" />
+                            {mrp && mrp > price ? <Money value={mrp} className="block text-xs text-muted-foreground line-through" /> : null}
+                        </div>
+                    );
+                },
+            },
+            {
+                id: 'stock',
+                accessorKey: 'stock',
+                header: ({ column }) => <DataTableColumnHeader column={column} title="Stock" />,
+                meta: { align: 'right', label: 'Stock', className: 'hidden sm:table-cell', headerClassName: 'hidden sm:table-cell' },
+                cell: ({ row }) => <StockCell stock={row.original.stock} reorderLevel={row.original.reorderLevel} state={row.original.stockState} />,
+            },
+            {
+                id: 'status',
+                header: 'Status',
+                enableSorting: false,
+                meta: { label: 'Status', className: 'hidden sm:table-cell', headerClassName: 'hidden sm:table-cell' },
+                cell: ({ row }) => {
+                    const p = row.original;
+                    return (
+                        <div className="flex flex-col items-start gap-1">
+                            <StatusBadge kind="product" status={productStatus(p)} />
+                            {p.isAvailable === false && productStatus(p) === 'active' ? <span className="text-xs text-muted-foreground">Sales paused</span> : null}
+                        </div>
+                    );
+                },
+            },
+            {
+                id: 'updatedAt',
+                accessorKey: 'updatedAt',
+                header: ({ column }) => <DataTableColumnHeader column={column} title="Updated" />,
+                meta: { label: 'Updated', className: 'hidden whitespace-nowrap text-muted-foreground xl:table-cell', headerClassName: 'hidden xl:table-cell' },
+                cell: ({ row }) => <DateTime value={row.original.updatedAt} format="relative" />,
+            },
+            {
+                id: 'actions',
+                enableHiding: false,
+                enableSorting: false,
+                meta: { className: 'w-12', align: 'right' },
+                cell: ({ row }) => <RowActions product={row.original} editable={editable} onEdit={() => openEditor({ mode: 'edit', id: row.original._id })} onDuplicate={() => openEditor({ mode: 'create', key: Date.now(), initial: duplicateToForm(row.original) })} onStatus={(s) => changeStatus(row.original, s)} onAdjust={() => setStockTarget(toStockTarget(row.original))} />,
+            },
+        ];
+        return editable ? [rowSelectColumn(), ...cols] : cols;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [editable]);
+
+    const c = counts.data;
+    const subOptions = (subcategories.data ?? []).filter((s) => refId(s.parentId) === categoryId);
+    const filtered = !!(q || categoryId || subcategoryId || flag || view !== 'all');
+    const clearFilters = () => {
+        setSearch('');
+        setCategoryId('');
+        setSubcategoryId('');
+        setFlag(null);
+        setView('all');
+    };
+
+    const views: { id: View; label: string; count?: number }[] = [
+        { id: 'all', label: 'All', count: c?.all },
+        { id: 'active', label: 'Active', count: c?.active },
+        { id: 'draft', label: 'Drafts', count: c?.draft },
+        { id: 'archived', label: 'Archived', count: c?.archived },
+    ];
+    const flags: { id: Exclude<Flag, null>; label: string; count?: number; tone: 'warning' | 'destructive' }[] = [
+        { id: 'attention', label: 'Needs attention', count: c?.needsAttention, tone: 'warning' },
+        { id: 'low', label: 'Low stock', count: c?.lowStock, tone: 'warning' },
+        { id: 'out', label: 'Out of stock', count: c?.outOfStock, tone: 'destructive' },
+    ];
 
     return (
-        <div className="dashboard-bg min-h-screen">
-            <div className="relative z-10 p-6 lg:p-8 space-y-8">
-
-                {/* Hero Header */}
-                <div className="animate-slide-up delay-1">
-                    <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
-                        <div>
-                            <div className="flex items-center gap-3 mb-2">
-                                <Boxes className="w-5 h-5" style={{ color: 'var(--accent)' }} />
-                                <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
-                                    Product Catalog
-                                </span>
-                            </div>
-                            <h1 className="font-display text-4xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
-                                Products
-                            </h1>
-                            <p className="mt-2 text-lg" style={{ color: 'var(--text-secondary)' }}>
-                                {products.length} products in your catalog
-                            </p>
-                        </div>
-                        <div className="flex gap-2">
-                            <Button variant="outline" onClick={downloadCsvTemplate} className="hidden sm:flex">
-                                <Download className="w-4 h-4 mr-2" /> Template
+        <PageContainer>
+            <PageHeader
+                title="Products"
+                description="The whole catalogue, including drafts and archived items. Click a row to edit."
+                actions={
+                    editable ? (
+                        <>
+                            <Button variant="outline" onClick={() => setImportOpen(true)}>
+                                <Upload aria-hidden /> Import CSV
                             </Button>
-                            <Button variant="secondary" onClick={() => setShowBulkImportModal(true)}>
-                                <UploadCloud className="w-4 h-4 mr-2" /> Bulk Import
+                            <Button onClick={() => openEditor({ mode: 'create', key: Date.now() })}>
+                                <PackagePlus aria-hidden /> New product
                             </Button>
-                            <Button onClick={openAddModal}>
-                                <Plus className="w-4 h-4 mr-2" /> Add Product
-                            </Button>
-                        </div>
+                        </>
+                    ) : null
+                }
+            >
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div role="tablist" aria-label="Product status" className="flex w-full gap-1 overflow-x-auto rounded-xl bg-muted p-1 sm:w-fit [scrollbar-width:none]">
+                        {views.map((v) => (
+                            <button
+                                key={v.id}
+                                role="tab"
+                                type="button"
+                                aria-selected={view === v.id}
+                                onClick={() => setView(v.id)}
+                                className={cn(
+                                    'flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-medium whitespace-nowrap transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none sm:flex-none',
+                                    view === v.id ? 'bg-card text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.06)]' : 'text-muted-foreground hover:text-foreground',
+                                )}
+                            >
+                                {v.label}
+                                <span className="text-xs text-muted-foreground tabular-nums">{v.count === undefined ? '' : formatNumber(v.count)}</span>
+                            </button>
+                        ))}
+                    </div>
+                    <div className="flex flex-wrap gap-2" aria-label="Quick filters">
+                        {flags.map((f) => {
+                            const on = flag === f.id;
+                            const has = (f.count ?? 0) > 0;
+                            return (
+                                <button
+                                    key={f.id}
+                                    type="button"
+                                    aria-pressed={on}
+                                    onClick={() => setFlag(on ? null : f.id)}
+                                    className={cn(
+                                        'inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none',
+                                        on ? 'border-transparent bg-brand-tint text-brand-text' : 'bg-card hover:bg-muted',
+                                    )}
+                                >
+                                    {f.label}
+                                    <span
+                                        className={cn(
+                                            'rounded-md px-1.5 text-xs tabular-nums',
+                                            !has ? 'text-muted-foreground' : f.tone === 'destructive' ? 'bg-destructive-tint text-destructive' : 'bg-warning-tint text-warning',
+                                        )}
+                                    >
+                                        {f.count === undefined ? '…' : formatNumber(f.count)}
+                                    </span>
+                                    {on ? <X className="size-3.5" aria-hidden /> : null}
+                                </button>
+                            );
+                        })}
                     </div>
                 </div>
+            </PageHeader>
 
-                {/* Search & Filters */}
-                <div className="flex flex-col gap-4 animate-slide-up delay-2">
-                    <div className="flex flex-col sm:flex-row gap-3">
-                        <div className="relative flex-1 max-w-md">
-                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+            {flag === 'attention' ? (
+                <p className="-mt-2 max-w-[80ch] text-sm text-pretty text-muted-foreground">
+                    Products missing a price, an image or a unit, or with a barcode typed into the unit. Open each one to fix it; nothing is corrected automatically.
+                </p>
+            ) : null}
+
+            <DataTable
+                label="Products"
+                columns={columns}
+                data={products.data?.products}
+                loading={products.isPending}
+                fetching={products.isFetching}
+                error={products.error ?? undefined}
+                onRetry={() => products.refetch()}
+                pagination={pagination}
+                onPaginationChange={setPagination}
+                rowCount={products.data?.total}
+                sorting={sorting}
+                onSortingChange={setSorting}
+                enableRowSelection={editable}
+                rowSelection={selection}
+                onRowSelectionChange={setSelection}
+                onRowClick={(p) => openEditor({ mode: 'edit', id: p._id })}
+                bulkActions={(rows, clear) => (
+                    <>
+                        {view !== 'active' ? (
+                            <Button size="sm" variant="outline" onClick={() => bulkStatus(rows, 'active', clear)}>
+                                <Send aria-hidden /> Publish
+                            </Button>
+                        ) : null}
+                        {view !== 'draft' ? (
+                            <Button size="sm" variant="outline" onClick={() => bulkStatus(rows, 'draft', clear)}>
+                                <FilePen aria-hidden /> Move to drafts
+                            </Button>
+                        ) : null}
+                        {view !== 'archived' ? (
+                            <Button size="sm" variant="outline" className="text-destructive" onClick={() => bulkStatus(rows, 'archived', clear)}>
+                                <Archive aria-hidden /> Archive
+                            </Button>
+                        ) : null}
+                    </>
+                )}
+                toolbar={
+                    <>
+                        <div className="relative w-full sm:w-64">
+                            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
                             <Input
-                                placeholder="Search products or barcode..."
+                                type="search"
                                 value={search}
-                                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                                className="pl-11"
+                                onChange={(e) => setSearch(e.target.value)}
+                                placeholder="Name, brand, barcode or SKU"
+                                aria-label="Search products"
+                                className="pl-8"
                             />
                         </div>
-                        <Button variant="outline" onClick={() => setShowFilters(!showFilters)}>
-                            <Filter className="w-4 h-4 mr-2" />
-                            Filters
-                            {(categoryFilter || stockFilter !== 'all' || statusFilter !== 'all') && (
-                                <span className="ml-2 w-5 h-5 rounded-full text-xs flex items-center justify-center" style={{ background: 'var(--accent)', color: 'var(--bg-primary)' }}>
-                                    {[categoryFilter, stockFilter !== 'all', statusFilter !== 'all'].filter(Boolean).length}
-                                </span>
-                            )}
-                        </Button>
-                    </div>
-
-                    {/* Filters Panel */}
-                    {showFilters && (
-                        <div
-                            className="p-5 rounded-2xl animate-scale-in"
-                            style={{ background: 'var(--bg-secondary)', border: '1px dashed var(--border)' }}
+                        <Select
+                            value={categoryId || 'all'}
+                            onValueChange={(v) => {
+                                setCategoryId(v === 'all' ? '' : v);
+                                setSubcategoryId('');
+                            }}
                         >
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                <div>
-                                    <label className="text-xs font-semibold mb-2 block" style={{ color: 'var(--text-secondary)' }}>Category</label>
-                                    <select
-                                        value={categoryFilter}
-                                        onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }}
-                                        className="w-full px-4 py-2.5 rounded-xl text-sm"
-                                        style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)', outline: 'none' }}
-                                    >
-                                        <option value="">All Categories</option>
-                                        {categories.map((cat) => (
-                                            <option key={cat._id} value={cat._id}>{cat.name}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="text-xs font-semibold mb-2 block" style={{ color: 'var(--text-secondary)' }}>Stock Status</label>
-                                    <select
-                                        value={stockFilter}
-                                        onChange={(e) => { setStockFilter(e.target.value as any); setPage(1); }}
-                                        className="w-full px-4 py-2.5 rounded-xl text-sm"
-                                        style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)', outline: 'none' }}
-                                    >
-                                        <option value="all">All</option>
-                                        <option value="in-stock">In Stock (10+)</option>
-                                        <option value="low-stock">Low Stock (&lt;10)</option>
-                                        <option value="out-of-stock">Out of Stock</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="text-xs font-semibold mb-2 block" style={{ color: 'var(--text-secondary)' }}>Status</label>
-                                    <select
-                                        value={statusFilter}
-                                        onChange={(e) => { setStatusFilter(e.target.value as any); setPage(1); }}
-                                        className="w-full px-4 py-2.5 rounded-xl text-sm"
-                                        style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)', outline: 'none' }}
-                                    >
-                                        <option value="all">All</option>
-                                        <option value="active">Active</option>
-                                        <option value="inactive">Inactive</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div className="flex justify-end mt-4">
-                                <Button variant="ghost" size="sm" onClick={() => { setCategoryFilter(''); setStockFilter('all'); setStatusFilter('all'); }}>
-                                    Clear Filters
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                {/* Products Table */}
-                <div
-                    className="rounded-2xl overflow-hidden animate-slide-up delay-3"
-                    style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
-                >
-                    <div className="overflow-x-auto">
-                        <table className="modern-table min-w-[900px]">
-                            <thead>
-                                <tr>
-                                    <th>Product</th>
-                                    <th>Brand</th>
-                                    <th>Hierarchy</th>
-                                    <th>Unit</th>
-                                    <th>Price</th>
-                                    <th>Stock</th>
-                                    <th>Status</th>
-                                    <th style={{ textAlign: 'right' }}>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {paginatedProducts.length === 0 ? (
-                                    <tr>
-                                        <td colSpan={8}>
-                                            <EmptyState
-                                                type="products"
-                                                action={
-                                                    <Button onClick={openAddModal}>
-                                                        <Plus className="w-4 h-4 mr-2" /> Add First Product
-                                                    </Button>
-                                                }
-                                            />
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    paginatedProducts.map((product, index) => (
-                                        <tr
-                                            key={product._id}
-                                            className="animate-fade-in"
-                                            style={{ animationDelay: `${index * 0.03}s` }}
-                                        >
-                                            <td>
-                                                <div className="flex items-center gap-3">
-                                                    {product.image ? (
-                                                        <img
-                                                            src={product.image}
-                                                            alt={product.name}
-                                                            className="w-11 h-11 rounded-xl object-cover"
-                                                            style={{ border: '1px solid var(--border)' }}
-                                                        />
-                                                    ) : (
-                                                        <div
-                                                            className="w-11 h-11 rounded-xl flex items-center justify-center"
-                                                            style={{ background: 'var(--bg-tertiary)' }}
-                                                        >
-                                                            <Package className="w-5 h-5" style={{ color: 'var(--text-muted)' }} />
-                                                        </div>
-                                                    )}
-                                                    <div>
-                                                        <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{product.name}</p>
-                                                        {product.barcode && (
-                                                            <code className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{product.barcode}</code>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td>{product.brand || <span style={{ color: 'var(--text-muted)' }}>-</span>}</td>
-                                            <td>
-                                                <div className="flex flex-col gap-0.5">
-                                                    <span className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
-                                                        {typeof product.categoryId === 'object' ? product.categoryId?.name : '-'}
-                                                    </span>
-                                                    {(product as any).subcategoryId && (
-                                                        <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                                                            → {typeof (product as any).subcategoryId === 'object' ? (product as any).subcategoryId?.name : '-'}
-                                                        </span>
-                                                    )}
-                                                    {(product as any).itemGroupId && (
-                                                        <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                                                            → {typeof (product as any).itemGroupId === 'object' ? (product as any).itemGroupId?.name : '-'}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td>{product.unit}</td>
-                                            <td>
-                                                <span className="font-semibold" style={{ color: 'var(--accent)' }}>₹{product.price}</span>
-                                                {product.originalPrice > product.price && (
-                                                    <span className="text-xs line-through ml-1" style={{ color: 'var(--text-muted)' }}>₹{product.originalPrice}</span>
-                                                )}
-                                            </td>
-                                            <td>
-                                                <Badge
-                                                    variant={product.stock === 0 ? 'destructive' : product.stock < 10 ? 'warning' : 'success'}
-                                                >
-                                                    {product.stock} units
-                                                </Badge>
-                                            </td>
-                                            <td>
-                                                {product.isAvailable ? (
-                                                    <span
-                                                        className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full"
-                                                        style={{ background: 'var(--success-light)', color: 'var(--success)' }}
-                                                    >
-                                                        <CheckCircle className="w-3 h-3" /> Active
-                                                    </span>
-                                                ) : (
-                                                    <span
-                                                        className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full"
-                                                        style={{ background: 'var(--bg-tertiary)', color: 'var(--text-muted)' }}
-                                                    >
-                                                        <XCircle className="w-3 h-3" /> Inactive
-                                                    </span>
-                                                )}
-                                            </td>
-                                            <td>
-                                                <div className="flex items-center justify-end gap-1">
-                                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setViewProduct(product); setShowViewModal(true); }}>
-                                                        <Eye className="w-4 h-4" />
-                                                    </Button>
-                                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditModal(product)}>
-                                                        <Pencil className="w-4 h-4" />
-                                                    </Button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    {/* Pagination */}
-                    {filteredProducts.length > 0 && (
-                        <div
-                            className="flex items-center justify-between px-6 py-4"
-                            style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-tertiary)' }}
-                        >
-                            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                                Showing {((page - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(page * ITEMS_PER_PAGE, filteredProducts.length)} of {filteredProducts.length} products
-                            </p>
-                            <div className="flex items-center gap-1">
-                                <Button
-                                    variant="outline"
-                                    size="icon"
-                                    className="h-8 w-8"
-                                    onClick={() => setPage(p => Math.max(1, p - 1))}
-                                    disabled={page === 1}
-                                >
-                                    <ChevronLeft className="w-4 h-4" />
-                                </Button>
-                                {[...Array(Math.min(5, actualTotalPages))].map((_, i) => {
-                                    const pageNum = i + 1;
-                                    return (
-                                        <Button
-                                            key={pageNum}
-                                            variant={page === pageNum ? 'default' : 'outline'}
-                                            size="icon"
-                                            className="h-8 w-8"
-                                            onClick={() => setPage(pageNum)}
-                                        >
-                                            {pageNum}
-                                        </Button>
-                                    );
-                                })}
-                                <Button
-                                    variant="outline"
-                                    size="icon"
-                                    className="h-8 w-8"
-                                    onClick={() => setPage(p => Math.min(actualTotalPages, p + 1))}
-                                    disabled={page === actualTotalPages}
-                                >
-                                    <ChevronRight className="w-4 h-4" />
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                {/* Add/Edit Modal with Tabs */}
-                {showModal && (
-                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto py-8">
-                        <Card className="w-full max-w-2xl mx-4 shadow-xl">
-                            <CardHeader className="flex flex-row items-center justify-between border-b py-4">
-                                <CardTitle className="text-lg">{editProduct ? 'Edit Product' : 'Add New Product'}</CardTitle>
-                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setShowModal(false); stopScanner(); }}>
-                                    <X className="w-4 h-4" />
-                                </Button>
-                            </CardHeader>
-                            <CardContent className="p-0">
-                                <form onSubmit={handleSubmit}>
-                                    <Tabs defaultValue="basic" value={activeTab} onValueChange={setActiveTab}>
-                                        <div className="px-6 pt-4" style={{ borderBottom: '1px solid var(--border)' }}>
-                                            <TabsList className="w-full justify-start p-0 gap-0">
-                                                <TabsTrigger value="basic">
-                                                    Basic Info
-                                                </TabsTrigger>
-                                                <TabsTrigger value="pricing">
-                                                    Pricing
-                                                </TabsTrigger>
-                                                <TabsTrigger value="inventory">
-                                                    Inventory
-                                                </TabsTrigger>
-                                                <TabsTrigger value="nutrition">
-                                                    Nutrition
-                                                </TabsTrigger>
-                                                <TabsTrigger value="images">
-                                                    Images
-                                                </TabsTrigger>
-                                            </TabsList>
-                                        </div>
-
-                                        <div className="p-6 max-h-[60vh] overflow-y-auto">
-                                            {/* Basic Info Tab */}
-                                            <TabsContent value="basic" className="mt-0 space-y-4">
-                                                <div>
-                                                    <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Product Name *</label>
-                                                    <Input
-                                                        placeholder="Enter product name"
-                                                        value={form.name}
-                                                        onChange={(e) => setForm({ ...form, name: e.target.value })}
-                                                        required
-                                                    />
-                                                </div>
-
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <div>
-                                                        <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Brand</label>
-                                                        <Input
-                                                            placeholder="Brand name"
-                                                            value={form.brand}
-                                                            onChange={(e) => setForm({ ...form, brand: e.target.value })}
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Barcode (EAN/UPC)</label>
-                                                        <div className="flex gap-2">
-                                                            <Input
-                                                                placeholder="Scan or enter barcode"
-                                                                value={form.barcode}
-                                                                onChange={(e) => setForm({ ...form, barcode: e.target.value })}
-                                                            />
-                                                            <Button type="button" variant="outline" size="icon" onClick={startScanner}>
-                                                                <Scan className="w-4 h-4" />
-                                                            </Button>
-                                                        </div>
-                                                    </div>
-                                                </div>
-
-                                                {showScanner && (
-                                                    <div className="rounded-lg p-3" style={{ border: '1px solid var(--border)' }}>
-                                                        <div id="barcode-reader" style={{ width: '100%' }}></div>
-                                                        {!scannerReady && <p className="text-sm text-center mt-2" style={{ color: 'var(--text-muted)' }}>Initializing camera...</p>}
-                                                        <Button type="button" variant="destructive" size="sm" onClick={stopScanner} className="mt-2 w-full">
-                                                            <StopCircle className="w-4 h-4 mr-2" /> Stop Scanner
-                                                        </Button>
-                                                    </div>
-                                                )}
-
-                                                {/* Hierarchy Selection - 3 columns */}
-                                                <div className="grid grid-cols-3 gap-4">
-                                                    <div>
-                                                        <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Category *</label>
-                                                        <select
-                                                            value={form.categoryId}
-                                                            onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
-                                                            className="w-full h-10 px-3 rounded-xl text-sm focus:outline-none"
-                                                            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-                                                            required
-                                                        >
-                                                            <option value="">Select Category</option>
-                                                            {categories.map((cat) => (
-                                                                <option key={cat._id} value={cat._id}>{cat.name}</option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Subcategory *</label>
-                                                        <select
-                                                            value={form.subcategoryId}
-                                                            onChange={(e) => setForm({ ...form, subcategoryId: e.target.value })}
-                                                            className="w-full h-10 px-3 rounded-xl text-sm focus:outline-none"
-                                                            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-                                                            required
-                                                            disabled={!form.categoryId}
-                                                        >
-                                                            <option value="">Select Subcategory</option>
-                                                            {availableSubcategories.map((sub) => (
-                                                                <option key={sub._id} value={sub._id}>{sub.name}</option>
-                                                            ))}
-                                                        </select>
-                                                        {!form.categoryId && (
-                                                            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Select a category first</p>
-                                                        )}
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Item Group *</label>
-                                                        <select
-                                                            value={form.itemGroupId}
-                                                            onChange={(e) => setForm({ ...form, itemGroupId: e.target.value })}
-                                                            className="w-full h-10 px-3 rounded-xl text-sm focus:outline-none"
-                                                            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-                                                            required
-                                                            disabled={!form.subcategoryId}
-                                                        >
-                                                            <option value="">Select Item Group</option>
-                                                            {availableItemGroups.map((ig) => (
-                                                                <option key={ig._id} value={ig._id}>{ig.name}</option>
-                                                            ))}
-                                                        </select>
-                                                        {!form.subcategoryId && (
-                                                            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Select a subcategory first</p>
-                                                        )}
-                                                    </div>
-                                                </div>
-
-                                                {/* Hierarchy Breadcrumb */}
-                                                {form.categoryId && (
-                                                    <div className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg" style={{ background: 'var(--bg-tertiary)', color: 'var(--text-muted)' }}>
-                                                        <span>{categories.find(c => c._id === form.categoryId)?.name}</span>
-                                                        {form.subcategoryId && (
-                                                            <>
-                                                                <span>→</span>
-                                                                <span>{availableSubcategories.find(s => s._id === form.subcategoryId)?.name}</span>
-                                                            </>
-                                                        )}
-                                                        {form.itemGroupId && (
-                                                            <>
-                                                                <span>→</span>
-                                                                <span>{availableItemGroups.find(ig => ig._id === form.itemGroupId)?.name}</span>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                )}
-
-                                                {/* Unit Selection - Separate row */}
-                                                <div>
-                                                    <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Unit *</label>
-                                                    <select
-                                                        value={form.unit}
-                                                        onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                                                        className="w-full h-10 px-3 rounded-xl text-sm focus:outline-none"
-                                                        style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-                                                        required
-                                                        disabled={!form.categoryId}
-                                                    >
-                                                        <option value="">Select Unit</option>
-                                                        {unitOptions.map((unit) => (
-                                                            <option key={unit} value={unit}>{unit}</option>
-                                                        ))}
-                                                        <option value="custom">Custom...</option>
-                                                    </select>
-                                                </div>
-
-                                                {form.unit === 'custom' && (
-                                                    <div>
-                                                        <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Custom Unit</label>
-                                                        <Input
-                                                            placeholder="e.g., 150ml, 750g, 3pcs"
-                                                            value={form.customUnit}
-                                                            onChange={(e) => setForm({ ...form, customUnit: e.target.value })}
-                                                            required
-                                                        />
-                                                    </div>
-                                                )}
-
-                                                <div>
-                                                    <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Description</label>
-                                                    <textarea
-                                                        placeholder="Product description..."
-                                                        value={form.description}
-                                                        onChange={(e) => setForm({ ...form, description: e.target.value })}
-                                                        className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none resize-none"
-                                                        style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-                                                        rows={3}
-                                                    />
-                                                </div>
-
-                                                <div className="mt-4">
-                                                    <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Highlights</label>
-                                                    <textarea
-                                                        placeholder="Product highlights..."
-                                                        value={form.highlights}
-                                                        onChange={(e) => setForm({ ...form, highlights: e.target.value })}
-                                                        className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none resize-none"
-                                                        style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-                                                        rows={3}
-                                                    />
-                                                </div>
-                                            </TabsContent>
-
-                                            {/* Pricing Tab */}
-                                            <TabsContent value="pricing" className="mt-0 space-y-4">
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <div>
-                                                        <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>MRP (₹) *</label>
-                                                        <Input
-                                                            type="number"
-                                                            placeholder="Maximum Retail Price"
-                                                            value={form.mrp}
-                                                            onChange={(e) => setForm({ ...form, mrp: e.target.value })}
-                                                            required
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Selling Price (₹) *</label>
-                                                        <Input
-                                                            type="number"
-                                                            placeholder="Your selling price"
-                                                            value={form.price}
-                                                            onChange={(e) => setForm({ ...form, price: e.target.value })}
-                                                            required
-                                                        />
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>GST %</label>
-                                                    <select
-                                                        value={form.gst}
-                                                        onChange={(e) => setForm({ ...form, gst: e.target.value })}
-                                                        className="w-full h-10 px-3 rounded-xl text-sm focus:outline-none"
-                                                        style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-                                                    >
-                                                        <option value="">No GST</option>
-                                                        <option value="5">5%</option>
-                                                        <option value="12">12%</option>
-                                                        <option value="18">18%</option>
-                                                        <option value="28">28%</option>
-                                                    </select>
-                                                </div>
-                                                {form.mrp && form.price && Number(form.mrp) > Number(form.price) && (
-                                                    <div className="rounded-lg p-3" style={{ background: 'var(--success-light)', border: '1px solid var(--success)' }}>
-                                                        <p className="text-sm" style={{ color: 'var(--success)' }}>
-                                                            <strong>Discount:</strong> {Math.round((1 - Number(form.price) / Number(form.mrp)) * 100)}% off
-                                                        </p>
-                                                    </div>
-                                                )}
-                                            </TabsContent>
-
-                                            {/* Inventory Tab */}
-                                            <TabsContent value="inventory" className="mt-0 space-y-4">
-                                                <div>
-                                                    <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Stock Quantity *</label>
-                                                    <Input
-                                                        type="number"
-                                                        placeholder="Available stock"
-                                                        value={form.stock}
-                                                        onChange={(e) => setForm({ ...form, stock: e.target.value })}
-                                                        required
-                                                    />
-                                                </div>
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <div>
-                                                        <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Shelf Life (days)</label>
-                                                        <Input
-                                                            type="number"
-                                                            placeholder="e.g., 30, 90, 365"
-                                                            value={form.shelfLife}
-                                                            onChange={(e) => setForm({ ...form, shelfLife: e.target.value })}
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Storage Type</label>
-                                                        <select
-                                                            value={form.storageType}
-                                                            onChange={(e) => setForm({ ...form, storageType: e.target.value })}
-                                                            className="w-full h-10 px-3 rounded-xl text-sm focus:outline-none"
-                                                            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-                                                        >
-                                                            <option value="">Select storage type</option>
-                                                            {STORAGE_TYPES.map((type) => (
-                                                                <option key={type} value={type}>{type}</option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
-                                                </div>
-                                            </TabsContent>
-
-                                            {/* Nutrition Tab */}
-                                            <TabsContent value="nutrition" className="mt-0 space-y-4">
-                                                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Nutritional information per 100g/100ml</p>
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <div>
-                                                        <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Protein (g)</label>
-                                                        <Input
-                                                            type="number"
-                                                            step="0.1"
-                                                            placeholder="0.0"
-                                                            value={form.protein}
-                                                            onChange={(e) => setForm({ ...form, protein: e.target.value })}
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Carbohydrates (g)</label>
-                                                        <Input
-                                                            type="number"
-                                                            step="0.1"
-                                                            placeholder="0.0"
-                                                            value={form.carbs}
-                                                            onChange={(e) => setForm({ ...form, carbs: e.target.value })}
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Sugar (g)</label>
-                                                        <Input
-                                                            type="number"
-                                                            step="0.1"
-                                                            placeholder="0.0"
-                                                            value={form.sugar}
-                                                            onChange={(e) => setForm({ ...form, sugar: e.target.value })}
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Fat (g)</label>
-                                                        <Input
-                                                            type="number"
-                                                            step="0.1"
-                                                            placeholder="0.0"
-                                                            value={form.fat}
-                                                            onChange={(e) => setForm({ ...form, fat: e.target.value })}
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-sm font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>Trans Fat (g)</label>
-                                                        <Input
-                                                            type="number"
-                                                            step="0.1"
-                                                            placeholder="0.0"
-                                                            value={form.transFat}
-                                                            onChange={(e) => setForm({ ...form, transFat: e.target.value })}
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </TabsContent>
-
-                                            {/* Images Tab */}
-                                            <TabsContent value="images" className="mt-0 space-y-4">
-                                                {/* Previews */}
-                                                {(form.images?.length > 0 || imagePreview) && (
-                                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                                        {(form.images?.length > 0 ? form.images.filter(Boolean) : (imagePreview ? [imagePreview] : [])).map((imgUrl, idx) => (
-                                                            <div key={idx} className="relative group">
-                                                                <img
-                                                                    src={imgUrl}
-                                                                    alt={`Preview ${idx + 1}`}
-                                                                    className="w-full h-32 object-contain rounded-lg"
-                                                                    style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
-                                                                />
-                                                                <Button
-                                                                    type="button"
-                                                                    variant="destructive"
-                                                                    size="icon"
-                                                                    className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                                                                    onClick={() => handleRemoveImage(idx)}
-                                                                >
-                                                                    <X className="w-3 h-3" />
-                                                                </Button>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-
-                                                {/* Background removal */}
-                                                <div className="rounded-lg p-3 space-y-3" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
-                                                    <label className="flex items-start gap-3" style={{ cursor: bgConfig?.enabled ? 'pointer' : 'not-allowed' }}>
-                                                        <input
-                                                            type="checkbox"
-                                                            className="mt-0.5 h-4 w-4"
-                                                            checked={!!bgConfig?.enabled && removeBg}
-                                                            disabled={!bgConfig?.enabled}
-                                                            onChange={(e) => {
-                                                                setRemoveBg(e.target.checked);
-                                                                const latest = bgPreview.before;
-                                                                if (latest) runBgPreview(latest, e.target.checked);
-                                                            }}
-                                                        />
-                                                        <span className="text-sm">
-                                                            <span className="font-medium" style={{ color: bgConfig?.enabled ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                                                                Remove background
-                                                            </span>
-                                                            <span className="block text-xs" style={{ color: 'var(--text-muted)' }}>
-                                                                {bgConfig === null
-                                                                    ? 'Checking image processing settings…'
-                                                                    : bgConfig.enabled
-                                                                        ? 'Uploaded images are cut out, trimmed and centred on a square transparent canvas when you save. Image URLs are kept as they are.'
-                                                                        : 'Not configured on the server. Set PRODUCT_IMAGE_BG_PROVIDER (removebg or local) in the backend to enable it.'}
-                                                            </span>
-                                                        </span>
-                                                    </label>
-
-                                                    {bgPreview.before && !!bgConfig?.enabled && removeBg && (
-                                                        <div className="grid grid-cols-2 gap-3">
-                                                            <figure className="space-y-1">
-                                                                <img
-                                                                    src={bgPreview.before}
-                                                                    alt="Before background removal"
-                                                                    className="w-full h-40 object-contain rounded-lg"
-                                                                    style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
-                                                                />
-                                                                <figcaption className="text-xs text-center" style={{ color: 'var(--text-muted)' }}>Before</figcaption>
-                                                            </figure>
-                                                            <figure className="space-y-1">
-                                                                <div
-                                                                    className="w-full h-40 rounded-lg flex items-center justify-center overflow-hidden"
-                                                                    style={{
-                                                                        border: '1px solid var(--border)',
-                                                                        backgroundColor: '#f4f1fb',
-                                                                        backgroundImage: 'linear-gradient(45deg, #e6e0f5 25%, transparent 25%), linear-gradient(-45deg, #e6e0f5 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e6e0f5 75%), linear-gradient(-45deg, transparent 75%, #e6e0f5 75%)',
-                                                                        backgroundSize: '16px 16px',
-                                                                        backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0',
-                                                                    }}
-                                                                >
-                                                                    {bgPreview.loading ? (
-                                                                        <span className="text-xs" style={{ color: '#5b5470' }}>Processing…</span>
-                                                                    ) : bgPreview.after ? (
-                                                                        <img src={bgPreview.after} alt="After background removal" className="w-full h-full object-contain" />
-                                                                    ) : (
-                                                                        <span className="text-xs px-2 text-center" style={{ color: '#5b5470' }}>No preview</span>
-                                                                    )}
-                                                                </div>
-                                                                <figcaption className="text-xs text-center" style={{ color: 'var(--text-muted)' }}>After (saved version)</figcaption>
-                                                            </figure>
-                                                            {bgPreview.error && (
-                                                                <p className="col-span-2 text-xs" style={{ color: 'var(--warning, #b45309)' }}>{bgPreview.error}</p>
-                                                            )}
-                                                        </div>
-                                                    )}
-                                                </div>
-
-                                                <div className="flex gap-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setImageMode('url')}
-                                                        className="flex-1 py-2.5 px-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
-                                                        style={{
-                                                            background: imageMode === 'url' ? 'var(--accent-glow)' : 'var(--bg-tertiary)',
-                                                            color: imageMode === 'url' ? 'var(--accent)' : 'var(--text-muted)',
-                                                            border: imageMode === 'url' ? '2px solid var(--accent)' : '2px solid transparent'
-                                                        }}
-                                                    >
-                                                        <Link className="w-4 h-4" /> Image URLs
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setImageMode('file')}
-                                                        className="flex-1 py-2.5 px-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
-                                                        style={{
-                                                            background: imageMode === 'file' ? 'var(--accent-glow)' : 'var(--bg-tertiary)',
-                                                            color: imageMode === 'file' ? 'var(--accent)' : 'var(--text-muted)',
-                                                            border: imageMode === 'file' ? '2px solid var(--accent)' : '2px solid transparent'
-                                                        }}
-                                                    >
-                                                        <Upload className="w-4 h-4" /> Upload File
-                                                    </button>
-                                                </div>
-
-                                                {imageMode === 'url' && (
-                                                    <div className="space-y-3">
-                                                        {(form.images?.length > 0 ? form.images : ['']).map((url, idx) => (
-                                                            <div key={idx} className="flex gap-2">
-                                                                <Input
-                                                                    placeholder="https://example.com/image.jpg"
-                                                                    value={url}
-                                                                    onChange={(e) => handleImageUrlChange(idx, e.target.value)}
-                                                                />
-                                                                <Button 
-                                                                    type="button" 
-                                                                    variant="outline"
-                                                                    size="icon"
-                                                                    onClick={() => handleRemoveImage(idx)}
-                                                                >
-                                                                    <X className="w-4 h-4" />
-                                                                </Button>
-                                                            </div>
-                                                        ))}
-                                                        <Button
-                                                            type="button"
-                                                            variant="outline"
-                                                            className="w-full"
-                                                            onClick={handleAddImageUrl}
-                                                        >
-                                                            + Add Another URL
-                                                        </Button>
-                                                    </div>
-                                                )}
-
-                                                {imageMode === 'file' && (
-                                                    <div>
-                                                        <input
-                                                            ref={fileInputRef}
-                                                            type="file"
-                                                            accept="image/*"
-                                                            onChange={handleFileSelect}
-                                                            className="hidden"
-                                                            id="image-upload"
-                                                        />
-                                                        <label
-                                                            htmlFor="image-upload"
-                                                            className="flex flex-col items-center justify-center gap-2 py-8 px-4 border-2 border-dashed rounded-lg cursor-pointer transition-colors"
-                                                            style={{ borderColor: 'var(--border)', background: 'transparent' }}
-                                                        >
-                                                            <Upload className="w-8 h-8" style={{ color: 'var(--text-muted)' }} />
-                                                            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Click to upload image</span>
-                                                            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>PNG, JPG up to 5MB</span>
-                                                        </label>
-                                                    </div>
-                                                )}
-                                            </TabsContent>
-                                        </div>
-
-                                        {/* Footer */}
-                                        <div className="flex items-center justify-between px-6 py-4" style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-tertiary)' }}>
-                                            <div className="flex gap-1">
-                                                {['basic', 'pricing', 'inventory', 'nutrition', 'images'].map((tab, i) => (
-                                                    <div
-                                                        key={tab}
-                                                        className="w-2 h-2 rounded-full"
-                                                        style={{ background: activeTab === tab ? 'var(--accent)' : 'var(--bg-elevated)' }}
-                                                    />
-                                                ))}
-                                            </div>
-                                            <div className="flex gap-3">
-                                                <Button type="button" variant="outline" onClick={() => { setShowModal(false); stopScanner(); }}>
-                                                    Cancel
-                                                </Button>
-                                                <Button type="submit">
-                                                    {editProduct ? 'Save Changes' : 'Add Product'}
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    </Tabs>
-                                </form>
-                            </CardContent>
-                        </Card>
-                    </div>
-                )}
-
-                {/* Bulk Import Modal */}
-                {showBulkImportModal && (
-                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto py-8">
-                        <Card className="w-full max-w-lg mx-4 shadow-xl">
-                            <CardHeader className="flex flex-row items-center justify-between border-b py-4">
-                                <CardTitle className="text-lg">Bulk Import Products</CardTitle>
-                                {!isBulkImporting && (
-                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
-                                        setShowBulkImportModal(false);
-                                        resetBulkImport();
-                                    }}>
-                                        <X className="w-4 h-4" />
-                                    </Button>
-                                )}
-                            </CardHeader>
-                            <CardContent className="p-6 space-y-6">
-                                {!isBulkImporting && !bulkPreview && bulkImportProgress.total === 0 && (
-                                    <>
-                                        <div className="p-4 rounded-xl" style={{ background: 'var(--bg-tertiary)' }}>
-                                            <div className="flex items-start gap-3">
-                                                <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: 'var(--accent)' }} />
-                                                <div className="text-sm space-y-2" style={{ color: 'var(--text-secondary)' }}>
-                                                    <p>Upload a CSV file to add multiple products at once.</p>
-                                                    <p>Make sure your CSV matches the template format. Category must be the name of an existing category. Rows are validated first so you can review errors before importing.</p>
-                                                    <p>Limits: {MAX_IMPORT_ROWS} rows, {MAX_IMPORT_FILE_BYTES / 1024 / 1024} MB per file.</p>
-                                                    <Button variant="link" className="h-auto p-0" onClick={downloadCsvTemplate}>
-                                                        Download CSV Template
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div>
-                                            <input
-                                                ref={bulkFileInputRef}
-                                                type="file"
-                                                accept=".csv"
-                                                onChange={handleBulkImport}
-                                                className="hidden"
-                                                id="bulk-csv-upload"
-                                            />
-                                            <label
-                                                htmlFor="bulk-csv-upload"
-                                                className="flex flex-col items-center justify-center gap-2 py-10 px-4 border-2 border-dashed rounded-lg cursor-pointer transition-colors"
-                                                style={{ borderColor: 'var(--border)', background: 'transparent' }}
-                                            >
-                                                <UploadCloud className="w-10 h-10" style={{ color: 'var(--text-muted)' }} />
-                                                <span className="text-base font-medium" style={{ color: 'var(--text-primary)' }}>Click to upload CSV</span>
-                                                <span className="text-sm" style={{ color: 'var(--text-muted)' }}>Only .csv files are supported</span>
-                                            </label>
-                                            {bulkFileError && (
-                                                <p className="mt-3 text-sm" style={{ color: 'var(--danger)' }}>{bulkFileError}</p>
-                                            )}
-                                        </div>
-                                    </>
-                                )}
-
-                                {!isBulkImporting && bulkPreview && (
-                                    <div className="space-y-4">
-                                        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                                            <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{bulkPreview.fileName}</span>
-                                            {': '}{bulkPreview.valid.length} valid, {bulkPreview.invalid.length} with errors.
-                                            {bulkPreview.invalid.length > 0 && ' Rows with errors will be skipped.'}
-                                        </p>
-                                        {bulkPreview.invalid.length > 0 && (
-                                            <ImportErrorList errors={bulkPreview.invalid} />
-                                        )}
-                                        <div className="flex gap-3">
-                                            <Button variant="outline" className="flex-1" onClick={resetBulkImport}>
-                                                Choose another file
-                                            </Button>
-                                            <Button className="flex-1" onClick={confirmBulkImport} disabled={bulkPreview.valid.length === 0}>
-                                                Import {bulkPreview.valid.length} row{bulkPreview.valid.length === 1 ? '' : 's'}
-                                            </Button>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {(isBulkImporting || bulkImportProgress.total > 0) && (
-                                    <div className="space-y-4">
-                                        <div className="flex items-center justify-between text-sm">
-                                            <span style={{ color: 'var(--text-primary)' }} className="font-medium">
-                                                {isBulkImporting ? 'Importing products...' : 'Import complete'}
-                                            </span>
-                                            <span style={{ color: 'var(--text-muted)' }}>
-                                                {bulkImportProgress.current} / {bulkImportProgress.total}
-                                            </span>
-                                        </div>
-                                        
-                                        <div className="w-full rounded-full h-2.5 overflow-hidden" style={{ background: 'var(--bg-tertiary)' }}>
-                                            <div 
-                                                className="h-2.5 rounded-full transition-all duration-300" 
-                                                style={{ 
-                                                    width: `${bulkImportProgress.total > 0 ? (bulkImportProgress.current / bulkImportProgress.total) * 100 : 0}%`,
-                                                    background: 'var(--accent)'
-                                                }}
-                                            ></div>
-                                        </div>
-
-                                        <div className="grid grid-cols-2 gap-4 pt-2">
-                                            <div className="p-3 rounded-lg" style={{ background: 'var(--success-light)', border: '1px solid var(--success)' }}>
-                                                <p className="text-xs" style={{ color: 'var(--success)' }}>Successfully Added</p>
-                                                <p className="text-xl font-bold" style={{ color: 'var(--success)' }}>{bulkImportProgress.success}</p>
-                                            </div>
-                                            <div className="p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
-                                                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Failed / Skipped</p>
-                                                <p className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{bulkImportProgress.failed}</p>
-                                            </div>
-                                        </div>
-
-                                        {!isBulkImporting && bulkImportErrors.length > 0 && (
-                                            <ImportErrorList errors={bulkImportErrors} />
-                                        )}
-
-                                        {!isBulkImporting && (
-                                            <Button 
-                                                className="w-full mt-4" 
-                                                onClick={() => {
-                                                    setShowBulkImportModal(false);
-                                                    resetBulkImport();
-                                                }}
-                                            >
-                                                Close
-                                            </Button>
-                                        )}
-                                    </div>
-                                )}
-                            </CardContent>
-                        </Card>
-                    </div>
-                )}
-            </div>
-
-            {/* View Product Modal */}
-            {showViewModal && viewProduct && (
-                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto py-8">
-                    <Card className="w-full max-w-3xl mx-4 shadow-xl">
-                        <CardHeader className="flex flex-row items-center justify-between border-b py-4">
-                            <CardTitle className="text-lg">Product Details</CardTitle>
-                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowViewModal(false)}>
-                                <X className="w-4 h-4" />
+                            <SelectTrigger className="w-[calc(50%-0.25rem)] sm:w-44" aria-label="Category">
+                                <SelectValue placeholder="Category" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All categories</SelectItem>
+                                {(categories.data ?? []).map((cat) => (
+                                    <SelectItem key={cat._id} value={cat._id}>
+                                        {cat.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <Select value={subcategoryId || 'all'} onValueChange={(v) => setSubcategoryId(v === 'all' ? '' : v)} disabled={!categoryId || subOptions.length === 0}>
+                            <SelectTrigger className="w-[calc(50%-0.25rem)] sm:w-44" aria-label="Subcategory">
+                                <SelectValue placeholder="Subcategory" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">{categoryId ? 'All subcategories' : 'Subcategory'}</SelectItem>
+                                {subOptions.map((s) => (
+                                    <SelectItem key={s._id} value={s._id}>
+                                        {s.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        {filtered ? (
+                            <Button variant="ghost" size="sm" onClick={clearFilters}>
+                                <X aria-hidden /> Clear
                             </Button>
-                        </CardHeader>
-                        <CardContent className="p-6">
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                {/* Product Image */}
-                                <div className="md:col-span-1">
-                                    {viewProduct.image ? (
-                                        <img
-                                            src={viewProduct.image}
-                                            alt={viewProduct.name}
-                                            className="w-full aspect-square object-contain rounded-xl"
-                                            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
-                                        />
-                                    ) : (
-                                        <div
-                                            className="w-full aspect-square rounded-xl flex items-center justify-center"
-                                            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
-                                        >
-                                            <Package className="w-16 h-16" style={{ color: 'var(--text-muted)' }} />
-                                        </div>
-                                    )}
-                                    <div className="mt-4 space-y-2">
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-sm" style={{ color: 'var(--text-muted)' }}>Status</span>
-                                            {viewProduct.isAvailable ? (
-                                                <Badge variant="success">Active</Badge>
-                                            ) : (
-                                                <Badge variant="destructive">Inactive</Badge>
-                                            )}
-                                        </div>
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-sm" style={{ color: 'var(--text-muted)' }}>Stock</span>
-                                            <Badge variant={viewProduct.stock === 0 ? 'destructive' : viewProduct.stock < 10 ? 'warning' : 'success'}>
-                                                {viewProduct.stock} units
-                                            </Badge>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Product Information */}
-                                <div className="md:col-span-2 space-y-6">
-                                    {/* Basic Info */}
-                                    <div>
-                                        <h3 className="text-2xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>{viewProduct.name}</h3>
-                                        {viewProduct.brand && (
-                                            <p className="text-sm mb-2" style={{ color: 'var(--text-muted)' }}>by {viewProduct.brand}</p>
-                                        )}
-                                        {viewProduct.barcode && (
-                                            <code className="text-xs px-2 py-1 rounded" style={{ background: 'var(--bg-tertiary)', color: 'var(--text-muted)' }}>
-                                                {viewProduct.barcode}
-                                            </code>
-                                        )}
-                                    </div>
-
-                                    {/* Hierarchy */}
-                                    <div>
-                                        <h4 className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Category Hierarchy</h4>
-                                        <div className="flex items-center gap-2 text-sm flex-wrap">
-                                            <Badge variant="outline">
-                                                {typeof viewProduct.categoryId === 'object' ? viewProduct.categoryId?.name : 'N/A'}
-                                            </Badge>
-                                            {(viewProduct as any).subcategoryId && (
-                                                <>
-                                                    <span style={{ color: 'var(--text-muted)' }}>→</span>
-                                                    <Badge variant="outline">
-                                                        {typeof (viewProduct as any).subcategoryId === 'object' ? (viewProduct as any).subcategoryId?.name : 'N/A'}
-                                                    </Badge>
-                                                </>
-                                            )}
-                                            {(viewProduct as any).itemGroupId && (
-                                                <>
-                                                    <span style={{ color: 'var(--text-muted)' }}>→</span>
-                                                    <Badge variant="outline">
-                                                        {typeof (viewProduct as any).itemGroupId === 'object' ? (viewProduct as any).itemGroupId?.name : 'N/A'}
-                                                    </Badge>
-                                                </>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {/* Pricing */}
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="p-4 rounded-xl" style={{ background: 'var(--bg-tertiary)' }}>
-                                            <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Selling Price</p>
-                                            <p className="text-2xl font-bold" style={{ color: 'var(--accent)' }}>₹{viewProduct.price}</p>
-                                            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>per {viewProduct.unit}</p>
-                                        </div>
-                                        {viewProduct.originalPrice && viewProduct.originalPrice > viewProduct.price && (
-                                            <div className="p-4 rounded-xl" style={{ background: 'var(--bg-tertiary)' }}>
-                                                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>MRP</p>
-                                                <p className="text-2xl font-bold line-through" style={{ color: 'var(--text-secondary)' }}>₹{viewProduct.originalPrice}</p>
-                                                <p className="text-xs mt-1 font-semibold" style={{ color: 'var(--success)' }}>
-                                                    {Math.round((1 - viewProduct.price / viewProduct.originalPrice) * 100)}% OFF
-                                                </p>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Description */}
-                                    {viewProduct.description && (
-                                        <div>
-                                            <h4 className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Description</h4>
-                                            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{viewProduct.description}</p>
-                                        </div>
-                                    )}
-
-                                    {/* Additional Details */}
-                                    <div className="grid grid-cols-2 gap-4">
-                                        {viewProduct.gst && viewProduct.gst > 0 && (
-                                            <div>
-                                                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>GST</p>
-                                                <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{viewProduct.gst}%</p>
-                                            </div>
-                                        )}
-                                        {viewProduct.shelfLife && viewProduct.shelfLife > 0 && (
-                                            <div>
-                                                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Shelf Life</p>
-                                                <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{viewProduct.shelfLife} days</p>
-                                            </div>
-                                        )}
-                                        {viewProduct.storageType && (
-                                            <div>
-                                                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Storage</p>
-                                                <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{viewProduct.storageType}</p>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Nutrition Info */}
-                                    {viewProduct.nutrition && (
-                                        <div>
-                                            <h4 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>Nutritional Information (per 100g/100ml)</h4>
-                                            <div className="grid grid-cols-3 gap-3">
-                                                {viewProduct.nutrition.protein && viewProduct.nutrition.protein > 0 && (
-                                                    <div className="p-3 rounded-lg text-center" style={{ background: 'var(--bg-tertiary)' }}>
-                                                        <p className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Protein</p>
-                                                        <p className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{viewProduct.nutrition.protein}g</p>
-                                                    </div>
-                                                )}
-                                                {viewProduct.nutrition.carbs && viewProduct.nutrition.carbs > 0 && (
-                                                    <div className="p-3 rounded-lg text-center" style={{ background: 'var(--bg-tertiary)' }}>
-                                                        <p className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Carbs</p>
-                                                        <p className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{viewProduct.nutrition.carbs}g</p>
-                                                    </div>
-                                                )}
-                                                {viewProduct.nutrition.sugar && viewProduct.nutrition.sugar > 0 && (
-                                                    <div className="p-3 rounded-lg text-center" style={{ background: 'var(--bg-tertiary)' }}>
-                                                        <p className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Sugar</p>
-                                                        <p className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{viewProduct.nutrition.sugar}g</p>
-                                                    </div>
-                                                )}
-                                                {viewProduct.nutrition.fat && viewProduct.nutrition.fat > 0 && (
-                                                    <div className="p-3 rounded-lg text-center" style={{ background: 'var(--bg-tertiary)' }}>
-                                                        <p className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Fat</p>
-                                                        <p className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{viewProduct.nutrition.fat}g</p>
-                                                    </div>
-                                                )}
-                                                {viewProduct.nutrition.transFat && viewProduct.nutrition.transFat > 0 && (
-                                                    <div className="p-3 rounded-lg text-center" style={{ background: 'var(--bg-tertiary)' }}>
-                                                        <p className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Trans Fat</p>
-                                                        <p className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{viewProduct.nutrition.transFat}g</p>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Footer Actions */}
-                            <div className="flex justify-end gap-3 mt-6 pt-6" style={{ borderTop: '1px solid var(--border)' }}>
-                                <Button variant="outline" onClick={() => setShowViewModal(false)}>
-                                    Close
+                        ) : null}
+                    </>
+                }
+                empty={
+                    filtered ? (
+                        <EmptyState
+                            icon={SearchX}
+                            title={flag === 'attention' ? 'Nothing needs attention here' : 'No products match these filters'}
+                            description={flag === 'attention' ? 'Every product in this view has a price, an image and a proper unit.' : 'Try a shorter search or clear the filters.'}
+                            action={
+                                <Button variant="outline" onClick={clearFilters}>
+                                    Clear filters
                                 </Button>
-                                <Button onClick={() => { setShowViewModal(false); openEditModal(viewProduct); }}>
-                                    <Pencil className="w-4 h-4 mr-2" /> Edit Product
-                                </Button>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </div>
-            )}
-        </div>
+                            }
+                        />
+                    ) : (
+                        <EmptyState
+                            icon={PackagePlus}
+                            title="No products yet"
+                            description="Add your first product, or import a spreadsheet of them."
+                            action={
+                                editable ? (
+                                    <>
+                                        <Button onClick={() => openEditor({ mode: 'create', key: Date.now() })}>New product</Button>
+                                        <Button variant="outline" onClick={() => setImportOpen(true)}>
+                                            Import CSV
+                                        </Button>
+                                    </>
+                                ) : null
+                            }
+                        />
+                    )
+                }
+            />
+
+            <ProductEditor target={editor} onClose={() => openEditor(null)} onAdjustStock={(p) => setStockTarget(toStockTarget(p))} />
+            <ImportWizard open={importOpen} onOpenChange={setImportOpen} />
+            <AdjustStockDialog product={stockTarget} open={!!stockTarget} onOpenChange={(o) => !o && setStockTarget(null)} />
+        </PageContainer>
     );
 }
 
-function ImportErrorList({ errors }: { errors: RowError[] }) {
+/** Shared select column, with the whole cell as the hit area so a near-miss doesn't open the editor. */
+function rowSelectColumn(): ColumnDef<AdminProduct> {
+    const base = selectColumn<AdminProduct>();
+    return {
+        ...base,
+        cell: ({ row }) => (
+            <label className="-m-3 flex cursor-pointer items-center p-3" onClick={(e) => e.stopPropagation()}>
+                <Checkbox checked={row.getIsSelected()} onCheckedChange={(v) => row.toggleSelected(!!v)} aria-label={`Select ${row.original.name}`} />
+            </label>
+        ),
+    };
+}
+
+function toStockTarget(p: AdminProduct): StockTarget {
+    return { _id: p._id, name: p.name, stock: p.stock, reorderLevel: p.reorderLevel, unit: productUnit(p) };
+}
+
+function RowActions({
+    product,
+    editable,
+    onEdit,
+    onDuplicate,
+    onStatus,
+    onAdjust,
+}: {
+    product: AdminProduct;
+    editable: boolean;
+    onEdit: () => void;
+    onDuplicate: () => void;
+    onStatus: (status: ProductStatus) => void;
+    onAdjust: () => void;
+}) {
+    const status = productStatus(product);
     return (
-        <div
-            className="max-h-60 overflow-y-auto rounded-lg p-3 text-sm space-y-2"
-            style={{ background: 'var(--danger-light)', border: '1px solid var(--danger)' }}
-        >
-            {errors.map((err) => (
-                <div key={err.row}>
-                    <p className="font-medium" style={{ color: 'var(--danger)' }}>
-                        Row {err.row}: {err.name}
-                    </p>
-                    <ul className="list-disc pl-5" style={{ color: 'var(--text-secondary)' }}>
-                        {err.errors.map((msg, i) => <li key={i}>{msg}</li>)}
-                    </ul>
-                </div>
-            ))}
-        </div>
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon-sm" onClick={(e) => e.stopPropagation()} aria-label={`Actions for ${product.name}`}>
+                    <MoreHorizontal aria-hidden />
+                </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
+                <DropdownMenuItem onSelect={onEdit}>
+                    <Pencil aria-hidden /> {editable ? 'Edit' : 'View'}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={onAdjust}>
+                    <PackagePlus aria-hidden /> Adjust stock
+                </DropdownMenuItem>
+                {editable ? (
+                    <>
+                        <DropdownMenuItem onSelect={onDuplicate}>
+                            <Copy aria-hidden /> Duplicate
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        {status !== 'active' ? (
+                            <DropdownMenuItem onSelect={() => onStatus('active')}>
+                                {status === 'archived' ? <ArchiveRestore aria-hidden /> : <Send aria-hidden />}
+                                {status === 'archived' ? 'Restore and publish' : 'Publish'}
+                            </DropdownMenuItem>
+                        ) : null}
+                        {status !== 'draft' ? (
+                            <DropdownMenuItem onSelect={() => onStatus('draft')}>
+                                {status === 'archived' ? <ArchiveRestore aria-hidden /> : <FilePen aria-hidden />}
+                                {status === 'archived' ? 'Restore as draft' : 'Move to drafts'}
+                            </DropdownMenuItem>
+                        ) : null}
+                        {status !== 'archived' ? (
+                            <DropdownMenuItem variant="destructive" onSelect={() => onStatus('archived')}>
+                                <Archive aria-hidden /> Archive
+                            </DropdownMenuItem>
+                        ) : null}
+                    </>
+                ) : null}
+            </DropdownMenuContent>
+        </DropdownMenu>
     );
 }
+
+export default withProviders(ProductsManager);

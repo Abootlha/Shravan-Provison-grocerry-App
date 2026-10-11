@@ -38,4 +38,28 @@ describe('UpdateStoreSettingsDto', () => {
       ).length,
     ).toBe(1);
   });
+
+  it('accepts the new contact, timezone and partial fee fields', async () => {
+    const errors = await errorsFor({
+      contactEmail: 'store@example.com',
+      address: 'Shop 1, Main Road',
+      gstin: '09AAACH7409R1ZZ',
+      timezone: 'Asia/Kolkata',
+      fees: { deliveryFee: 30, discountRate: 0 },
+    });
+    expect(errors).toHaveLength(0);
+  });
+
+  it('allows clearing email and gstin with an empty string', async () => {
+    expect(await errorsFor({ contactEmail: '', gstin: '' })).toHaveLength(0);
+  });
+
+  it('rejects invalid email, gstin, timezone and fees', async () => {
+    expect((await errorsFor({ contactEmail: 'nope' })).length).toBe(1);
+    expect((await errorsFor({ gstin: '1234' })).length).toBe(1);
+    expect((await errorsFor({ timezone: 'Mars/Base' })).length).toBe(1);
+    expect((await errorsFor({ fees: { deliveryFee: -1 } })).length).toBe(1);
+    expect((await errorsFor({ fees: { discountRate: 2 } })).length).toBe(1);
+    expect((await errorsFor({ fees: { unknown: 1 } })).length).toBe(1);
+  });
 });

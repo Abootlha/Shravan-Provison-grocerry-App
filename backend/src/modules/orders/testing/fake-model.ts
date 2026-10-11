@@ -191,6 +191,15 @@ export function createFakeModel(options: FakeModelOptions = {}) {
       return project(opts.new ? doc : before, selected);
     }),
   );
+  model.findByIdAndUpdate = jest.fn((id: any, update: Doc, opts: Doc = {}) =>
+    query((selected) => {
+      const doc = store.get(idOf(id));
+      if (!doc) return null;
+      const before = { ...doc };
+      applyUpdate(doc, update);
+      return project(opts.new ? doc : before, selected);
+    }),
+  );
   model.updateOne = jest.fn((filter: Doc, update: Doc) => {
     const run = () =>
       settle(() => {

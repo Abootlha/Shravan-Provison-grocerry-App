@@ -22,6 +22,12 @@
  * Tokens: height 64, side inset space.lg (16), radius radii.dock (18), colors.surface + hairline, shadows.floating.
  * Accessibility: role tablist / tab with selected state; every item gets a ≥44pt target.
  *
+ * Width: the dock fills the screen minus the 16pt insets, capped at DOCK_MAX_WIDTH and centred on
+ * tablets / desktop web. Tabs share that width: the active tab takes what its icon + label need
+ * (label measured off-screen, so font scale and Hindi labels are accounted for) and the rest split
+ * the remainder evenly (never below 44). When the label can't fit, the active tab first tightens its
+ * padding, then truncates the label, and on very narrow screens goes icon-only. Nothing overflows.
+ *
  * Example
  *   <FloatingDock
  *     items={[{ key: 'Home', label: 'Home', icon: ({ color, size }) => <Icon name="home" color={color} size={size} /> }, …]}
@@ -30,9 +36,9 @@
  *     bottomInset={insets.bottom}
  *   />
  */
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
-import Animated, { useAnimatedStyle, useReducedMotion, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { radii, space, type, z } from '../../constants/theme';
 import { makeStyles, makeThemed, useTheme } from '../../theme';
 import { springs, durations, easings } from '../../theme/motion';
@@ -54,8 +60,20 @@ function DockBadge({ count }) {
 }
 
 export const DOCK_HEIGHT = 64;
+/** Widest the dock gets (tablet / desktop web); it centres beyond this. */
+export const DOCK_MAX_WIDTH = 480;
 const PAD = 6;
 const ICON = 24;
+const MIN_TAB = 44; // inactive tab floor = the touch target
+const LABEL_FONT_SCALE = 1.2;
+// Active-tab padding tiers: roomy first, then tight; below that the label truncates, then drops.
+const ROOMY = { pad: space.lg, gap: space.sm };
+const TIGHT = { pad: space.sm, gap: 6 };
+const SNUG = { pad: 6, gap: space.xs };
+// Truncate only when nearly all of the word stays readable; otherwise the active tab goes icon-only
+// (the tint pill + filled glyph still mark it, and the a11y label keeps the name).
+const MIN_VISIBLE = 0.9;
+const MIN_LABEL = 36;
 
 const DOCK_RADIUS = radii.dock;
 const INDICATOR_RADIUS = 12;
@@ -65,11 +83,40 @@ const useTones = makeThemed(({ colors: c }) => {
 });
 
 /**
- * The pill's x is DERIVED, not read from each item's onLayout `x`: on web onLayout only fires on
- * size changes (ResizeObserver), so when the active item widens its neighbours move without
- * reporting and the pill would land on the wrong tab. Only the row width and item widths are
- * measured; x follows from the space-between arithmetic, exact on every platform.
+ * Tab widths for a row `rowW` wide. Pure arithmetic, so the pill's x is exact on every platform
+ * (on web onLayout only fires on size changes, so a neighbour's reported x goes stale after a reflow).
+ * Returns { widths: number[], mode: 'roomy' | 'tight' | 'snug' | 'truncate' | 'icon' }.
  */
+export function layoutDock({ rowW, count, activeIndex, labelW, withLabel }) {
+    const even = rowW / count;
+    if (!withLabel || activeIndex < 0 || count < 2 || labelW == null) {
+        return { widths: Array(count).fill(even), mode: 'icon' };
+    }
+    const room = rowW - (count - 1) * MIN_TAB; // the most the active tab may take
+    // +2: onLayout widths are rounded (web reports whole pixels), so leave room for the sub-pixel rest
+    const need = (tier) => tier.pad * 2 + ICON + tier.gap + labelW + 2;
+    let mode;
+    let activeW;
+    if (need(ROOMY) <= room) {
+        mode = 'roomy';
+        activeW = need(ROOMY);
+    } else if (need(TIGHT) <= room) {
+        mode = 'tight';
+        activeW = need(TIGHT);
+    } else if (need(SNUG) <= room) {
+        mode = 'snug';
+        activeW = need(SNUG);
+    } else if (room - (SNUG.pad * 2 + ICON + SNUG.gap) >= Math.max(MIN_LABEL, labelW * MIN_VISIBLE)) {
+        mode = 'truncate';
+        activeW = room;
+    } else {
+        return { widths: Array(count).fill(even), mode: 'icon' };
+    }
+    activeW = Math.max(activeW, even);
+    const rest = (rowW - activeW) / (count - 1);
+    return { widths: Array.from({ length: count }, (_, i) => (i === activeIndex ? activeW : rest)), mode };
+}
+
 export function FloatingDock({ items = [], activeKey, onSelect, activeTone = 'tint', showLabels = 'active', bottomInset = 0, style }) {
     const reduce = useReducedMotion();
     const TONES = useTones();
@@ -77,102 +124,149 @@ export function FloatingDock({ items = [], activeKey, onSelect, activeTone = 'ti
     const { colors, shadows } = useTheme();
     const t = TONES[activeTone] || TONES.tint;
     const [rowW, setRowW] = useState(0);
-    const [widths, setWidths] = useState({});
+    const [labelWs, setLabelWs] = useState({});
 
     const onRowLayout = useCallback((e) => setRowW(e.nativeEvent.layout.width), []);
-    const measure = useCallback(
+    const measureLabel = useCallback(
         (key) => (e) => {
-            const w = e.nativeEvent.layout.width;
-            setWidths((prev) => (prev[key] === w ? prev : { ...prev, [key]: w }));
+            const w = Math.ceil(e.nativeEvent.layout.width);
+            setLabelWs((prev) => (prev[key] === w ? prev : { ...prev, [key]: w }));
         },
         [],
     );
 
-    // x of the active item in the space-between row: sum(width + gap) of the items before it
+    const activeIndex = items.findIndex((it) => it.key === activeKey);
+    const activeItem = items[activeIndex];
+    const wantsLabel = showLabels === 'active';
+    const { widths, mode } = rowW
+        ? layoutDock({
+              rowW,
+              count: items.length,
+              activeIndex,
+              labelW: activeItem ? labelWs[activeItem.key] : null,
+              withLabel: wantsLabel,
+          })
+        : { widths: null, mode: 'icon' };
+    const tier = mode === 'roomy' ? ROOMY : mode === 'tight' ? TIGHT : SNUG;
+
     let pillX = 0;
     let pillW = 0;
-    if (rowW && items.length && items.every((it) => widths[it.key] != null)) {
-        const total = items.reduce((sum, it) => sum + widths[it.key], 0);
-        const gap = items.length > 1 ? Math.max(0, (rowW - total) / (items.length - 1)) : 0;
-        let x = items.length > 1 ? 0 : Math.max(0, (rowW - total) / 2);
-        for (const it of items) {
-            if (it.key === activeKey) {
-                pillX = x;
-                pillW = widths[it.key];
-                break;
-            }
-            x += widths[it.key] + gap;
-        }
+    if (widths && activeIndex >= 0) {
+        for (let i = 0; i < activeIndex; i += 1) pillX += widths[i];
+        pillW = widths[activeIndex];
     }
 
-    const pillStyle = useAnimatedStyle(() => {
-        if (!pillW) return { opacity: 0 };
+    // Spring only when the active tab changes; a resize, rotation or font change snaps into place.
+    const x = useSharedValue(0);
+    const w = useSharedValue(0);
+    const lastKey = useRef(null);
+    useEffect(() => {
+        if (!pillW) return;
+        const switched = lastKey.current != null && lastKey.current !== activeKey;
+        lastKey.current = activeKey;
+        if (!switched) {
+            x.value = pillX;
+            w.value = pillW;
+            return;
+        }
         const go = (v) => (reduce ? withTiming(v, { duration: durations.fast, easing: easings.out }) : withSpring(v, springs.snappy));
+        x.value = go(pillX);
         // the one sanctioned width animation (README section 3, rule 2): the pill hugs the active label
-        return { opacity: 1, width: go(pillW), transform: [{ translateX: go(pillX) }] };
-    }, [pillX, pillW, reduce]);
+        w.value = go(pillW);
+    }, [activeKey, pillX, pillW, reduce]);
+
+    const pillStyle = useAnimatedStyle(() => (w.value ? { opacity: 1, width: w.value, transform: [{ translateX: x.value }] } : { opacity: 0 }));
 
     return (
         <View style={[styles.wrap, { bottom: bottomInset + space.md }, style, { pointerEvents: 'box-none' }]}>
-            <GlassSurface radius={DOCK_RADIUS} style={[styles.dock, shadows.floating]} accessibilityRole="tablist">
-                <View style={styles.row} onLayout={onRowLayout}>
-                    <Animated.View style={[styles.pill, { backgroundColor: t.pill }, pillStyle, { pointerEvents: 'none' }]} />
-                    {items.map((it) => {
-                        const focused = it.key === activeKey;
-                        const fg = focused ? t.fg : colors.inkMuted;
-                        const label = showLabels === 'all' || (showLabels === 'active' && focused);
-                        return (
-                            <PressableScale
+            {/* the shadow lives on the shell so the dock itself can clip without losing it on iOS */}
+            <View style={[styles.shell, shadows.floating]}>
+                <GlassSurface radius={DOCK_RADIUS} style={styles.dock} accessibilityRole="tablist">
+                    {/* off-screen label measurement: natural widths at the current font scale and language */}
+                    <View
+                        style={[styles.measure, { pointerEvents: 'none' }]}
+                        aria-hidden
+                        accessibilityElementsHidden
+                        importantForAccessibility="no-hide-descendants"
+                    >
+                        {items.map((it) => (
+                            <Animated.Text
                                 key={it.key}
-                                onPress={() => onSelect && onSelect(it.key)}
-                                haptic={focused ? false : 'selection'}
-                                accessibilityRole="tab"
-                                accessibilityState={{ selected: focused }}
-                                accessibilityLabel={it.accessibilityLabel || it.label}
-                                onLayout={measure(it.key)}
-                                style={[styles.item, focused && label && styles.itemWide]}
+                                onLayout={measureLabel(it.key)}
+                                maxFontSizeMultiplier={LABEL_FONT_SCALE}
+                                numberOfLines={1}
+                                style={[styles.label, styles.measureText]}
                             >
-                                <View>
-                                    {it.icon({ color: fg, size: ICON, focused })}
-                                    <DockBadge count={it.badge} />
-                                </View>
-                                {label ? (
-                                    <Animated.Text numberOfLines={1} maxFontSizeMultiplier={1.2} style={[styles.label, { color: fg }]}>
-                                        {it.label}
-                                    </Animated.Text>
-                                ) : null}
-                            </PressableScale>
-                        );
-                    })}
-                </View>
-            </GlassSurface>
+                                {it.label}
+                            </Animated.Text>
+                        ))}
+                    </View>
+                    <View style={styles.row} onLayout={onRowLayout}>
+                        <Animated.View style={[styles.pill, { backgroundColor: t.pill }, pillStyle, { pointerEvents: 'none' }]} />
+                        {items.map((it, i) => {
+                            const focused = it.key === activeKey;
+                            const fg = focused ? t.fg : colors.inkMuted;
+                            const label = showLabels === 'all' || (focused && wantsLabel && mode !== 'icon');
+                            return (
+                                <PressableScale
+                                    key={it.key}
+                                    onPress={() => onSelect && onSelect(it.key)}
+                                    haptic={focused ? false : 'selection'}
+                                    accessibilityRole="tab"
+                                    accessibilityState={{ selected: focused }}
+                                    accessibilityLabel={it.accessibilityLabel || it.label}
+                                    style={[styles.item, widths ? { width: widths[i] } : styles.itemFlex, label && focused && { paddingHorizontal: tier.pad }]}
+                                >
+                                    <View>
+                                        {it.icon({ color: fg, size: ICON, focused })}
+                                        <DockBadge count={it.badge} />
+                                    </View>
+                                    {label ? (
+                                        <Animated.Text
+                                            numberOfLines={1}
+                                            ellipsizeMode="tail"
+                                            maxFontSizeMultiplier={LABEL_FONT_SCALE}
+                                            style={[styles.label, styles.labelShrink, { color: fg, marginLeft: tier.gap }]}
+                                        >
+                                            {it.label}
+                                        </Animated.Text>
+                                    ) : null}
+                                </PressableScale>
+                            );
+                        })}
+                    </View>
+                </GlassSurface>
+            </View>
         </View>
     );
 }
 
 const useStyles = makeStyles((th) => ({
-    wrap: { position: 'absolute', left: space.lg, right: space.lg, zIndex: z.tabBar },
+    wrap: { position: 'absolute', left: space.lg, right: space.lg, zIndex: z.tabBar, alignItems: 'center' },
+    shell: { width: '100%', maxWidth: DOCK_MAX_WIDTH, borderRadius: DOCK_RADIUS, backgroundColor: th.colors.surface },
     dock: {
         height: DOCK_HEIGHT,
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: PAD,
         backgroundColor: th.colors.surface, // solid: white / dark surface #1A1A1A
-        overflow: 'visible',
+        overflow: 'hidden',
     },
-    row: { flex: 1, height: DOCK_HEIGHT - PAD * 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    row: { flex: 1, minWidth: 0, height: DOCK_HEIGHT - PAD * 2, flexDirection: 'row', alignItems: 'center' },
     pill: { position: 'absolute', top: 0, bottom: 0, left: 0, borderRadius: INDICATOR_RADIUS },
     item: {
         height: DOCK_HEIGHT - PAD * 2,
-        minWidth: 52,
-        paddingHorizontal: space.md,
+        paddingHorizontal: space.xs,
         borderRadius: INDICATOR_RADIUS,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
     },
-    itemWide: { paddingHorizontal: space.lg },
-    label: { ...type.label, fontFamily: type.button.fontFamily, marginLeft: space.sm },
+    itemFlex: { flex: 1 },
+    label: { ...type.label, fontFamily: type.button.fontFamily },
+    labelShrink: { flexShrink: 1, minWidth: 0 },
+    measure: { position: 'absolute', top: 0, left: 0, width: 2000, opacity: 0, alignItems: 'flex-start' },
+    measureText: { alignSelf: 'flex-start' },
     badge: { position: 'absolute', top: -6, right: -10 },
 }));
 

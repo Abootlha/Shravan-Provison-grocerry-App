@@ -6,9 +6,6 @@
  */
 import { themes } from '../../constants/theme';
 
-/** Backend orders.service: deliveryFee = itemTotal >= 200 ? 0 : 25 */
-export const FREE_DELIVERY_THRESHOLD = 200;
-
 export const getProductId = (p) => (p ? p.id || p._id || p.productId : undefined);
 
 export const getCategoryId = (p) => {

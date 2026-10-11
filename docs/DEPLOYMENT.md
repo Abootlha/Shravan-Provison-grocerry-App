@@ -1,10 +1,12 @@
 # Backend deployment (VPS + PM2)
 
-The NestJS backend is deployed automatically to the production VPS whenever a
-change under `backend/` lands on `main`.
+The NestJS backend is deployed automatically to the VPS whenever a change under
+`backend/` lands on `main` (production) or `develop` (the development instance,
+see [Development environment](#development-environment)). Both run on the same
+server as separate PM2 apps.
 
 ```
-GitHub (push to main)
+GitHub (push to main → production, push to develop → development)
   └─ .github/workflows/deploy-backend.yml
        verify:  npm ci → eslint → tsc --noEmit → jest → nest build → release.tar.gz
        deploy:  scp release + remote-deploy.sh → ssh: remote-deploy.sh deploy
@@ -20,7 +22,7 @@ Files involved:
 |------|---------|
 | `.github/workflows/deploy-backend.yml` | Build, test, package and deploy (or roll back) |
 | `backend/scripts/deploy/remote-deploy.sh` | Runs on the server: install, switch, reload, health check, rollback |
-| `backend/ecosystem.config.js` | PM2 app definition (`shravan-backend`) |
+| `backend/ecosystem.config.js` | PM2 app definition (`shravan-backend`, or `PM2_APP_NAME`) |
 | `backend/.nvmrc` | Node major version used by CI and the server (22) |
 
 `.github/workflows/ci-cd.yml` only runs checks (all packages, on PRs and pushes).
@@ -38,6 +40,7 @@ Files involved:
 │   └── logs/                         out.log, error.log (PM2)
 ├── incoming/                         upload area used by the workflow
 ├── DEPLOYED_SHA                      commit currently live
+├── APP_NAME                          PM2 app that owns this directory (deploys with another name are refused)
 └── .deploy.lock                      prevents overlapping deploys (flock)
 ```
 
@@ -104,10 +107,11 @@ Start from `backend/.env.example`. Every variable:
 
 | Variable | Notes |
 |----------|-------|
-| `NODE_ENV` | `production` (PM2 also sets it) |
+| `NODE_ENV` | `production`. PM2 sets it from this file: `development` only if this says `development`, otherwise `production` |
 | `PORT` | `3000`; nginx and the health check use it |
 | `MONGODB_URI`, `MONGODB_DB` | Mongo connection; `MONGODB_DB` optional (defaults to the URI's database) |
 | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_URL` | Redis for cache, BullMQ, Socket.IO adapter and login sessions |
+| `REDIS_DB` | Redis database index, default `0`. Production keeps `0`; the development instance must use another one (`1`) |
 | `CORS_ORIGINS` | Comma separated browser origins (admin panel, website) |
 | `TRUST_PROXY` | `1` behind nginx (Cloudflare's real IP is restored by nginx, see below) |
 | `PUBLIC_API_URL` | `https://api.shravanprovision.com` — base for PayU callbacks (`/api/v1/payments/success`, `/failure`, `/webhook`) |
@@ -118,7 +122,8 @@ Start from `backend/.env.example`. Every variable:
 | `JWT_REFRESH_IDLE_DAYS` | Customer/rider session idle timeout, default 365 |
 | `JWT_ADMIN_REFRESH_IDLE_DAYS` | Admin session idle timeout, default 28 |
 | `JWT_REFRESH_REUSE_GRACE_SECONDS` | Grace window for a just-rotated refresh token, default 300 |
-| `TWOFACTOR_API_KEY`, `TWOFACTOR_TEMPLATE_NAME`, `OTP_LENGTH` | OTP SMS (required in production) |
+| `TWOFACTOR_API_KEY`, `TWOFACTOR_TEMPLATE_NAME`, `OTP_LENGTH` | OTP SMS (required in production). `OTP_LENGTH` 4-6, default 4; the apps read it from the send-otp response |
+| `OTP_FIXED_CODE` | **Never in production** (the app refuses to start). Development only, see below |
 | `MAPMYINDIA_API_KEY`, `MAPMYINDIA_CLIENT_ID`, `MAPMYINDIA_CLIENT_SECRET` | Mappls (optional) |
 | `GOOGLE_MAPS_API_KEY` | Maps, search, ETA |
 | `STORE_LATITUDE`, `STORE_LONGITUDE`, `STORE_MAX_DELIVERY_KM` | Store location and delivery radius |
@@ -288,6 +293,12 @@ Repository → Settings → Secrets and variables → Actions (or put them on th
 | `DEPLOY_PATH` | secret or variable | no | Default `/var/www/shravan-backend` |
 | `DEPLOY_HEALTHCHECK_URL` | secret or variable | no | Checked on the server. Default `http://127.0.0.1:<PORT>/api/v1/health` |
 | `PUBLIC_HEALTHCHECK_URL` | secret or variable | no | e.g. `https://api.shravanprovision.com/api/v1/health`, checked from GitHub after the deploy |
+| `DEPLOY_PATH_DEV` | secret or variable | for `develop` | Development instance directory, e.g. `/home/ubuntu/shravan-backend-dev`. Must differ from `DEPLOY_PATH`; no default |
+| `DEPLOY_HEALTHCHECK_URL_DEV` | secret or variable | no | Like `DEPLOY_HEALTHCHECK_URL`, for development (default uses `PORT` from its `shared/.env`) |
+| `PUBLIC_HEALTHCHECK_URL_DEV` | secret or variable | no | e.g. `https://dev-api.shravanprovision.com/api/v1/health` |
+
+The development target uses the same `DEPLOY_HOST`, `DEPLOY_USER`,
+`DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS` and `DEPLOY_PORT`.
 
 If Cloudflare's bot protection challenges GitHub's runners, the public check
 fails (the deploy itself is fine); leave `PUBLIC_HEALTHCHECK_URL` unset or add
@@ -319,10 +330,71 @@ run): add **Required reviewers** to approve each deploy, and restrict
    not come back on reboot. Keep the old directory and `.env` until you are
    confident, then remove them.
 
+## Development environment
+
+A second instance of the backend runs on the same server for testing. It has
+its own directory, PM2 app, port, Redis database and config, and is deployed
+from the `develop` branch.
+
+| | Production | Development |
+|---|---|---|
+| Branch | `main` | `develop` |
+| GitHub environment / concurrency group | `production` / `deploy-backend-production` | `development` / `deploy-backend-development` |
+| `DEPLOY_PATH` | `DEPLOY_PATH` (default `/var/www/shravan-backend`) | `DEPLOY_PATH_DEV`, e.g. `/home/ubuntu/shravan-backend-dev` |
+| PM2 app (`APP_NAME`) | `shravan-backend` | `shravan-backend-dev` |
+| Public URL | `api.shravanprovision.com` | own subdomain / tunnel, e.g. `dev-api.shravanprovision.com` |
+
+Differences in the development `shared/.env` (start from a copy of the
+production file, then change these):
+
+| Variable | Development value | Why |
+|----------|-------------------|-----|
+| `NODE_ENV` | `development` | Enables the fixed OTP; PM2 runs the app as development |
+| `PORT` | `3001` | Production uses 3000. The deploy health check reads `PORT` from `shared/.env` |
+| `REDIS_DB` | `1` | Production uses `0`. Sessions, OTP codes, caches and BullMQ queues are keyed per database, so a different index keeps them apart on a shared Redis server. **Never give both instances the same `REDIS_DB`**: dev would consume production jobs and could read production sessions |
+| `MONGODB_DB` | `shravankirana` | Development database. It must not be the database production uses on the same MongoDB server |
+| `OTP_FIXED_CODE` | `000000` | Every phone number logs in with this code, no SMS is sent (no 2Factor cost). Must have exactly `OTP_LENGTH` digits. The backend refuses to start if this is set with `NODE_ENV=production` |
+| `OTP_LENGTH` | `6` | The apps render as many boxes as the server reports |
+| `PAYU_ENV` | `test` | PayU sandbox with test keys, never live keys |
+| `PUBLIC_API_URL`, `PAYMENT_RETURN_URL`, `CORS_ORIGINS`, `SOCKET_IO_CORS_ORIGIN` | the dev subdomain | Callbacks and browsers must reach the dev instance, not production |
+| `JWT_SECRET`, `JWT_REFRESH_SECRET` | new values | Different from production, so tokens never work across instances |
+
+At startup the development instance logs `Fixed OTP mode enabled — SMS
+disabled`. If you do not see it, the fixed OTP is not active.
+
+One-time setup on the server (as the deploy user, e.g. `ubuntu`):
+
+```bash
+mkdir -p /home/ubuntu/shravan-backend-dev/{releases,shared/logs,incoming}
+install -m 600 /dev/null /home/ubuntu/shravan-backend-dev/shared/.env
+nano /home/ubuntu/shravan-backend-dev/shared/.env     # values above
+```
+
+Then set `DEPLOY_PATH_DEV` in GitHub, give the dev subdomain its own nginx
+`server` block (or tunnel) pointing at `127.0.0.1:3001`, and push to `develop`
+(or Actions → Deploy backend → Run workflow → target `development`).
+
+Safety checks in `remote-deploy.sh`: an `APP_NAME` other than
+`shravan-backend` needs an explicit `DEPLOY_PATH`, and each `DEPLOY_PATH`
+records its owner in `APP_NAME`, so a deploy with the wrong name/path pair is
+refused before anything changes. Deploy locks are per `DEPLOY_PATH`, so
+production and development deploys never wait on each other.
+
+Manual commands for the dev instance take the same form with its own path and
+name:
+
+```bash
+DEPLOY_PATH=/home/ubuntu/shravan-backend-dev APP_NAME=shravan-backend-dev \
+  bash /home/ubuntu/shravan-backend-dev/current/scripts/deploy/remote-deploy.sh rollback
+pm2 logs shravan-backend-dev --lines 200
+curl -s http://127.0.0.1:3001/api/v1/health
+```
+
 ## Day-to-day
 
-**Deploy**: merge to `main` (any change under `backend/`). Or run the workflow
-manually with an optional `ref` (branch, tag or SHA). Only people with write
+**Deploy**: merge to `main` (any change under `backend/`); merging to
+`develop` deploys the development instance. Or run the workflow manually with a
+`target` (`production` or `development`) and an optional `ref` (branch, tag or SHA). Only people with write
 access can run it; add required reviewers on `production` to gate it.
 
 **What happens on failure**: if the new release does not pass the health check
@@ -334,7 +406,7 @@ leave the live release untouched.
 
 **Roll back** to the previous release (the one before `current`):
 
-- GitHub: Actions → Deploy backend → Run workflow → tick `rollback`.
+- GitHub: Actions → Deploy backend → Run workflow → choose the `target` and tick `rollback`.
 - On the server:
   ```bash
   sudo -iu deploy

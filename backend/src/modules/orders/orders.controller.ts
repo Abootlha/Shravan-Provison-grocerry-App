@@ -10,6 +10,7 @@ import {
   Request,
   ForbiddenException,
   NotFoundException,
+  HttpCode,
 } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -20,8 +21,19 @@ import {
   UpdateStatusDto,
   AdminUpdateStatusDto,
   AssignRiderDto,
+  QuoteOrderDto,
+  AdminOrdersQueryDto,
 } from './dto';
-import { UserRole } from '../users/schemas/user.schema';
+import { UserRole, isStaffRole } from '../users/schemas/user.schema';
+import { Roles } from '../auth/decorators/roles.decorator';
+
+// Statuses only the assigned rider may set.
+const RIDER_CONTROLLED_STATUSES = [
+  OrderStatus.ASSIGNED,
+  OrderStatus.PICKED_UP,
+  OrderStatus.OUT_FOR_DELIVERY,
+  OrderStatus.DELIVERED,
+];
 
 @Controller('orders')
 @UseGuards(JwtAuthGuard)
@@ -64,7 +76,7 @@ export class OrdersController {
     const isAssignedRider =
       req.user.role === UserRole.RIDER &&
       this.extractEntityId(order.riderId) === req.user.userId;
-    const isAdmin = req.user.role === UserRole.ADMIN;
+    const isAdmin = isStaffRole(req.user.role);
 
     if (!isOwner && !isAssignedRider && !isAdmin) {
       throw new ForbiddenException('You can only access your own orders');
@@ -73,10 +85,21 @@ export class OrdersController {
     return { order, isAdmin };
   }
 
+  /**
+   * POST /orders. 409 { code: 'STORE_CLOSED', nextOpenAt } when the store is
+   * closed or outside storeTimings.
+   */
   @Post()
   async createOrder(@Request() req: any, @Body() body: CreateOrderDto) {
     const order = await this.ordersService.createOrder(req.user.userId, body);
     return { order };
+  }
+
+  /** POST /orders/quote: the exact bill POST /orders would charge. */
+  @Post('quote')
+  @HttpCode(200)
+  async quoteOrder(@Request() req: any, @Body() body: QuoteOrderDto) {
+    return this.ordersService.quoteOrder(req.user.userId, body.items);
   }
 
   @Get()
@@ -135,7 +158,7 @@ export class OrdersController {
     @Param('userId') userId: string,
   ) {
     // Verify ownership or admin role
-    if (req.user.userId !== userId && req.user.role !== UserRole.ADMIN) {
+    if (req.user.userId !== userId && !isStaffRole(req.user.role)) {
       throw new ForbiddenException('You can only access your own orders');
     }
 
@@ -156,7 +179,7 @@ export class OrdersController {
       this.extractEntityId(order.riderId) === req.user.userId;
 
     // Verify ownership, assigned rider, or admin role
-    if (!isOwner && !isAssignedRider && req.user.role !== UserRole.ADMIN) {
+    if (!isOwner && !isAssignedRider && !isStaffRole(req.user.role)) {
       throw new ForbiddenException('You can only access your own orders');
     }
 
@@ -245,13 +268,8 @@ export class OrdersController {
     else if (req.user.role === UserRole.CUSTOMER) {
       throw new ForbiddenException('Customers cannot update order status');
     } else if (
-      req.user.role === UserRole.ADMIN &&
-      [
-        OrderStatus.ASSIGNED,
-        OrderStatus.PICKED_UP,
-        OrderStatus.OUT_FOR_DELIVERY,
-        OrderStatus.DELIVERED,
-      ].includes(updateStatusDto.status)
+      isStaffRole(req.user.role) &&
+      RIDER_CONTROLLED_STATUSES.includes(updateStatusDto.status)
     ) {
       throw new ForbiddenException(
         'Admins cannot update rider-controlled delivery statuses',
@@ -273,6 +291,7 @@ export class OrdersController {
 
   @Patch(':id/assign-rider')
   @UseGuards(AdminGuard)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   async assignRider(
     @Param('id') id: string,
     @Body() assignRiderDto: AssignRiderDto,
@@ -285,27 +304,23 @@ export class OrdersController {
   }
 }
 
-// Admin controller for order management
+// Admin controller for order management (admins and managers).
 @Controller('admin/orders')
 @UseGuards(JwtAuthGuard, AdminGuard)
+@Roles(UserRole.ADMIN, UserRole.MANAGER)
 export class AdminOrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
   @Get()
-  async getAllOrders(
-    @Query('status') status?: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string,
-  ) {
-    return this.ordersService.findAll({
-      status,
-      page: page ? parseInt(page) : 1,
-      limit: limit ? parseInt(limit) : 20,
-      startDate,
-      endDate,
-    });
+  async getAllOrders(@Query() query: AdminOrdersQueryDto) {
+    return this.ordersService.adminListOrders(query);
+  }
+
+  /** :id is the Mongo _id or the human orderId (ORD-...). */
+  @Get(':id')
+  async getOrderDetail(@Param('id') id: string) {
+    const order = await this.ordersService.adminGetOrderDetail(id);
+    return { order };
   }
 
   @Patch(':id/status')
@@ -314,14 +329,7 @@ export class AdminOrdersController {
     @Param('id') id: string,
     @Body() body: AdminUpdateStatusDto,
   ) {
-    if (
-      [
-        OrderStatus.ASSIGNED,
-        OrderStatus.PICKED_UP,
-        OrderStatus.OUT_FOR_DELIVERY,
-        OrderStatus.DELIVERED,
-      ].includes(body.status)
-    ) {
+    if (RIDER_CONTROLLED_STATUSES.includes(body.status)) {
       throw new ForbiddenException(
         'Admins cannot update rider-controlled delivery statuses',
       );
@@ -331,8 +339,22 @@ export class AdminOrdersController {
       id,
       body.status,
       req.user.userId,
-      { actorRole: UserRole.ADMIN, reason: body.note },
+      { actorRole: req.user.role, reason: body.note },
     );
+    return { order };
+  }
+
+  /** Only CONFIRMED orders; the rider must be active and available. */
+  @Patch(':id/assign-rider')
+  async assignRider(@Param('id') id: string, @Body() body: AssignRiderDto) {
+    const order = await this.ordersService.assignRider(id, body.riderId);
+    return { order };
+  }
+
+  /** Only while CONFIRMED (before the rider accepted). */
+  @Patch(':id/unassign-rider')
+  async unassignRider(@Param('id') id: string) {
+    const order = await this.ordersService.unassignRider(id);
     return { order };
   }
 }

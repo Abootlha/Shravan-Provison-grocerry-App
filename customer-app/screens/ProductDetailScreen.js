@@ -1,7 +1,7 @@
 /**
  * ProductDetailScreen (Part C §8) — full-bleed hero on the flat neutral image well with pager dots
  * (tap opens the full-screen viewer), a surface r16 sheet overlapping it with sentence-case badges
- * (clock + ETA, veg, fresh), name 20/700, PriceTag 28/800 + green savings, trust strip, spring accordions, a
+ * (clock + ETA, veg, fresh), name 20/700, PriceTag 28/800 + green savings, spring accordions, a
  * "You might also like" rail and a sticky stepper + 52px violet CTA footer. Glass back/share/heart
  * float over the hero; a solid titled header fades in as you scroll.
  *
@@ -13,7 +13,7 @@
  * CTA (useFlyToCart). The screen itself cross-fades (AppNavigator PDP_OPTIONS).
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Share, View, useWindowDimensions } from 'react-native';
+import { Share, View } from 'react-native';
 import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -24,7 +24,7 @@ import { Screen, Text, Badge, Chip, Divider, PriceTag, useFlyToCart, useHeroTarg
 import { radii, space } from '../constants/theme';
 import { useTheme, makeStyles } from '../theme';
 import { useTranslation } from '../hooks/useTranslation';
-import { useServiceArea } from './address/useServiceArea';
+import { useDeliveryEta } from '../components/product/useDeliveryEta';
 import { translateToHindi } from '../services/translationService';
 import { ProductService } from '../services/services';
 import ImageGallery from '../components/product/ImageGallery';
@@ -36,11 +36,11 @@ import {
     DescriptionText,
     HighlightsList,
     NutritionTable,
-    TrustStrip,
     hasNutrition,
     productInfoRows,
 } from '../components/product/PdpDetails';
 import { InfoRow } from '../components/product/AccordionSection';
+import { contentColumn, useContentWidth } from '../hooks/useContentWidth';
 import {
     formatINR,
     getCategoryId,
@@ -100,10 +100,10 @@ const ProductDetailScreen = ({ route, navigation }) => {
     const { colors } = useTheme();
     const routeProduct = route.params?.product || {};
     const { currentLanguage, isHi } = useTranslation();
-    const { etaMinutes } = useServiceArea();
+    const eta = useDeliveryEta(isHi); // from the store settings only; no chip while unknown
     const dispatch = useDispatch();
     const insets = useSafeAreaInsets();
-    const { width } = useWindowDimensions();
+    const width = useContentWidth();
 
     const productId = getProductId(routeProduct);
     const [fetched, setFetched] = useState(null);
@@ -222,6 +222,7 @@ const ProductDetailScreen = ({ route, navigation }) => {
 
     return (
         <Screen edges={[]}>
+            <View style={contentColumn}>
             <Animated.ScrollView
                 onScroll={onScroll}
                 scrollEventThrottle={16}
@@ -241,7 +242,14 @@ const ProductDetailScreen = ({ route, navigation }) => {
 
                 <View style={styles.sheet}>
                     <View style={styles.chips}>
-                        {inStock ? <Badge tone="neutral" size="md" label={isHi ? `${etaMinutes} मिनट` : `${etaMinutes} mins`} icon={ClockIcon} /> : null}
+                        {inStock && (eta.closedLabel || eta.minutes) ? (
+                            <Badge
+                                tone="neutral"
+                                size="md"
+                                label={eta.closedLabel || (isHi ? `${eta.minutes} मिनट` : `${eta.minutes} mins`)}
+                                icon={ClockIcon}
+                            />
+                        ) : null}
                         {isVeg ? <Badge tone="success" size="md" label={isHi ? 'शाकाहारी' : 'Veg'} icon={VegIcon} /> : null}
                         {fresh ? <Badge tone="neutral" size="md" label={isHi ? 'ताज़ा' : 'Fresh'} icon={LeafIcon} /> : null}
                     </View>
@@ -308,11 +316,7 @@ const ProductDetailScreen = ({ route, navigation }) => {
                         <Badge tone="error" size="md" label={isHi ? 'स्टॉक में नहीं' : 'Out of stock'} style={styles.oos} />
                     ) : null}
 
-                    <View style={styles.trust}>
-                        <TrustStrip isHi={isHi} />
-                    </View>
-
-                    <Divider />
+                    <Divider spacing={space.lg} />
 
                     {shown.highlights ? (
                         <AccordionSection title={isHi ? 'मुख्य बातें' : 'Highlights'} expanded={expanded.highlights} animateLayout={lastToggled !== 'highlights'} onToggle={() => toggle('highlights')}>
@@ -383,6 +387,7 @@ const ProductDetailScreen = ({ route, navigation }) => {
                 onClose={closeViewer}
                 productName={shown.name}
             />
+            </View>
         </Screen>
     );
 };
@@ -423,7 +428,6 @@ const useStyles = makeStyles((t) => ({
     },
     taxes: { marginTop: space.xxs },
     oos: { alignSelf: 'flex-start', marginTop: space.md },
-    trust: { marginTop: space.xl, marginBottom: space.lg },
 }));
 
 export default ProductDetailScreen;

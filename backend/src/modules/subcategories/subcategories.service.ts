@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Subcategory, SubcategoryDocument } from './schemas/subcategory.schema';
 import { RedisService } from '../../common/utils/redis.service';
+import { CatalogCacheService } from '../../common/utils/catalog-cache.service';
 
 @Injectable()
 export class SubcategoriesService {
@@ -10,7 +11,30 @@ export class SubcategoriesService {
     @InjectModel(Subcategory.name)
     private subcategoryModel: Model<SubcategoryDocument>,
     private redisService: RedisService,
+    private catalogCache: CatalogCacheService,
   ) {}
+
+  /** Admin list, optionally including deactivated subcategories. */
+  async adminFindAll(options: {
+    includeInactive?: boolean;
+    parentId?: string;
+  }): Promise<any[]> {
+    const and: Record<string, any>[] = [];
+    if (!options.includeInactive) and.push({ isActive: true });
+    if (options.parentId) {
+      and.push({
+        parentId: {
+          $in: [new Types.ObjectId(options.parentId), options.parentId],
+        },
+      });
+    }
+    return this.subcategoryModel
+      .find(and.length ? { $and: and } : {})
+      .populate('parentId', 'name icon color')
+      .sort({ sortOrder: 1, name: 1 })
+      .lean()
+      .exec();
+  }
 
   async findAll(parentId?: string): Promise<SubcategoryDocument[]> {
     const cacheKey = parentId
@@ -122,6 +146,7 @@ export class SubcategoriesService {
   }
 
   private async invalidateCache(parentId?: string): Promise<void> {
+    await this.catalogCache.bump();
     await this.redisService.del('subcategories:all');
     if (parentId) {
       await this.redisService.del(`subcategories:parent:${parentId}`);

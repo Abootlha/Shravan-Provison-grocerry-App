@@ -14,6 +14,26 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { CategoryType } from './schemas/category.schema';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/category.dto';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../users/schemas/user.schema';
+import { AdminCatalogListQueryDto } from '../../common/dto/admin-catalog-query.dto';
+
+/** Admin list including deactivated categories (?includeInactive=true). */
+@Controller('admin/categories')
+@UseGuards(JwtAuthGuard, AdminGuard)
+@Roles(UserRole.ADMIN, UserRole.MANAGER)
+export class AdminCategoriesController {
+  constructor(private readonly categoriesService: CategoriesService) {}
+
+  @Get()
+  async findAll(@Query() query: AdminCatalogListQueryDto) {
+    const categories = await this.categoriesService.adminFindAll({
+      includeInactive: query.includeInactive,
+      type: query.type,
+    });
+    return { categories };
+  }
+}
 
 @Controller('categories')
 export class CategoriesController {

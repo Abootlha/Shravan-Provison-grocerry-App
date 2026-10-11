@@ -65,6 +65,56 @@ function parseNonNegativeInt(value: string | undefined, fallback: number) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
+/**
+ * REDIS_DB: logical Redis database index (default 0). Two environments that
+ * share one Redis server (production and development) must use different
+ * indexes so sessions, OTPs, caches and BullMQ queues never mix. An invalid
+ * value fails the boot instead of silently falling back to database 0.
+ */
+export function parseRedisDb(value: string | undefined): number {
+  if (value === undefined || value.trim() === '') return 0;
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error(
+      `[config] REDIS_DB must be a non-negative integer (got "${value}")`,
+    );
+  }
+  return parseInt(trimmed, 10);
+}
+
+/**
+ * OTP_LENGTH: number of OTP digits, 4-6 (default 4).
+ */
+export function parseOtpLength(value: string | undefined): number {
+  const parsed = parseInt(value || '4', 10);
+  return Number.isFinite(parsed) && parsed >= 4 && parsed <= 6 ? parsed : 4;
+}
+
+/**
+ * OTP_FIXED_CODE: development-only fixed OTP (e.g. 000000). When set, no SMS
+ * is sent and this code is accepted. It must never reach production, so a
+ * production boot with it set fails here, before anything else starts.
+ */
+export function parseOtpFixedCode(
+  value: string | undefined,
+  otpLength: number,
+  production: boolean,
+): string | undefined {
+  const code = (value || '').trim();
+  if (!code) return undefined;
+  if (production) {
+    throw new Error(
+      '[config] OTP_FIXED_CODE is set while NODE_ENV=production. A fixed OTP would let anyone log in to any account. Remove OTP_FIXED_CODE from the production environment.',
+    );
+  }
+  if (!/^\d+$/.test(code) || code.length !== otpLength) {
+    throw new Error(
+      `[config] OTP_FIXED_CODE must be exactly ${otpLength} digits (OTP_LENGTH=${otpLength})`,
+    );
+  }
+  return code;
+}
+
 function parseList(value?: string): string[] {
   return (value || '')
     .split(',')
@@ -82,7 +132,12 @@ export default () => {
     );
   }
 
-  const otpLength = parseInt(process.env.OTP_LENGTH || '4', 10);
+  const otpLength = parseOtpLength(process.env.OTP_LENGTH);
+  const otpFixedCode = parseOtpFixedCode(
+    process.env.OTP_FIXED_CODE,
+    otpLength,
+    isProduction(),
+  );
 
   return {
     port: parseInt(process.env.PORT || '3000', 10),
@@ -97,6 +152,9 @@ export default () => {
       host: process.env.REDIS_HOST || 'localhost',
       port: parseInt(process.env.REDIS_PORT || '6379', 10),
       password: process.env.REDIS_PASSWORD || undefined,
+      // Logical database index. Use a different one per environment when
+      // production and development share a Redis server.
+      db: parseRedisDb(process.env.REDIS_DB),
     },
 
     jwt: {
@@ -148,11 +206,10 @@ export default () => {
       apiKey: process.env.TWOFACTOR_API_KEY || '',
       templateName: process.env.TWOFACTOR_TEMPLATE_NAME || 'OTP1',
       otpExpiry: 300, // 5 minutes in seconds
-      // Mobile apps currently render a 4-digit OTP input; raise to 6 once they support it.
-      otpLength:
-        Number.isFinite(otpLength) && otpLength >= 4 && otpLength <= 6
-          ? otpLength
-          : 4,
+      // 4-6 digits. send-otp returns it so the apps render the right number of boxes.
+      otpLength,
+      // Development only (refused in production above): fixed OTP, no SMS sent.
+      fixedCode: otpFixedCode,
     },
 
     store: {

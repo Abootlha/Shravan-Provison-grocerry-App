@@ -192,6 +192,7 @@ export const translations = {
             },
             moment: {
                 breakfast: { lead: 'Breakfast in', emphasis: '{eta} mins' },
+                breakfastNoEta: { lead: 'Breakfast', emphasis: 'basics' },
                 snack: { lead: 'Snack', emphasis: "o'clock" },
                 dinner: { lead: "Tonight's", emphasis: 'dinner', trail: 'basics' },
                 lateNight: { lead: 'Midnight', emphasis: 'cravings' },
@@ -411,6 +412,7 @@ export const translations = {
             },
             moment: {
                 breakfast: { lead: 'नाश्ता', emphasis: '{eta} मिनट', trail: 'में' },
+                breakfastNoEta: { lead: 'नाश्ते का', emphasis: 'सामान' },
                 snack: { lead: 'स्नैक', emphasis: 'टाइम' },
                 dinner: { lead: 'आज रात के', emphasis: 'खाने', trail: 'का सामान' },
                 lateNight: { lead: 'आधी रात की', emphasis: 'भूख' },

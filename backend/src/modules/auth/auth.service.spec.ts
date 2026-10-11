@@ -70,7 +70,7 @@ type RedisMock = ReturnType<typeof createRedisMock>;
 /** Session records currently stored (one per signed-in device). */
 const sessionKeys = (redis: RedisMock) =>
   [...redis.store.keys()].filter((k) =>
-    /^refresh:(customer|admin|rider):/.test(k),
+    /^refresh:(customer|admin|manager|rider):/.test(k),
   );
 
 /** Asserts a 401 SessionException carrying `code`. */
@@ -405,6 +405,38 @@ describe('AuthService', () => {
       const [key] = sessionKeys(redis);
       expect(key).toMatch(/^refresh:admin:admin-1:/);
       expect(redis.ttls.get(key)).toBe(28 * DAY);
+    });
+
+    it('lets managers sign in to the admin panel with the staff timeout', async () => {
+      usersService.findByUsername.mockResolvedValue({
+        _id: { toString: () => 'manager-1' },
+        username: 'manager',
+        password: await bcrypt.hash('secret', 4),
+        role: UserRole.MANAGER,
+        isActive: true,
+      });
+
+      const login = await service.adminLogin('manager', 'secret');
+
+      expect(login.user.role).toBe(UserRole.MANAGER);
+      const [key] = sessionKeys(redis);
+      expect(key).toMatch(/^refresh:manager:manager-1:/);
+      expect(redis.ttls.get(key)).toBe(28 * DAY);
+    });
+
+    it('never lets customers or riders use the admin login', async () => {
+      for (const role of [UserRole.CUSTOMER, UserRole.RIDER]) {
+        usersService.findByUsername.mockResolvedValue({
+          _id: { toString: () => 'u-1' },
+          username: 'u',
+          password: await bcrypt.hash('secret', 4),
+          role,
+          isActive: true,
+        });
+        await expect(service.adminLogin('u', 'secret')).rejects.toThrow(
+          'Invalid credentials',
+        );
+      }
     });
 
     it('reports SESSION_EXPIRED once the idle record is gone', async () => {

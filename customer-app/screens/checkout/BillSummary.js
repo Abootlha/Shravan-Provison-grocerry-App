@@ -1,12 +1,21 @@
-import React, { memo } from 'react';
+import React, { memo, useEffect } from 'react';
 import { View } from 'react-native';
-import Animated from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Card, Divider, RollingNumber, Text } from '../../components/ui';
+import { Card, Divider, RollingNumber, Skeleton, Text } from '../../components/ui';
 import { fontFamily, space } from '../../constants/theme';
 import { layout, makeStyles, useTheme } from '../../theme';
-import { DELIVERY_FEE } from './bill';
+import { durations, easings } from '../../theme/motion';
 import { GROUP_RADIUS } from './layout';
+
+/** Dims the amounts while the server quote is in flight (opacity only, ≤200ms fade). */
+const useUpdatingFade = (updating) => {
+    const o = useSharedValue(updating ? 0.5 : 1);
+    useEffect(() => {
+        o.value = withTiming(updating ? 0.5 : 1, { duration: durations.fast, easing: easings.out });
+    }, [updating]);
+    return useAnimatedStyle(() => ({ opacity: o.value }));
+};
 
 const Row = ({ label, children }) => {
     const styles = useStyles();
@@ -25,18 +34,67 @@ const Amount = ({ value, color, minus }) => {
 };
 
 /**
+ * `bill` is the server quote once it has arrived, or an estimate from the store's fees while it
+ * is in flight (`state` 'updating': amounts dim and "Updating" shows). `state` 'error' replaces
+ * the total with a retry message: a total the server hasn't confirmed is never shown as final.
+ *
  * Bill card ending in the green "You saved ₹X" band (JioMart, Part C §9). Every amount rolls
  * (RollingNumber); the discount row and savings band enter/leave with layout animations so
  * the rows below slide instead of jumping.
  */
-function BillSummaryBase({ bill, tip, isHi }) {
+function BillSummaryBase({ bill, tip, state = 'ready', isHi }) {
     const styles = useStyles();
     const { colors } = useTheme();
+    const updating = state === 'updating';
+    const fade = useUpdatingFade(updating);
+    const head = (
+        <View style={styles.head}>
+            <Text variant="title" accessibilityRole="header">{isHi ? 'बिल विवरण' : 'Bill summary'}</Text>
+            {updating ? (
+                <Animated.View entering={layout.enter} exiting={layout.exit}>
+                    <Text variant="caption" color="muted" accessibilityLiveRegion="polite">{isHi ? 'अपडेट हो रहा है…' : 'Updating…'}</Text>
+                </Animated.View>
+            ) : null}
+        </View>
+    );
+
+    if (state === 'error') {
+        return (
+            <Card padding={0} radius={GROUP_RADIUS} style={styles.card}>
+                <View style={styles.body} accessibilityLiveRegion="polite">
+                    {head}
+                    <View style={styles.errorRow}>
+                        <MaterialCommunityIcons name="alert-circle-outline" size={20} color={colors.inkSecondary} />
+                        <Text variant="body" color="secondary" style={styles.flex}>
+                            {isHi
+                                ? 'हम आपकी कुल राशि की पुष्टि नहीं कर सके। भुगतान से पहले नीचे फिर से प्रयास करें।'
+                                : 'We couldn’t confirm your total with the store. Use Retry below before paying.'}
+                        </Text>
+                    </View>
+                </View>
+            </Card>
+        );
+    }
+
+    if (!bill) {
+        return (
+            <Card padding={0} radius={GROUP_RADIUS} style={styles.card}>
+                <View style={styles.body}>
+                    {head}
+                    <Skeleton height={14} />
+                    <Skeleton height={14} width="70%" />
+                    <Skeleton height={22} width="45%" />
+                </View>
+            </Card>
+        );
+    }
+
     const free = bill.deliveryFee === 0;
+    const pct = bill.discountRate != null ? Math.round(bill.discountRate * 100) : null;
     return (
         <Card padding={0} radius={GROUP_RADIUS} style={styles.card}>
-            <View style={styles.body}>
-                <Text variant="title" accessibilityRole="header">{isHi ? 'बिल विवरण' : 'Bill summary'}</Text>
+            <Animated.View style={[styles.body, fade]}>
+                {head}
 
                 <Row label={isHi ? 'सामान का कुल' : 'Item total'}>
                     <Amount value={bill.itemTotal} />
@@ -45,7 +103,9 @@ function BillSummaryBase({ bill, tip, isHi }) {
                 <Row label={isHi ? 'डिलीवरी शुल्क' : 'Delivery fee'}>
                     {free ? (
                         <Animated.View key="free" entering={layout.enter} style={styles.value}>
-                            <Text variant="priceStrike" color="muted">₹{DELIVERY_FEE}</Text>
+                            {bill.standardDeliveryFee > 0 ? (
+                                <Text variant="priceStrike" color="muted">₹{bill.standardDeliveryFee}</Text>
+                            ) : null}
                             <Text variant="price" color="success">{isHi ? 'मुफ़्त' : 'Free'}</Text>
                         </Animated.View>
                     ) : (
@@ -60,7 +120,7 @@ function BillSummaryBase({ bill, tip, isHi }) {
                 </Row>
 
                 {bill.discount > 0 ? (
-                    <Row label={isHi ? 'स्टोर छूट (5%)' : 'Store discount (5%)'}>
+                    <Row label={pct ? (isHi ? `स्टोर छूट (${pct}%)` : `Store discount (${pct}%)`) : (isHi ? 'स्टोर छूट' : 'Store discount')}>
                         <Amount value={bill.discount} color="success" minus />
                     </Row>
                 ) : null}
@@ -86,7 +146,7 @@ function BillSummaryBase({ bill, tip, isHi }) {
                     </Text>
                     </Animated.View>
                 ) : null}
-            </View>
+            </Animated.View>
 
             {bill.savings > 0 ? (
                 <Animated.View entering={layout.enter} exiting={layout.exit} layout={layout.list} style={styles.savings} accessibilityRole="text">
@@ -108,6 +168,9 @@ export const BillSummary = memo(BillSummaryBase);
 
 const useStyles = makeStyles((t) => ({
     card: { overflow: 'hidden' },
+    head: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: space.md },
+    errorRow: { flexDirection: 'row', alignItems: 'flex-start', gap: space.sm },
+    flex: { flex: 1 },
     body: { padding: space.lg, gap: space.md },
     row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.md },
     label: { flexShrink: 1 },

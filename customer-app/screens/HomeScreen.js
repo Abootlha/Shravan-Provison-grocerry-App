@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DeviceEventEmitter, RefreshControl, StyleSheet } from 'react-native';
+import { DeviceEventEmitter, RefreshControl, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import Animated, {
     useAnimatedStyle,
@@ -15,11 +15,11 @@ import { BannerCarousel, FloatingCartBar } from '../components';
 import { space, z } from '../constants/theme';
 import { useTheme } from '../theme';
 import { durations, easings, springs } from '../theme/motion';
-import { OrderService, ProductService, SettingsService } from '../services';
-import { API_BASE_URL } from '../services/config';
+import { OrderService, ProductService } from '../services';
+import { useStoreFees, useStoreStatus } from '../hooks/useStoreSettings';
 import { useTranslation } from '../hooks/useTranslation';
 import { translateToHindi } from '../services/translationService';
-import { describeError } from '../services/normalize';
+import { describeError, friendlyError } from '../services/normalize';
 import HomeHeader from './home/HomeHeader';
 import { CategoryGrid, HomeSkeleton, ProductRail, RailSkeleton } from './home/HomeSections';
 import { FreshSection, MomentSection, PriceStore, Reveal, SeasonBlock } from './home/EditorialSections';
@@ -29,7 +29,7 @@ import { useTabBarScroll } from './home/useTabBarScroll';
 import { useTabEnter } from './home/useTabEnter';
 import { useCartBarOffset, useTabBarHeight } from '../components/BottomTabsIcons';
 import ActiveOrderBar, { ORDER_BAR_HEIGHT, useActiveOrder } from '../components/ActiveOrderBar';
-import { FREE_DELIVERY_THRESHOLD } from '../components/product/productUtils';
+import { contentColumn } from '../hooks/useContentWidth';
 
 const AnimatedFlashList = Animated.createAnimatedComponent(FlashList);
 
@@ -60,18 +60,13 @@ const to12h = (hhmm) => {
     return m ? `${hr}:${String(m).padStart(2, '0')} ${suffix}` : `${hr} ${suffix}`;
 };
 
-const storeBadgeFor = (settings, isHi) => {
-    const t = settings?.storeTimings;
-    if (!t?.openTime || !t?.closeTime) return null;
-    const now = new Date();
-    const mins = now.getHours() * 60 + now.getMinutes();
-    const toMin = (s) => {
-        const [h, m] = s.split(':').map(Number);
-        return h * 60 + (m || 0);
-    };
-    const open = mins >= toMin(t.openTime) && mins < toMin(t.closeTime);
-    if (open) return { open, label: isHi ? `${to12h(t.closeTime)} तक खुला` : `Open till ${to12h(t.closeTime)}` };
-    return { open, label: isHi ? `${to12h(t.openTime)} बजे खुलेगा` : `Opens ${to12h(t.openTime)}` };
+// Only what the server says: "Open till 11 PM" when it reports the store open; nothing when it
+// doesn't report (the closed state lives in the headline instead).
+const storeBadgeFor = (status, isHi) => {
+    if (status.settings?.isOpen !== true) return null;
+    const close = to12h(status.settings?.storeTimings?.closeTime);
+    if (!close) return null;
+    return { open: true, label: isHi ? `${close} तक खुला` : `Open till ${close}` };
 };
 
 const translateList = async (list, currentLanguage) => {
@@ -99,7 +94,9 @@ const HomeScreen = ({ navigation }) => {
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState(null);
     const [partialError, setPartialError] = useState(null); // one of categories/products failed
-    const [settings, setSettings] = useState(null);
+    const [errorCause, setErrorCause] = useState(null); // the request error behind error/partialError (for the friendly copy)
+    const store = useStoreStatus();
+    const fees = useStoreFees();
     const [activeTab, setActiveTab] = useState('all');
     const [catProducts, setCatProducts] = useState({}); // categoryId -> products | 'loading'
     const [headerH, setHeaderH] = useState(0);
@@ -121,6 +118,7 @@ const HomeScreen = ({ navigation }) => {
                 if (!silent) setLoading(true);
                 setError(null);
                 setPartialError(null);
+                setErrorCause(null);
                 // Independent requests: one failing must not blank the other.
                 const [catRes, prodRes] = await Promise.allSettled([
                     ProductService.getCategories(),
@@ -130,7 +128,10 @@ const HomeScreen = ({ navigation }) => {
                     catRes.status === 'rejected' && `categories: ${describeError(catRes.reason)}`,
                     prodRes.status === 'rejected' && `products: ${describeError(prodRes.reason)}`,
                 ].filter(Boolean);
-                if (failed.length) console.error('[home] catalogue request failed', failed.join(' | '));
+                if (failed.length) {
+                    if (__DEV__) console.error('[home] catalogue request failed', failed.join(' | '));
+                    setErrorCause(catRes.status === 'rejected' ? catRes.reason : prodRes.reason);
+                }
                 const [cats, prods] = await Promise.all([
                     translateList(catRes.status === 'fulfilled' ? catRes.value : [], currentLanguage),
                     translateList(prodRes.status === 'fulfilled' ? prodRes.value.products : [], currentLanguage),
@@ -144,7 +145,8 @@ const HomeScreen = ({ navigation }) => {
                     else setPartialError(failed.join(' | '));
                 }
             } catch (err) {
-                console.error('Error fetching data:', err);
+                if (__DEV__) console.error('[home] load failed', describeError(err));
+                setErrorCause(err);
                 setError(describeError(err) || 'Failed to load data.');
             } finally {
                 setLoading(false);
@@ -158,16 +160,6 @@ const HomeScreen = ({ navigation }) => {
     useEffect(() => {
         fetchData();
     }, [fetchData]);
-
-    useEffect(() => {
-        let alive = true;
-        SettingsService.getStoreSettings()
-            .then((data) => alive && setSettings(data?.settings || data))
-            .catch(() => {});
-        return () => {
-            alive = false;
-        };
-    }, []);
 
     // Past orders feed the "Buy again" rail (one fetch per sign-in; failures just hide the rail).
     const userId = user?.id || user?._id;
@@ -298,7 +290,18 @@ const HomeScreen = ({ navigation }) => {
 
     // ---------------- sections ----------------
 
-    const etaMinutes = Number(settings?.estimatedDeliveryMinutes) || 10;
+    // ETA only from the store settings, and only while the store is open
+    const etaMinutes = store.isOpen ? store.etaMinutes : null;
+    const headline = useMemo(() => {
+        if (!store.isOpen) {
+            const line = store.closedLine(isHi);
+            const [lead, ...rest] = line.split(' · ');
+            return rest.length ? { lead: `${lead} ·`, emphasis: rest.join(' · '), accessibilityLabel: line } : { lead: '', emphasis: line };
+        }
+        if (etaMinutes) return { lead: headerLabels.deliveryIn, emphasis: `${etaMinutes} ${headerLabels.minutes}` };
+        return isHi ? { lead: 'किराना,', emphasis: 'घर तक' } : { lead: 'Groceries,', emphasis: 'delivered' };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [store.isOpen, store.nextOpenAt, etaMinutes, isHi, headerLabels]);
 
     // Entrance plays once per section: the first screenful staggers, later sections fade in as
     // they first scroll into view, and nothing replays on recycle, refresh or revisit.
@@ -390,7 +393,7 @@ const HomeScreen = ({ navigation }) => {
                                       ? 'कुछ गड़बड़ हो गई'
                                       : 'Couldn’t load the store'
                             }
-                            subtitle={__DEV__ && (item.detail || error) ? item.detail || error : isHi ? 'इंटरनेट जाँचें और फिर कोशिश करें।' : 'Check your connection and try again.'}
+                            subtitle={friendlyError(item.cause || errorCause, isHi)}
                             actionLabel={t('retry')}
                             onAction={fetchData}
                             style={styles.state}
@@ -400,13 +403,7 @@ const HomeScreen = ({ navigation }) => {
                     return (
                         <EmptyState
                             title={isHi ? 'दुकान अभी खाली है' : 'The shelves are empty'}
-                            subtitle={
-                                __DEV__
-                                    ? `The API returned no categories or products (${API_BASE_URL}).`
-                                    : isHi
-                                      ? 'दुकान जल्द ही सामान जोड़ेगी।'
-                                      : 'The store is stocking up. Pull down to refresh, or check back soon.'
-                            }
+                            subtitle={isHi ? 'दुकान जल्द ही सामान जोड़ेगी।' : 'The store is stocking up. Pull down to refresh, or check back soon.'}
                             actionLabel={t('retry')}
                             onAction={fetchData}
                             style={styles.state}
@@ -491,12 +488,18 @@ const HomeScreen = ({ navigation }) => {
                 </Reveal>
             );
         },
-        [banners, currentLanguage, error, fetchData, firstPaint, freshLabels, handleAllCategories, handleBannerPress, handleCategoryPress, handleProductPress, isHi, onTabSelect, scrollY, t],
+        [banners, currentLanguage, errorCause, fetchData, firstPaint, freshLabels, handleAllCategories, handleBannerPress, handleCategoryPress, handleProductPress, isHi, onTabSelect, scrollY, t],
     );
 
     const addressType = selectedAddress?.type || (isHi ? 'घर' : 'Home');
     const addressLine = selectedAddress?.address || (isHi ? 'अपना पता चुनें' : 'Select your location');
-    const offerLabel = isHi ? `₹${FREE_DELIVERY_THRESHOLD} से ऊपर मुफ़्त डिलीवरी` : `Free delivery above ₹${FREE_DELIVERY_THRESHOLD}`;
+    // From the server's fees; nothing until settings load.
+    const freeAt = fees?.freeDeliveryThreshold;
+    const offerLabel = fees == null
+        ? null
+        : freeAt > 0
+          ? (isHi ? `₹${freeAt} से ऊपर मुफ़्त डिलीवरी` : `Free delivery above ₹${freeAt}`)
+          : (isHi ? 'हर ऑर्डर पर मुफ़्त डिलीवरी' : 'Free delivery on every order');
     const avatarInitial = (user?.name || '').trim().charAt(0).toUpperCase();
     const hasOrderBar = !!activeOrder;
     const cartSpace = cartCount > 0 ? CART_PILL_H + space.sm : 0;
@@ -506,6 +509,7 @@ const HomeScreen = ({ navigation }) => {
 
     return (
         <Screen edges={[]} statusBar={theme.statusBar} topInsetColor={theme.bg}>
+            <View style={contentColumn}>
             <Animated.View style={[styles.body, enter.fade]}>
                 <Animated.View style={[styles.body, bodyStyle]}>
                     <AnimatedFlashList
@@ -536,8 +540,8 @@ const HomeScreen = ({ navigation }) => {
                 <HomeHeader
                     theme={theme}
                     scrollY={scrollY}
-                    etaMinutes={etaMinutes}
-                    storeBadge={storeBadgeFor(settings, isHi)}
+                    headline={headline}
+                    storeBadge={storeBadgeFor(store, isHi)}
                     offerLabel={offerLabel}
                     avatarInitial={avatarInitial}
                     addressType={addressType}
@@ -559,6 +563,7 @@ const HomeScreen = ({ navigation }) => {
                 ) : null}
                 <FloatingCartBar onPress={handleCartPress} bottomOffset={cartBarOffset} />
             </Animated.View>
+            </View>
         </Screen>
     );
 };

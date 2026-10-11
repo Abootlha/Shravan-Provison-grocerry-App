@@ -16,15 +16,29 @@ import { radii, space } from '../../constants/theme';
 import { useTheme, makeStyles } from '../../theme';
 import { press, layout } from '../../theme/motion';
 
-// Suggested starting terms (a fixed list, labelled as suggestions — not a live trend feed).
-// [English term, Hindi term, glyph]
-const SUGGESTED = [
-    ['Organic fruits', 'ऑर्गेनिक फल', 'fruit-cherries'],
-    ['Dairy products', 'डेयरी उत्पाद', 'cup-outline'],
-    ['Snacks', 'स्नैक्स', 'cookie-outline'],
-    ['Cold drinks', 'कोल्ड ड्रिंक्स', 'bottle-soda-classic-outline'],
-    ['Cleaning products', 'सफ़ाई का सामान', 'spray-bottle'],
-];
+const MAX_TERMS = 6;
+
+/**
+ * Starting terms taken from the live catalogue: the parts of each category name
+ * ("Dairy, Bread & Eggs" -> Dairy, Bread, Eggs), in catalogue order, de-duplicated.
+ * Nothing is suggested when the categories haven't loaded.
+ */
+const termsFrom = (categories, isHi) => {
+    const seen = new Set();
+    const out = [];
+    for (const c of categories) {
+        const name = (isHi && (c.nameHi || c.translatedName)) || c.name || '';
+        for (const part of name.split(/\s*(?:,|&|\band\b|और)\s*/i)) {
+            const term = part.trim();
+            const key = term.toLowerCase();
+            if (term.length < 3 || seen.has(key)) continue;
+            seen.add(key);
+            out.push(term);
+            if (out.length >= MAX_TERMS) return out;
+        }
+    }
+    return out;
+};
 
 const HistoryIcon = ({ color, size }) => <MaterialCommunityIcons name="history" color={color} size={size} />;
 const CloseIcon = ({ color, size }) => <MaterialCommunityIcons name="close" color={color} size={size - 2} />;
@@ -37,7 +51,14 @@ export const CategoryTile = memo(function CategoryTile({ category, onPress, isHi
         <PressableScale onPress={onPress} scaleTo={press.scale} style={[styles.tile, style]} accessibilityLabel={name}>
             <View style={styles.tileWell}>
                 {category.image ? (
-                    <Image source={{ uri: category.image }} style={styles.tileImg} contentFit="cover" transition={150} />
+                    <Image
+                        source={{ uri: category.image }}
+                        style={styles.tileImg}
+                        contentFit="cover"
+                        transition={150}
+                        cachePolicy="memory-disk"
+                        recyclingKey={String(category._id || category.id || category.image)}
+                    />
                 ) : icon3dFor(category) ? (
                     <Icon3D name={icon3dFor(category)} size={40} />
                 ) : (
@@ -84,6 +105,7 @@ const RecentChip = memo(function RecentChip({ term, selected, onTerm, onRemove, 
 
 function SearchIdle({ recent, onClearRecent, onRemoveRecent, onTerm, categories, onCategory, isHi, bottomPad, onScroll }) {
     const styles = useStyles();
+    const terms = React.useMemo(() => termsFrom(categories, isHi), [categories, isHi]);
     return (
         <Animated.ScrollView
             onScroll={onScroll}
@@ -112,26 +134,25 @@ function SearchIdle({ recent, onClearRecent, onRemoveRecent, onTerm, categories,
                 </Animated.View>
             ) : null}
 
-            <Animated.View layout={layout.list}>
-                <AnimatedListItem index={2} style={styles.section}>
-                    <SectionHeader title={isHi ? 'खोजकर देखें' : 'Try searching'} />
-                    <View style={styles.chips}>
-                        {SUGGESTED.map(([en, hi, icon], i) => {
-                            const term = isHi ? hi : en;
-                            return (
-                                <Animated.View key={en} entering={layout.enterAt(i + 2)}>
-                                    <TrendingTerm label={term} icon={icon} onPress={() => onTerm(term)} />
+            {terms.length > 0 ? (
+                <Animated.View layout={layout.list}>
+                    <AnimatedListItem index={2} style={styles.section}>
+                        <SectionHeader title={isHi ? 'खोजकर देखें' : 'Try searching'} />
+                        <View style={styles.chips}>
+                            {terms.map((term, i) => (
+                                <Animated.View key={term} entering={layout.enterAt(i + 2)}>
+                                    <TrendingTerm label={term} icon="magnify" onPress={() => onTerm(term)} />
                                 </Animated.View>
-                            );
-                        })}
-                    </View>
-                </AnimatedListItem>
-            </Animated.View>
+                            ))}
+                        </View>
+                    </AnimatedListItem>
+                </Animated.View>
+            ) : null}
 
             {categories.length > 0 ? (
                 <Animated.View layout={layout.list}>
                 <AnimatedListItem index={3} style={styles.section}>
-                    <SectionHeader title={isHi ? 'लोकप्रिय श्रेणियाँ' : 'Popular categories'} />
+                    <SectionHeader title={isHi ? 'श्रेणियाँ' : 'Categories'} />
                     <View style={styles.grid}>
                         {categories.slice(0, 8).map((c) => (
                             <CategoryTile key={c._id || c.id} category={c} isHi={isHi} onPress={() => onCategory(c)} />

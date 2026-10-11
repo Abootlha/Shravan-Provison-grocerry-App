@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type OrderDocument = Order & Document;
 
@@ -30,7 +30,9 @@ export enum PaymentStatus {
 
 @Schema({ _id: false })
 export class OrderItem {
-  @Prop({ type: Types.ObjectId, ref: 'Product', required: true })
+  // Schema.Types.ObjectId, not Types.ObjectId: with mongoose 9 the latter
+  // resolves to Mixed, which stored productId as a string and broke joins.
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Product', required: true })
   productId!: Types.ObjectId;
 
   @Prop({ required: true })
@@ -189,6 +191,11 @@ export const OrderSchema = SchemaFactory.createForClass(Order);
 OrderSchema.index({ orderStatus: 1, createdAt: 1 }); // Compound index for stale order queries
 OrderSchema.index({ userId: 1, createdAt: -1 });
 OrderSchema.index({ createdAt: -1 });
+// Admin order filters and rider stats / active-order lookups.
+OrderSchema.index({ riderId: 1, orderStatus: 1, updatedAt: -1 });
+OrderSchema.index({ paymentStatus: 1, createdAt: -1 });
+OrderSchema.index({ paymentMethod: 1, createdAt: -1 });
+OrderSchema.index({ requiresManualReview: 1, createdAt: -1 });
 
 // Pre-save hook for referential integrity validation
 OrderSchema.pre('save', async function () {
