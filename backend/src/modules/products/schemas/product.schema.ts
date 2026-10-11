@@ -232,6 +232,12 @@ export class Product {
   @Prop()
   image?: string;
 
+  // True once image/images went through the pack-shot pipeline
+  // (background removal + normalisation). Idempotency marker for
+  // scripts/normalize-product-images.js.
+  @Prop({ default: false })
+  imageProcessed?: boolean;
+
   @Prop()
   description?: string;
 

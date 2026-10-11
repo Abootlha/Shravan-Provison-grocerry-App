@@ -11,7 +11,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ navigation }) => {
   useEffect(() => {
     const bootstrap = async () => {
       const result = await dispatch(loadUser());
-      const hasSession = loadUser.fulfilled.match(result) && Boolean(result.payload?.token);
+      const hasSession = loadUser.fulfilled.match(result) && Boolean(result.payload?.user);
 
       navigation.replace(hasSession ? 'Home' : 'Login');
     };

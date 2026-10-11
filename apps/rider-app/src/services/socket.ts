@@ -2,6 +2,7 @@ import { io, Socket } from 'socket.io-client';
 import { LOCATION_UPDATE_INTERVAL, SOCKET_URL } from '../utils/constants';
 import type { RiderLocation } from '../types/rider';
 import type { NewOrderAssignment, OrderStatusUpdate } from '../types/order';
+import { refreshAccessToken } from './authSession';
 
 type SocketEventHandler = (...args: unknown[]) => void;
 
@@ -67,10 +68,13 @@ class SocketService {
 
     socket.on('disconnect', (reason) => {
       if (__DEV__) console.log('Socket disconnected:', reason);
+      // The backend drops sockets whose token fails verification.
+      if (reason === 'io server disconnect') this.handleAuthFailure();
     });
 
     socket.on('connect_error', (error) => {
       console.error('Socket connection error:', error.message);
+      if (/unauthori[sz]ed|jwt|token/i.test(error.message || '')) this.handleAuthFailure();
     });
 
     // 'reconnect' is emitted by the Manager (socket.io), not by the Socket.
@@ -80,6 +84,24 @@ class SocketService {
     });
 
     this.attachStoredListeners();
+  }
+
+  private authRefreshing = false;
+
+  /**
+   * Token rejected: renew it. On success the store gets the new token and
+   * useSocket() calls connect() with it, which swaps in a fresh socket. A real
+   * session end (401 from refresh) is handled by the session handlers in App.tsx;
+   * offline, the socket's own reconnection keeps trying.
+   */
+  private handleAuthFailure(): void {
+    if (this.authRefreshing) return;
+    this.authRefreshing = true;
+    refreshAccessToken()
+      .catch(() => null)
+      .finally(() => {
+        this.authRefreshing = false;
+      });
   }
 
   private joinRooms(): void {

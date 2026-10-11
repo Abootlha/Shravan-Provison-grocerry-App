@@ -1,811 +1,429 @@
-import React, { useState, useEffect } from 'react';
-import {
-    View,
-    Text,
-    Image,
-    ScrollView,
-    TouchableOpacity,
-    StyleSheet,
-    SafeAreaView,
-    StatusBar,
-    Dimensions,
-    FlatList,
-} from 'react-native';
+/**
+ * ProductDetailScreen (Part C §8) — full-bleed hero on the flat neutral image well with pager dots
+ * (tap opens the full-screen viewer), a surface r16 sheet overlapping it with sentence-case badges
+ * (clock + ETA, veg, fresh), name 20/700, PriceTag 28/800 + green savings, trust strip, spring accordions, a
+ * "You might also like" rail and a sticky stepper + 52px violet CTA footer. Glass back/share/heart
+ * float over the hero; a solid titled header fades in as you scroll.
+ *
+ * Route params: { product } — a raw API product or a card-shaped one (wishlist / cart).
+ * The full product is refreshed from GET /products/:id in the background.
+ *
+ * Motion: the hero pack shot is the destination of the card → PDP shared-element flight
+ * (useHeroTarget; flies back to the card on pop), and "Add to cart" flies the pack shot into the
+ * CTA (useFlyToCart). The screen itself cross-fades (AppNavigator PDP_OPTIONS).
+ */
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Share, View, useWindowDimensions } from 'react-native';
+import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useDispatch, useSelector } from 'react-redux';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { addToCart, incrementQuantity, decrementQuantity } from '../store/slices/cartSlice';
-import { COLORS, SHADOWS, PRODUCTS } from '../constants';
+import { toggleWishlistItem } from '../store/slices/wishlistSlice';
+import { Screen, Text, Badge, Chip, Divider, PriceTag, useFlyToCart, useHeroTarget } from '../components/ui';
+import { radii, space } from '../constants/theme';
+import { useTheme, makeStyles } from '../theme';
 import { useTranslation } from '../hooks/useTranslation';
+import { useServiceArea } from './address/useServiceArea';
 import { translateToHindi } from '../services/translationService';
+import { ProductService } from '../services/services';
+import ImageGallery from '../components/product/ImageGallery';
+import ImageViewer from '../components/product/ImageViewer';
+import AccordionSection, { sectionLayout } from '../components/product/AccordionSection';
+import ProductRail from '../components/product/ProductRail';
+import { PdpHeader, PdpBottomBar } from '../components/product/PdpChrome';
+import {
+    DescriptionText,
+    HighlightsList,
+    NutritionTable,
+    TrustStrip,
+    hasNutrition,
+    productInfoRows,
+} from '../components/product/PdpDetails';
+import { InfoRow } from '../components/product/AccordionSection';
+import {
+    formatINR,
+    getCategoryId,
+    getDiscountPercent,
+    getImages,
+    getMrp,
+    getPrice,
+    getProductId,
+    getUnit,
+    isInStock,
+    normalizeProduct,
+} from '../components/product/productUtils';
 
-const { width } = Dimensions.get('window');
+const BOTTOM_BAR_SPACE = 104;
+const HI_PRICE_LABELS = { save: 'बचत', off: 'छूट' };
+const ClockIcon = ({ color, size }) => <MaterialCommunityIcons name="clock-outline" color={color} size={size} />;
+function VegIcon({ size }) {
+    const { colors } = useTheme();
+    return <MaterialCommunityIcons name="square-circle" color={colors.veg} size={size} />;
+}
+const LeafIcon = ({ color, size }) => <MaterialCommunityIcons name="leaf" color={color} size={size} />;
+
+const useTranslatedProduct = (product, currentLanguage) => {
+    const [translated, setTranslated] = useState(product);
+    useEffect(() => {
+        let alive = true;
+        if (currentLanguage !== 'hi') {
+            setTranslated(product);
+            return undefined;
+        }
+        (async () => {
+            try {
+                const next = {
+                    ...product,
+                    name: product.nameHi || (await translateToHindi(product.name)),
+                    description:
+                        product.descriptionHi || (product.description ? await translateToHindi(product.description) : product.description),
+                    highlights:
+                        product.highlightsHi || (product.highlights ? await translateToHindi(product.highlights) : product.highlights),
+                    brand: product.brandHi || (product.brand ? await translateToHindi(product.brand) : product.brand),
+                };
+                if (alive) setTranslated(next);
+            } catch (err) {
+                console.error('Translation error:', err);
+                if (alive) setTranslated(product);
+            }
+        })();
+        return () => {
+            alive = false;
+        };
+    }, [currentLanguage, product]);
+    return translated;
+};
 
 const ProductDetailScreen = ({ route, navigation }) => {
-    const { product } = route.params;
-    const { currentLanguage } = useTranslation();
+    const styles = useStyles();
+    const { colors } = useTheme();
+    const routeProduct = route.params?.product || {};
+    const { currentLanguage, isHi } = useTranslation();
+    const { etaMinutes } = useServiceArea();
     const dispatch = useDispatch();
-    const cartItems = useSelector((state) => state.cart.items);
-    const productId = product.id || product._id || product.productId;
-    const normalizedProduct = { ...product, id: productId };
-    const cartItem = cartItems.find((item) => item.id === productId);
-    const quantity = cartItem ? cartItem.quantity : 0;
-
-    const [translatedProduct, setTranslatedProduct] = useState(product);
-    const [activeImageIndex, setActiveImageIndex] = useState(0);
     const insets = useSafeAreaInsets();
-    const [expandedSections, setExpandedSections] = useState({
-        description: true,
-        highlights: true,
-        nutritional: false,
-        ingredients: false,
-        storage: false,
+    const { width } = useWindowDimensions();
+
+    const productId = getProductId(routeProduct);
+    const [fetched, setFetched] = useState(null);
+    const [similar, setSimilar] = useState([]);
+    const [similarLoading, setSimilarLoading] = useState(true);
+    const [viewer, setViewer] = useState({ visible: false, index: 0 });
+    const [expanded, setExpanded] = useState({ highlights: true, details: true, nutrition: false, info: false });
+
+    const product = useMemo(() => ({ ...routeProduct, ...(fetched || {}), id: productId }), [routeProduct, fetched, productId]);
+    const shown = useTranslatedProduct(product, currentLanguage);
+
+    const price = getPrice(product);
+    const mrp = getMrp(product);
+    const unit = getUnit(product);
+    const discount = getDiscountPercent(product);
+    const inStock = isInStock(product);
+    const images = useMemo(() => getImages(product), [product]);
+    const categoryId = getCategoryId(product);
+    const reviewCount = Number(product.reviewCount ?? product.reviews) || 0;
+    const rating = Number(product.rating) || 0;
+    const dietary = product.attributes?.dietary || [];
+    const isVeg = dietary.some((d) => /^veg/i.test(String(d))) || product.isVeg === true;
+    const fresh = product.isPerishable === true || (Number(product.shelfLife) > 0 && Number(product.shelfLife) <= 7);
+    const cartProduct = useMemo(() => ({ ...product, ...normalizeProduct(product), name: product.name }), [product]);
+
+    const quantity = useSelector((s) => s.cart.items.find((it) => it.id === productId)?.quantity || 0);
+    const wishlisted = useSelector((s) => (s.wishlist?.items || []).some((it) => it.id === productId));
+
+    // Refresh the full product (wishlist/cart entries only carry the card fields).
+    useEffect(() => {
+        let alive = true;
+        if (!productId) return undefined;
+        ProductService.getProductById(productId)
+            .then((p) => alive && p && setFetched(p))
+            .catch(() => {});
+        return () => {
+            alive = false;
+        };
+    }, [productId]);
+
+    // "You might also like": same category from the API.
+    useEffect(() => {
+        let alive = true;
+        if (!categoryId) {
+            setSimilarLoading(false);
+            return undefined;
+        }
+        setSimilarLoading(true);
+        ProductService.getProducts({ categoryId, limit: 12 })
+            .then((res) => {
+                if (!alive) return;
+                const list = (res?.products || []).filter((p) => getProductId(p) !== productId).slice(0, 10);
+                setSimilar(list);
+            })
+            .catch(() => alive && setSimilar([]))
+            .finally(() => alive && setSimilarLoading(false));
+        return () => {
+            alive = false;
+        };
+    }, [categoryId, productId]);
+
+    const heroHeight = Math.round(Math.min(Math.max(width, 320) * 0.92, 420));
+    const scrollY = useSharedValue(0);
+    const onScroll = useAnimatedScrollHandler((e) => {
+        scrollY.value = e.contentOffset.y;
     });
 
-    // Translate product when language changes
+    const heroTarget = useHeroTarget(productId);
+    const fly = useFlyToCart();
     useEffect(() => {
-        const translateProduct = async () => {
-            if (currentLanguage === 'hi') {
-                try {
-                    const translated = {
-                        ...product,
-                        name: product.nameHi || await translateToHindi(product.name),
-                        description: product.descriptionHi || (product.description ? await translateToHindi(product.description) : product.description),
-                        highlights: product.highlightsHi || (product.highlights ? await translateToHindi(product.highlights) : product.highlights),
-                        brand: product.brandHi || (product.brand ? await translateToHindi(product.brand) : product.brand)
-                    };
-                    setTranslatedProduct(translated);
-                } catch (err) {
-                    console.error('Translation error:', err);
-                    setTranslatedProduct(product);
-                }
-            } else {
-                setTranslatedProduct(product);
-            }
+        const reverse = heroTarget.reverse;
+        const offRemove = navigation.addListener('beforeRemove', reverse);
+        const offTransition = navigation.addListener('transitionStart', (e) => e?.data?.closing && reverse());
+        return () => {
+            offRemove();
+            offTransition();
         };
+    }, [navigation, heroTarget.reverse]);
 
-        translateProduct();
-    }, [currentLanguage, product]);
+    // The "You might also like" rail sits below the fold: mount it once the push transition has
+    // settled, so the PDP's first frame (and the hero flight) don't also pay for skeleton cards.
+    const [settled, setSettled] = useState(false);
+    useEffect(() => {
+        const off = navigation.addListener('transitionEnd', (e) => !e?.data?.closing && setSettled(true));
+        const fallback = setTimeout(() => setSettled(true), 450); // no transition event (web, reduced motion)
+        return () => {
+            off();
+            clearTimeout(fallback);
+        };
+    }, [navigation]);
 
-    const similarProducts = PRODUCTS.filter(
-        (p) => p.categoryId === product.categoryId && p.id !== product.id
-    ).slice(0, 4);
-
-    const handleAddToCart = () => {
-        dispatch(addToCart(normalizedProduct));
+    const heroUri = images[0];
+    const onAdd = useCallback(() => {
+        fly({ fromRef: heroTarget.ref, uri: heroUri, inset: 0.1 }); // fire-and-forget
+        dispatch(addToCart(cartProduct));
+    }, [dispatch, cartProduct, fly, heroUri, heroTarget.ref]);
+    const onInc = useCallback(() => dispatch(incrementQuantity(productId)), [dispatch, productId]);
+    const onDec = useCallback(() => dispatch(decrementQuantity(productId)), [dispatch, productId]);
+    const onWishlist = useCallback(() => dispatch(toggleWishlistItem(normalizeProduct(product))), [dispatch, product]);
+    const onShare = useCallback(() => {
+        Share.share({ message: `${shown.name}${unit ? ` (${unit})` : ''} for ₹${formatINR(price)} on Shravan Kirana` }).catch(() => {});
+    }, [shown.name, unit, price]);
+    const openViewer = useCallback((index) => setViewer({ visible: true, index }), []);
+    const closeViewer = useCallback(() => setViewer((v) => ({ ...v, visible: false })), []);
+    const [lastToggled, setLastToggled] = useState(null);
+    const toggle = (key) => {
+        setLastToggled(key);
+        setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
     };
+    const openCart = useCallback(() => navigation.navigate('Main', { screen: 'Cart' }), [navigation]);
+    const openSimilar = useCallback((item) => navigation.push('ProductDetail', { product: item }), [navigation]);
 
-    const handleIncrement = () => {
-        dispatch(incrementQuantity(productId));
-    };
-
-    const handleDecrement = () => {
-        dispatch(decrementQuantity(productId));
-    };
-
-    const handleBackPress = () => {
-        navigation.goBack();
-    };
-
-    const toggleSection = (section) => {
-        setExpandedSections(prev => ({
-            ...prev,
-            [section]: !prev[section]
-        }));
-    };
-
-    const renderDescriptionText = (text) => {
-        if (!text) return null;
-        const lines = text.split('\n');
-        return lines.map((line, index) => {
-            const trimmedLine = line.trim();
-            if (!trimmedLine) return <View key={index} style={{ height: 8 }} />;
-            
-            // Short lines without trailing punctuation act as bold headings
-            const isHeading = trimmedLine.length < 35 && !/[.,;:]$/.test(trimmedLine);
-            if (isHeading) {
-                return (
-                    <Text key={index} style={[styles.description, { fontWeight: '700', color: COLORS.text, marginTop: 12, marginBottom: 4, fontSize: 15 }]}>
-                        {trimmedLine}
-                    </Text>
-                );
-            }
-            return (
-                <Text key={index} style={styles.description}>
-                    {trimmedLine}
-                </Text>
-            );
-        });
-    };
-
-    const renderHighlightsList = (text) => {
-        if (!text) return null;
-        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-        const pairs = [];
-        for (let i = 0; i < lines.length; i += 2) {
-            if (i + 1 < lines.length && lines[i].length < 40) {
-                pairs.push({ key: lines[i], value: lines[i+1] });
-            } else {
-                pairs.push({ key: null, value: lines[i] });
-                i--;
-            }
-        }
-        
-        return pairs.map((pair, index) => (
-            <View key={index} style={[styles.infoRow, { paddingVertical: 4, borderBottomWidth: index === pairs.length - 1 ? 0 : 1, borderBottomColor: '#F0F0F0' }]}>
-                {pair.key && <Text style={[styles.infoLabel, { flex: 0.4 }]}>{pair.key}</Text>}
-                <Text style={[styles.infoValue, { flex: pair.key ? 0.6 : 1, textAlign: pair.key ? 'right' : 'left' }]}>{pair.value}</Text>
-            </View>
-        ));
-    };
+    const variants = (product.variants || []).filter((v) => v && v.isActive !== false);
+    const infoRows = productInfoRows({ ...product, brand: shown.brand, unit });
+    const showNutrition = hasNutrition(product.nutrition);
 
     return (
-        <SafeAreaView style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
+        <Screen edges={[]}>
+            <Animated.ScrollView
+                onScroll={onScroll}
+                scrollEventThrottle={16}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: BOTTOM_BAR_SPACE + insets.bottom }}
+            >
+                <ImageGallery
+                    images={images}
+                    height={heroHeight + insets.top}
+                    onOpen={openViewer}
+                    productName={shown.name}
+                    heroRef={heroTarget.ref}
+                    heroStyle={heroTarget.style}
+                    onHeroLayout={heroTarget.onLayout}
+                    onHeroLoad={heroTarget.onLoad}
+                />
 
-            {/* Header */}
-            <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) + 8 }]}>
-                <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
-                    <MaterialCommunityIcons name="arrow-left" size={24} color={COLORS.text} />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.shareButton}>
-                    <MaterialCommunityIcons name="share-variant" size={22} color={COLORS.text} />
-                </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-                {/* Product Image */}
-                <View style={styles.imageContainer}>
-                    {translatedProduct.discount > 0 && (
-                        <View style={styles.discountBadge}>
-                            <Text style={styles.discountText}>{translatedProduct.discount}% OFF</Text>
-                        </View>
-                    )}
-                    <FlatList
-                        data={translatedProduct.images && translatedProduct.images.length > 0 ? translatedProduct.images : [translatedProduct.image]}
-                        horizontal
-                        pagingEnabled
-                        showsHorizontalScrollIndicator={false}
-                        onMomentumScrollEnd={(e) => {
-                            const slideSize = e.nativeEvent.layoutMeasurement.width;
-                            const index = Math.floor(e.nativeEvent.contentOffset.x / slideSize);
-                            setActiveImageIndex(index);
-                        }}
-                        keyExtractor={(_, idx) => idx.toString()}
-                        renderItem={({ item }) => (
-                            <View style={{ width: width, alignItems: 'center', justifyContent: 'center' }}>
-                                <Image
-                                    source={{ uri: item }}
-                                    style={styles.productImage}
-                                    resizeMode="contain"
-                                />
-                            </View>
-                        )}
-                    />
-                    
-                    {/* Pagination Dots */}
-                    {(translatedProduct.images && translatedProduct.images.length > 1) && (
-                        <View style={styles.paginationContainer}>
-                            {translatedProduct.images.map((_, i) => (
-                                <View
-                                    key={i}
-                                    style={[
-                                        styles.dot,
-                                        i === activeImageIndex ? styles.activeDot : styles.inactiveDot
-                                    ]}
-                                />
-                            ))}
-                        </View>
-                    )}
-                </View>
-
-                {/* Product Info */}
-                <View style={styles.infoContainer}>
-                    {/* Delivery Badge */}
-                    <View style={styles.deliveryBadge}>
-                        <MaterialCommunityIcons name="clock-fast" size={16} color={COLORS.secondary} />
-                        <Text style={styles.deliveryText}>Delivery in 10 mins</Text>
+                <View style={styles.sheet}>
+                    <View style={styles.chips}>
+                        {inStock ? <Badge tone="neutral" size="md" label={isHi ? `${etaMinutes} मिनट` : `${etaMinutes} mins`} icon={ClockIcon} /> : null}
+                        {isVeg ? <Badge tone="success" size="md" label={isHi ? 'शाकाहारी' : 'Veg'} icon={VegIcon} /> : null}
+                        {fresh ? <Badge tone="neutral" size="md" label={isHi ? 'ताज़ा' : 'Fresh'} icon={LeafIcon} /> : null}
                     </View>
 
-                    <Text style={styles.productName}>{translatedProduct.name}</Text>
-                    <Text style={styles.productUnit}>{translatedProduct.unit}</Text>
-
-                    {/* Rating */}
-                    <View style={styles.ratingContainer}>
-                        <View style={styles.ratingBadge}>
-                            <MaterialCommunityIcons name="star" size={14} color={COLORS.white} />
-                            <Text style={styles.ratingText}>{translatedProduct.rating}</Text>
-                        </View>
-                        <Text style={styles.reviewsText}>{translatedProduct.reviews} reviews</Text>
-                    </View>
-
-                    {/* Price */}
-                    <View style={styles.priceContainer}>
-                        <Text style={styles.price}>₹{translatedProduct.price}</Text>
-                        {translatedProduct.originalPrice > translatedProduct.price && (
-                            <>
-                                <Text style={styles.originalPrice}>₹{translatedProduct.originalPrice}</Text>
-                                <View style={styles.savingsBadge}>
-                                    <Text style={styles.savingsText}>
-                                        Save ₹{translatedProduct.originalPrice - translatedProduct.price}
+                    {shown.brand ? (
+                        <Text variant="label" color="secondary" style={styles.brand}>
+                            {shown.brand}
+                        </Text>
+                    ) : null}
+                    <Text variant="h2" style={styles.name} accessibilityRole="header">
+                        {shown.name}
+                    </Text>
+                    <View style={styles.subRow}>
+                        {unit ? (
+                            <Text variant="body" color="muted">
+                                {unit}
+                            </Text>
+                        ) : null}
+                        {rating > 0 ? (
+                            <View style={styles.rating} accessibilityLabel={`Rated ${rating} out of 5 from ${reviewCount} reviews`}>
+                                {unit ? <View style={styles.sep} /> : null}
+                                <MaterialCommunityIcons name="star" size={14} color={colors.rating} />
+                                <Text variant="label">{rating.toFixed(1)}</Text>
+                                {reviewCount > 0 ? (
+                                    <Text variant="caption" color="muted">
+                                        ({formatINR(reviewCount)} {isHi ? 'समीक्षाएँ' : reviewCount === 1 ? 'review' : 'reviews'})
                                     </Text>
-                                </View>
-                            </>
-                        )}
+                                ) : null}
+                            </View>
+                        ) : null}
                     </View>
 
-                    {/* Divider */}
-                    <View style={styles.divider} />
-
-                    {/* Product Description Section */}
-                    <TouchableOpacity 
-                        style={styles.sectionContainer}
-                        onPress={() => toggleSection('description')}
-                        activeOpacity={0.7}
-                    >
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Product Details</Text>
-                            <MaterialCommunityIcons 
-                                name={expandedSections.description ? "chevron-up" : "chevron-down"} 
-                                size={22} 
-                                color={COLORS.textSecondary} 
-                            />
-                        </View>
-                    </TouchableOpacity>
-                    {expandedSections.description && (
-                        <View style={styles.sectionContent}>
-                            {renderDescriptionText(translatedProduct.description)}
-                        </View>
-                    )}
-                    <View style={styles.sectionDivider} />
-
-                    {/* Highlights Section */}
-                    {translatedProduct.highlights && (
-                        <>
-                            <TouchableOpacity 
-                                style={styles.sectionContainer}
-                                onPress={() => toggleSection('highlights')}
-                                activeOpacity={0.7}
-                            >
-                                <View style={styles.sectionHeader}>
-                                    <Text style={styles.sectionTitle}>Highlights</Text>
-                                    <MaterialCommunityIcons 
-                                        name={expandedSections.highlights ? "chevron-up" : "chevron-down"} 
-                                        size={22} 
-                                        color={COLORS.textSecondary} 
+                    {variants.length > 1 ? (
+                        <View style={styles.variants}>
+                            {variants.map((v) => {
+                                const current = v.unit === unit || (v.isDefault && !variants.some((x) => x.unit === unit));
+                                return (
+                                    <Chip
+                                        key={v.sku || v.unit}
+                                        size="md"
+                                        label={v.unit}
+                                        caption={`₹${formatINR(v.sellingPrice)}`}
+                                        selected={current}
+                                        disabled={!current}
                                     />
-                                </View>
-                            </TouchableOpacity>
-                            {expandedSections.highlights && (
-                                <View style={styles.sectionContent}>
-                                    {renderHighlightsList(translatedProduct.highlights)}
-                                </View>
-                            )}
-                            <View style={styles.sectionDivider} />
-                        </>
-                    )}
+                                );
+                            })}
+                        </View>
+                    ) : null}
 
-                    {/* Nutritional Information Section */}
-                    <TouchableOpacity 
-                        style={styles.sectionContainer}
-                        onPress={() => toggleSection('nutritional')}
-                        activeOpacity={0.7}
-                    >
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Nutritional Information</Text>
-                            <MaterialCommunityIcons 
-                                name={expandedSections.nutritional ? "chevron-up" : "chevron-down"} 
-                                size={22} 
-                                color={COLORS.textSecondary} 
-                            />
-                        </View>
-                    </TouchableOpacity>
-                    {expandedSections.nutritional && (
-                        <View style={styles.sectionContent}>
-                            <View style={styles.nutritionalTable}>
-                                <View style={styles.nutritionalRow}>
-                                    <Text style={styles.nutritionalLabel}>Energy</Text>
-                                    <Text style={styles.nutritionalValue}>150 kcal</Text>
-                                </View>
-                                <View style={styles.nutritionalRow}>
-                                    <Text style={styles.nutritionalLabel}>Protein</Text>
-                                    <Text style={styles.nutritionalValue}>3.5g</Text>
-                                </View>
-                                <View style={styles.nutritionalRow}>
-                                    <Text style={styles.nutritionalLabel}>Carbohydrates</Text>
-                                    <Text style={styles.nutritionalValue}>25g</Text>
-                                </View>
-                                <View style={styles.nutritionalRow}>
-                                    <Text style={styles.nutritionalLabel}>Total Fat</Text>
-                                    <Text style={styles.nutritionalValue}>5g</Text>
-                                </View>
-                                <View style={styles.nutritionalRow}>
-                                    <Text style={styles.nutritionalLabel}>Sugar</Text>
-                                    <Text style={styles.nutritionalValue}>12g</Text>
-                                </View>
-                                <View style={styles.nutritionalRow}>
-                                    <Text style={styles.nutritionalLabel}>Sodium</Text>
-                                    <Text style={styles.nutritionalValue}>200mg</Text>
-                                </View>
-                            </View>
-                            <Text style={styles.nutritionalNote}>*Per 100g serving</Text>
-                        </View>
-                    )}
-                    <View style={styles.sectionDivider} />
-
-                    {/* Unit & Shelf Life Section */}
-                    <View style={styles.sectionContainer}>
-                        <View style={styles.infoRow}>
-                            <Text style={styles.infoLabel}>Unit</Text>
-                            <Text style={styles.infoValue}>{translatedProduct.unit}</Text>
-                        </View>
+                    <View style={styles.priceBlock}>
+                        <PriceTag price={price} mrp={mrp > price ? mrp : undefined} size="lg" showSave={mrp > price ? 'amount' : false} labels={isHi ? HI_PRICE_LABELS : undefined} />
+                        <Text variant="caption" color="muted" style={styles.taxes}>
+                            {mrp > price
+                                ? isHi
+                                    ? `MRP ₹${formatINR(mrp)} · ${discount}% की छूट · सभी कर शामिल`
+                                    : `MRP ₹${formatINR(mrp)} · ${discount}% off · incl. of all taxes`
+                                : isHi
+                                  ? 'सभी कर शामिल'
+                                  : 'Inclusive of all taxes'}
+                        </Text>
                     </View>
-                    <View style={styles.sectionDivider} />
+                    {!inStock ? (
+                        <Badge tone="error" size="md" label={isHi ? 'स्टॉक में नहीं' : 'Out of stock'} style={styles.oos} />
+                    ) : null}
 
-                    <View style={styles.sectionContainer}>
-                        <View style={styles.infoRow}>
-                            <Text style={styles.infoLabel}>Shelf Life</Text>
-                            <Text style={styles.infoValue}>6 months</Text>
-                        </View>
-                    </View>
-                    <View style={styles.sectionDivider} />
-
-                    {/* Why Choose Section */}
-                    <View style={styles.sectionContainer}>
-                        <Text style={styles.sectionTitle}>Why Choose This?</Text>
-                        <View style={styles.whyChooseList}>
-                            <View style={styles.whyChooseItem}>
-                                <MaterialCommunityIcons name="check-circle" size={18} color={COLORS.secondary} />
-                                <Text style={styles.whyChooseText}>100% Fresh & Quality Assured</Text>
-                            </View>
-                            <View style={styles.whyChooseItem}>
-                                <MaterialCommunityIcons name="check-circle" size={18} color={COLORS.secondary} />
-                                <Text style={styles.whyChooseText}>Delivered in 10 minutes</Text>
-                            </View>
-                            <View style={styles.whyChooseItem}>
-                                <MaterialCommunityIcons name="check-circle" size={18} color={COLORS.secondary} />
-                                <Text style={styles.whyChooseText}>Easy returns & refunds</Text>
-                            </View>
-                        </View>
+                    <View style={styles.trust}>
+                        <TrustStrip isHi={isHi} />
                     </View>
 
-                    {/* Similar Products */}
-                    {similarProducts.length > 0 && (
-                        <>
-                            <View style={styles.divider} />
-                            <View style={styles.similarProductsSection}>
-                                <Text style={styles.similarProductsTitle}>Similar Products</Text>
-                                <ScrollView
-                                    horizontal
-                                    showsHorizontalScrollIndicator={false}
-                                    style={styles.similarProductsScroll}
-                                >
-                                    {similarProducts.map((item) => (
-                                        <TouchableOpacity
-                                            key={item.id}
-                                            style={styles.similarProduct}
-                                            onPress={() => navigation.push('ProductDetail', { product: item })}
-                                        >
-                                            <Image
-                                                source={{ uri: item.image }}
-                                                style={styles.similarImage}
-                                                resizeMode="contain"
-                                            />
-                                            <Text style={styles.similarName} numberOfLines={2}>
-                                                {item.name}
-                                            </Text>
-                                            <Text style={styles.similarUnit}>{item.unit}</Text>
-                                            <View style={styles.similarPriceRow}>
-                                                <Text style={styles.similarPrice}>₹{item.price}</Text>
-                                                {item.originalPrice > item.price && (
-                                                    <Text style={styles.similarOriginalPrice}>₹{item.originalPrice}</Text>
-                                                )}
-                                            </View>
-                                            <TouchableOpacity style={styles.similarAddButton}>
-                                                <Text style={styles.similarAddText}>ADD</Text>
-                                            </TouchableOpacity>
-                                        </TouchableOpacity>
-                                    ))}
-                                </ScrollView>
-                            </View>
-                        </>
-                    )}
+                    <Divider />
 
-                    <View style={{ height: 100 }} />
-                </View>
-            </ScrollView>
-
-            {/* Bottom CTA */}
-            <View style={styles.bottomBar}>
-                <View style={styles.bottomPrice}>
-                    <Text style={styles.bottomPriceLabel}>Total Price</Text>
-                    <Text style={styles.bottomPriceValue}>₹{translatedProduct.price * (quantity || 1)}</Text>
+                    {shown.highlights ? (
+                        <AccordionSection title={isHi ? 'मुख्य बातें' : 'Highlights'} expanded={expanded.highlights} animateLayout={lastToggled !== 'highlights'} onToggle={() => toggle('highlights')}>
+                            <HighlightsList text={shown.highlights} />
+                        </AccordionSection>
+                    ) : null}
+                    {shown.description ? (
+                        <AccordionSection title={isHi ? 'उत्पाद विवरण' : 'Product details'} expanded={expanded.details} animateLayout={lastToggled !== 'details'} onToggle={() => toggle('details')}>
+                            <DescriptionText text={shown.description} />
+                        </AccordionSection>
+                    ) : null}
+                    {showNutrition ? (
+                        <AccordionSection title={isHi ? 'पोषण जानकारी' : 'Nutritional information'} expanded={expanded.nutrition} animateLayout={lastToggled !== 'nutrition'} onToggle={() => toggle('nutrition')}>
+                            <NutritionTable nutrition={product.nutrition} />
+                        </AccordionSection>
+                    ) : null}
+                    {infoRows.length ? (
+                        <AccordionSection title={isHi ? 'अन्य जानकारी' : 'More info'} expanded={expanded.info} animateLayout={lastToggled !== 'info'} onToggle={() => toggle('info')} last>
+                            {infoRows.map(([label, value], i) => (
+                                <InfoRow key={label} label={label} value={value} last={i === infoRows.length - 1} />
+                            ))}
+                        </AccordionSection>
+                    ) : null}
                 </View>
 
-                {quantity === 0 ? (
-                    <TouchableOpacity style={styles.addToCartButton} onPress={handleAddToCart}>
-                        <MaterialCommunityIcons name="cart-plus" size={22} color={COLORS.white} />
-                        <Text style={styles.addToCartText}>Add to Cart</Text>
-                    </TouchableOpacity>
-                ) : (
-                    <View style={styles.quantityContainer}>
-                        <TouchableOpacity style={styles.quantityButton} onPress={handleDecrement}>
-                            <MaterialCommunityIcons name="minus" size={20} color={COLORS.white} />
-                        </TouchableOpacity>
-                        <Text style={styles.quantityText}>{quantity}</Text>
-                        <TouchableOpacity style={styles.quantityButton} onPress={handleIncrement}>
-                            <MaterialCommunityIcons name="plus" size={20} color={COLORS.white} />
-                        </TouchableOpacity>
-                    </View>
-                )}
-            </View>
-        </SafeAreaView>
+                {settled ? (
+                    <Animated.View layout={sectionLayout}>
+                        <ProductRail
+                            title={isHi ? 'आपको यह भी पसंद आ सकता है' : 'You might also like'}
+                            products={similar}
+                            loading={similarLoading}
+                            onProductPress={openSimilar}
+                        />
+                    </Animated.View>
+                ) : null}
+            </Animated.ScrollView>
+
+            <PdpHeader
+                scrollY={scrollY}
+                fadeStart={heroHeight * 0.45}
+                fadeEnd={heroHeight - 40}
+                topInset={insets.top}
+                title={shown.name}
+                wishlisted={wishlisted}
+                onBack={navigation.goBack}
+                onShare={onShare}
+                onWishlist={onWishlist}
+            />
+
+            <PdpBottomBar
+                price={price}
+                mrp={mrp}
+                quantity={quantity}
+                inStock={inStock}
+                bottomInset={insets.bottom}
+                productName={shown.name}
+                isHi={isHi}
+                onAdd={onAdd}
+                onIncrement={onInc}
+                onDecrement={onDec}
+                onViewCart={openCart}
+            />
+
+            <ImageViewer
+                visible={viewer.visible}
+                images={images}
+                initialIndex={viewer.index}
+                onClose={closeViewer}
+                productName={shown.name}
+            />
+        </Screen>
     );
 };
 
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: COLORS.white,
+const useStyles = makeStyles((t) => ({
+    sheet: {
+        marginTop: -radii.sheet,
+        backgroundColor: t.colors.surface,
+        borderTopLeftRadius: radii.sheet,
+        borderTopRightRadius: radii.sheet,
+        paddingHorizontal: space.lg,
+        paddingTop: space.xl,
+        paddingBottom: space.sm,
     },
-    header: {
+    chips: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        flexWrap: 'wrap',
+        gap: space.sm,
+        marginBottom: space.lg,
     },
-    backButton: {
-        padding: 8,
-    },
-    shareButton: {
-        padding: 8,
-    },
-    scrollView: {
-        flex: 1,
-    },
-    imageContainer: {
-        width: width,
-        height: 280,
-        backgroundColor: '#F8F8F8',
-        alignItems: 'center',
-        justifyContent: 'center',
-        position: 'relative',
-    },
-    discountBadge: {
-        position: 'absolute',
-        top: 16,
-        left: 16,
-        backgroundColor: '#E8F5E9',
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 6,
-        zIndex: 1,
-    },
-    discountText: {
-        color: COLORS.secondary,
-        fontSize: 12,
-        fontWeight: '700',
-    },
-    productImage: {
-        width: '80%',
-        height: '80%',
-    },
-    infoContainer: {
-        padding: 20,
-    },
-    deliveryBadge: {
+    rating: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#E8F5E9',
-        alignSelf: 'flex-start',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 20,
-        marginBottom: 12,
+        gap: space.xs,
     },
-    deliveryText: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: COLORS.secondary,
-        marginLeft: 6,
-    },
-    productName: {
-        fontSize: 22,
-        fontWeight: '700',
-        color: COLORS.text,
-        lineHeight: 28,
-    },
-    productUnit: {
-        fontSize: 14,
-        color: COLORS.textSecondary,
-        marginTop: 4,
-    },
-    ratingContainer: {
+    sep: { width: 3, height: 3, borderRadius: 2, backgroundColor: t.colors.borderStrong, marginHorizontal: space.xs },
+    brand: { marginBottom: space.xxs },
+    name: { fontSize: 20, lineHeight: 26 },
+    subRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginTop: space.xs },
+    variants: {
         flexDirection: 'row',
-        alignItems: 'center',
-        marginTop: 12,
+        flexWrap: 'wrap',
+        gap: space.sm,
+        marginTop: space.lg,
     },
-    ratingBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: COLORS.secondary,
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 6,
+    priceBlock: {
+        marginTop: space.xl,
     },
-    ratingText: {
-        color: COLORS.white,
-        fontSize: 12,
-        fontWeight: '700',
-        marginLeft: 4,
-    },
-    reviewsText: {
-        fontSize: 12,
-        color: COLORS.textSecondary,
-        marginLeft: 10,
-    },
-    priceContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginTop: 16,
-    },
-    price: {
-        fontSize: 28,
-        fontWeight: '800',
-        color: COLORS.text,
-    },
-    originalPrice: {
-        fontSize: 18,
-        color: COLORS.textSecondary,
-        textDecorationLine: 'line-through',
-        marginLeft: 12,
-    },
-    savingsBadge: {
-        backgroundColor: '#FFF3E0',
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 6,
-        marginLeft: 12,
-    },
-    savingsText: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#FF9800',
-    },
-    divider: {
-        height: 8,
-        backgroundColor: '#F5F5F5',
-        marginVertical: 16,
-    },
-    sectionContainer: {
-        paddingVertical: 12,
-    },
-    sectionHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    sectionTitle: {
-        fontSize: 15,
-        fontWeight: '600',
-        color: COLORS.text,
-    },
-    sectionContent: {
-        paddingTop: 12,
-    },
-    sectionDivider: {
-        height: 1,
-        backgroundColor: '#F0F0F0',
-        marginVertical: 4,
-    },
-    description: {
-        fontSize: 14,
-        color: COLORS.textSecondary,
-        lineHeight: 22,
-    },
-    nutritionalTable: {
-        marginTop: 4,
-    },
-    nutritionalRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingVertical: 10,
-    },
-    nutritionalLabel: {
-        fontSize: 14,
-        color: COLORS.text,
-        fontWeight: '400',
-    },
-    nutritionalValue: {
-        fontSize: 14,
-        color: COLORS.textSecondary,
-        fontWeight: '500',
-    },
-    nutritionalNote: {
-        fontSize: 12,
-        color: COLORS.textSecondary,
-        fontStyle: 'italic',
-        marginTop: 8,
-    },
-    infoRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    infoLabel: {
-        fontSize: 15,
-        color: COLORS.text,
-        fontWeight: '400',
-    },
-    infoValue: {
-        fontSize: 14,
-        color: COLORS.textSecondary,
-        fontWeight: '500',
-    },
-    whyChooseList: {
-        marginTop: 12,
-    },
-    whyChooseItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 12,
-    },
-    whyChooseText: {
-        fontSize: 14,
-        color: COLORS.text,
-        marginLeft: 10,
-        flex: 1,
-    },
-    similarProductsSection: {
-        marginTop: 8,
-    },
-    similarProductsTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: COLORS.text,
-        marginBottom: 16,
-    },
-    similarProductsScroll: {
-        marginHorizontal: -20,
-        paddingHorizontal: 20,
-    },
-    similarProduct: {
-        width: 140,
-        marginRight: 12,
-        backgroundColor: COLORS.white,
-        borderRadius: 12,
-        padding: 12,
-        borderWidth: 1,
-        borderColor: '#E8E8E8',
-    },
-    similarImage: {
-        width: '100%',
-        height: 100,
-        marginBottom: 8,
-    },
-    similarName: {
-        fontSize: 13,
-        fontWeight: '500',
-        color: COLORS.text,
-        lineHeight: 18,
-        marginBottom: 4,
-    },
-    similarUnit: {
-        fontSize: 12,
-        color: COLORS.textSecondary,
-        marginBottom: 6,
-    },
-    similarPriceRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 8,
-    },
-    similarPrice: {
-        fontSize: 14,
-        fontWeight: '700',
-        color: COLORS.text,
-        marginRight: 6,
-    },
-    similarOriginalPrice: {
-        fontSize: 12,
-        color: COLORS.textSecondary,
-        textDecorationLine: 'line-through',
-    },
-    similarAddButton: {
-        backgroundColor: COLORS.white,
-        borderWidth: 1,
-        borderColor: COLORS.secondary,
-        borderRadius: 8,
-        paddingVertical: 8,
-        alignItems: 'center',
-    },
-    similarAddText: {
-        fontSize: 13,
-        fontWeight: '700',
-        color: COLORS.secondary,
-    },
-    bottomBar: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        backgroundColor: COLORS.white,
-        paddingHorizontal: 20,
-        paddingVertical: 16,
-        borderTopWidth: 1,
-        borderTopColor: COLORS.border,
-        ...SHADOWS.medium,
-    },
-    bottomPrice: {
-        flex: 1,
-    },
-    bottomPriceLabel: {
-        fontSize: 12,
-        color: COLORS.textSecondary,
-    },
-    bottomPriceValue: {
-        fontSize: 20,
-        fontWeight: '800',
-        color: COLORS.text,
-        marginTop: 2,
-    },
-    addToCartButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: COLORS.secondary,
-        paddingHorizontal: 28,
-        paddingVertical: 14,
-        borderRadius: 12,
-    },
-    addToCartText: {
-        color: COLORS.white,
-        fontSize: 16,
-        fontWeight: '700',
-        marginLeft: 8,
-    },
-    quantityContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: COLORS.secondary,
-        borderRadius: 12,
-        overflow: 'hidden',
-    },
-    quantityButton: {
-        paddingHorizontal: 16,
-        paddingVertical: 14,
-    },
-    quantityText: {
-        color: COLORS.white,
-        fontSize: 18,
-        fontWeight: '700',
-        paddingHorizontal: 16,
-    },
-    paginationContainer: {
-        flexDirection: 'row',
-        position: 'absolute',
-        bottom: 15,
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: '100%',
-    },
-    dot: {
-        height: 6,
-        borderRadius: 3,
-        marginHorizontal: 3,
-    },
-    activeDot: {
-        width: 12,
-        backgroundColor: COLORS.primary,
-    },
-    inactiveDot: {
-        width: 6,
-        backgroundColor: '#D9D9D9',
-    },
-});
+    taxes: { marginTop: space.xxs },
+    oos: { alignSelf: 'flex-start', marginTop: space.md },
+    trust: { marginTop: space.xl, marginBottom: space.lg },
+}));
 
 export default ProductDetailScreen;

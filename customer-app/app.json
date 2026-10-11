@@ -4,14 +4,9 @@
     "slug": "shravankirana-customer",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "icon": "./assets/brand/icon.png",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#F8CB46"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.shravankirana.customer",
@@ -22,8 +17,9 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#F8CB46"
+        "foregroundImage": "./assets/brand/adaptive-foreground.png",
+        "backgroundImage": "./assets/brand/adaptive-background.png",
+        "backgroundColor": "#6C3CF4"
       },
       "package": "com.shravankirana.customer",
       "permissions": [
@@ -32,7 +28,7 @@
       ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/brand/favicon.png"
     },
     "scheme": "shravankirana",
     "plugins": [
@@ -42,7 +38,21 @@
           "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location."
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-image",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/brand/splash.png",
+          "imageWidth": 88,
+          "resizeMode": "contain",
+          "backgroundColor": "#FFFFFF",
+          "dark": {
+            "image": "./assets/brand/splash-dark.png",
+            "backgroundColor": "#0F0F0F"
+          }
+        }
+      ]
     ],
     "extra": {
       "eas": {

@@ -1,4 +1,4 @@
-import { MAPMYINDIA_CONFIG, LOCATION_URL } from './config';
+import { MAPMYINDIA_CONFIG } from './config';
 import api from './api';
 import Constants from 'expo-constants';
 

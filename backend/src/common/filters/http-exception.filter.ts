@@ -22,6 +22,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
     let status: number = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = 'Internal server error';
     let error = 'Internal Server Error';
+    // Machine-readable reason (e.g. SESSION_EXPIRED on /auth/refresh).
+    let code: string | undefined;
 
     // Handle HTTP exceptions
     if (exception instanceof HttpException) {
@@ -33,6 +35,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
       } else if (typeof exceptionResponse === 'object') {
         message = (exceptionResponse as any).message || message;
         error = (exceptionResponse as any).error || error;
+        const rawCode = (exceptionResponse as any).code;
+        if (typeof rawCode === 'string') code = rawCode;
       }
     }
     // Handle MongoDB errors
@@ -98,6 +102,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       path: request.url,
       message,
       error,
+      ...(code ? { code } : {}),
     });
   }
 }

@@ -7,7 +7,6 @@ import {
   HttpCode,
   HttpStatus,
   Res,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
@@ -20,7 +19,7 @@ import {
   IsNotEmpty,
 } from 'class-validator';
 import type { Response } from 'express';
-import { AuthService } from './auth.service';
+import { AuthService, SessionException } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { UserRole } from '../users/schemas/user.schema';
 
@@ -75,34 +74,39 @@ class AdminLoginDto {
   password!: string;
 }
 
-// Cookie config
-const COOKIE_OPTIONS = {
+const cookieBase = () => ({
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
   sameSite: 'lax' as const,
-  maxAge: 2 * 60 * 60 * 1000, // 2 hours for access token
   path: '/',
-};
+});
 
-const REFRESH_COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax' as const,
-  maxAge: 28 * 24 * 60 * 60 * 1000, // 28 days for refresh token
-  path: '/',
-};
-
-const setAuthCookies = (
-  res: Response,
-  tokens: { accessToken: string; refreshToken: string },
-) => {
-  res.cookie('accessToken', tokens.accessToken, COOKIE_OPTIONS);
-  res.cookie('refreshToken', tokens.refreshToken, REFRESH_COOKIE_OPTIONS);
-};
+// Ten years: browsers cap cookie lifetimes anyway; the server-side session
+// record decides whether the refresh token is still valid.
+const UNLIMITED_COOKIE_MS = 10 * 365 * 24 * 60 * 60 * 1000;
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
+  /** Cookie lifetimes follow the token lifetimes from config. */
+  private setAuthCookies(
+    res: Response,
+    tokens: { accessToken: string; refreshToken: string },
+    role: string,
+  ) {
+    const refreshIdleSeconds = this.authService.getRefreshIdleSeconds(role);
+    res.cookie('accessToken', tokens.accessToken, {
+      ...cookieBase(),
+      maxAge: this.authService.getAccessTtlSeconds() * 1000,
+    });
+    res.cookie('refreshToken', tokens.refreshToken, {
+      ...cookieBase(),
+      maxAge: refreshIdleSeconds
+        ? refreshIdleSeconds * 1000
+        : UNLIMITED_COOKIE_MS,
+    });
+  }
 
   @Post('admin/login')
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
@@ -117,7 +121,7 @@ export class AuthController {
     );
 
     // Set tokens as HTTP-only cookies with appropriate expiry
-    setAuthCookies(res, result);
+    this.setAuthCookies(res, result, result.user?.role);
 
     // Return user info and tokens
     return {
@@ -140,7 +144,7 @@ export class AuthController {
       dto.password,
     );
 
-    setAuthCookies(res, result);
+    this.setAuthCookies(res, result, result.user?.role);
 
     return {
       user: result.user,
@@ -171,7 +175,7 @@ export class AuthController {
       dto.role,
     );
 
-    setAuthCookies(res, result);
+    this.setAuthCookies(res, result, result.user?.role);
 
     // Mobile apps rely on bearer tokens, so return them in the response body too.
     return {
@@ -185,8 +189,12 @@ export class AuthController {
   /**
    * POST /auth/refresh
    * Body: { refreshToken } (or the httpOnly refreshToken cookie).
-   * No access token required. Rotates the refresh token.
+   * No access token required. Rotates the refresh token and slides the
+   * session's idle timeout.
    * Returns { user, accessToken, refreshToken, message } (same shape as login).
+   * Errors: 401 { code: SESSION_EXPIRED | SESSION_REVOKED | REFRESH_REUSED |
+   * USER_NOT_FOUND }. Clients end the session only on these; 5xx and network
+   * errors are transient.
    */
   @Post('refresh')
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
@@ -198,12 +206,15 @@ export class AuthController {
   ) {
     const refreshToken = dto?.refreshToken || req.cookies?.refreshToken;
     if (!refreshToken || typeof refreshToken !== 'string') {
-      throw new UnauthorizedException('Refresh token is required');
+      throw new SessionException(
+        'SESSION_EXPIRED',
+        'Refresh token is required',
+      );
     }
 
     const result = await this.authService.refreshTokens(refreshToken);
 
-    setAuthCookies(res, result);
+    this.setAuthCookies(res, result, result.user?.role);
 
     return {
       user: result.user,
@@ -220,6 +231,8 @@ export class AuthController {
     await this.authService.logout(req.user.userId, {
       jti: req.user.jti,
       exp: req.user.exp,
+      sid: req.user.sid,
+      role: req.user.role,
     });
 
     // Clear cookies
@@ -227,5 +240,25 @@ export class AuthController {
     res.clearCookie('refreshToken', { path: '/' });
 
     return { message: 'Logged out successfully' };
+  }
+
+  /** POST /auth/logout-all: sign out every device of the current user. */
+  @Post('logout-all')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  async logoutAll(
+    @Request() req: any,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const sessions = await this.authService.logoutAll(
+      req.user.userId,
+      req.user.role,
+    );
+
+    res.clearCookie('accessToken', { path: '/' });
+    res.clearCookie('refreshToken', { path: '/' });
+
+    return { message: 'Logged out from all devices', sessions };
   }
 }

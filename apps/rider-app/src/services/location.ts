@@ -3,7 +3,7 @@ import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import { LOCATION_UPDATE_THROTTLE, RIDER_SERVICE_URL } from '../utils/constants';
 import { storage } from './storage';
-import { refreshAccessToken } from './authSession';
+import { ensureFreshAccessToken, refreshAccessToken } from './authSession';
 
 const BACKGROUND_LOCATION_TASK = 'rider-background-location';
 
@@ -32,9 +32,14 @@ if (!TaskManager.isTaskDefined(BACKGROUND_LOCATION_TASK)) {
     }
 
     try {
-      let token = await storage.getToken();
+      // Renew a stale access token first. Only a 401 from /auth/refresh ends the
+      // session (tokens are cleared then); offline, the stored token is kept.
+      let token = await ensureFreshAccessToken();
       if (!token) {
-        await stopBackgroundUpdatesQuietly();
+        if (!(await storage.getRefreshToken())) {
+          // Signed out, or the session really ended: stop posting locations.
+          await stopBackgroundUpdatesQuietly();
+        }
         return;
       }
 
@@ -57,8 +62,6 @@ if (!TaskManager.isTaskDefined(BACKGROUND_LOCATION_TASK)) {
       if (response.status === 401) {
         token = await refreshAccessToken();
         if (!token) {
-          // Refresh failed. If the session was revoked the tokens are gone now:
-          // stop tracking instead of posting unauthenticated updates forever.
           if (!(await storage.getRefreshToken())) {
             await stopBackgroundUpdatesQuietly();
           }

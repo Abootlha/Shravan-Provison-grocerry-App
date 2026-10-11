@@ -17,7 +17,9 @@ import { RidersModule } from '../modules/riders/riders.module';
       useFactory: (configService: ConfigService) => ({
         // Must match the REST JwtStrategy secret so access tokens verify on both.
         secret: configService.getOrThrow<string>('jwt.secret'),
-        signOptions: { expiresIn: '2h' },
+        signOptions: {
+          expiresIn: configService.get<number>('jwt.accessTtlSeconds') ?? 900,
+        },
       }),
       inject: [ConfigService],
     }),

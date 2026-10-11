@@ -1,0 +1,40 @@
+diff --git a/node_modules/react-native-reanimated/android/src/main/java/com/swmansion/reanimated/NativeProxy.kt b/node_modules/react-native-reanimated/android/src/main/java/com/swmansion/reanimated/NativeProxy.kt
+index 48e3771..cce2225 100644
+--- a/node_modules/react-native-reanimated/android/src/main/java/com/swmansion/reanimated/NativeProxy.kt
++++ b/node_modules/react-native-reanimated/android/src/main/java/com/swmansion/reanimated/NativeProxy.kt
+@@ -245,6 +245,13 @@ open class NativeProxy {
+             }.apply { isAccessible = true }
+     }
+ 
++    // MountingManager.getViewExists, looked up like updatePropsSynchronously (MountingManager is internal).
++    private val viewExistsMethod by lazy {
++        mountingManager.javaClass.methods
++            .firstOrNull { it.name.startsWith("getViewExists") && it.parameterTypes.size == 1 }
++            ?.apply { isAccessible = true }
++    }
++
+     @DoNotStrip
+     fun synchronouslyUpdateUIProps(
+         intBuffer: IntArray,
+@@ -252,8 +259,21 @@ open class NativeProxy {
+     ) {
+         SynchronousPropsBufferParser.parse(intBuffer, doubleBuffer) { viewTag, props ->
+             if (BuildConfig.IS_REACT_NATIVE_86_OR_NEWER) {
++                // Views that are not mounted (yet, or any more) are skipped up front: letting the call
++                // throw built two exceptions with stack traces per view per frame, which dominated the
++                // UI thread while lists mounted skeletons / recycled cells.
++                if (viewExistsMethod?.invoke(mountingManager, viewTag) == false) {
++                    return@parse
++                }
+                 try {
+                     updatePropsSynchronouslyMethod.invoke(mountingManager, viewTag, props)
++                } catch (e: java.lang.reflect.InvocationTargetException) {
++                    // The view was unmounted while its animation was still running (e.g. a recycled
++                    // list cell): nothing to update. Logging a full stack trace per frame here
++                    // saturated the UI thread (jank / ANR), so stale tags are skipped silently.
++                    if (e.cause?.javaClass?.simpleName != "RetryableMountingLayerException") { // class is internal to RN
++                        Log.w("Reanimated", "synchronouslyUpdateUIProps failed for tag $viewTag", e)
++                    }
+                 } catch (e: Exception) {
+                     Log.w("Reanimated", "synchronouslyUpdateUIProps failed for tag $viewTag", e)
+                 }

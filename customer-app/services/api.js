@@ -17,6 +17,7 @@ import {
 } from './tokenStorage';
 import { store } from '../store';
 import { logout, refreshTokenSuccess } from '../store/slices/authSlice';
+import { emitSessionEnded, isTokenExpiring } from './session';
 
 const createClient = (baseURL) =>
     axios.create({
@@ -39,23 +40,40 @@ const AUTH_ROUTES = [
 const isAuthRoute = (url = '') => AUTH_ROUTES.some((route) => url.includes(route));
 
 let refreshPromise = null;
+let sessionEnding = false;
 
-const endSession = async () => {
+/**
+ * The server said the session is over (refresh returned 401): forget the tokens
+ * and tell the app shell, which disconnects sockets, shows a message and opens
+ * Login. The cart is local and survives. Guests (never signed in) are left alone.
+ */
+const endSession = async (code) => {
+    const wasSignedIn = store.getState().auth.isAuthenticated;
     await clearSession().catch(() => undefined);
     store.dispatch(logout());
+    if (wasSignedIn && !sessionEnding) {
+        sessionEnding = true;
+        try {
+            emitSessionEnded(code || 'SESSION_EXPIRED');
+        } finally {
+            sessionEnding = false;
+        }
+    }
 };
 
 /**
- * Single-flight refresh: every request that hits a 401 while a refresh is in
- * progress waits on the same promise and is retried with the new token.
- * Resolves to the new access token, or null if the session could not be renewed.
+ * Single-flight refresh: every caller that needs a new access token while a
+ * refresh is in progress waits on the same promise.
+ * Resolves to the new access token, or null when it could not be renewed.
+ * Only a 401 from /auth/refresh ends the session. Network errors, timeouts,
+ * 5xx and rate limits keep the stored tokens so the next attempt can succeed.
  */
-const refreshAccessToken = () => {
+export const refreshAccessToken = () => {
     if (!refreshPromise) {
         refreshPromise = (async () => {
             const refreshToken = await getRefreshToken();
             if (!refreshToken) {
-                await endSession();
+                if (store.getState().auth.isAuthenticated) await endSession('SESSION_EXPIRED');
                 return null;
             }
 
@@ -70,9 +88,10 @@ const refreshAccessToken = () => {
                 const accessToken = data.accessToken || data.tokens?.accessToken || null;
                 const nextRefreshToken = data.refreshToken || data.tokens?.refreshToken || null;
                 if (!accessToken) {
-                    throw new Error('Refresh response did not include an access token');
+                    return null;
                 }
 
+                // Refresh tokens rotate on every call: always store the new one.
                 await setTokens({
                     accessToken,
                     refreshToken: nextRefreshToken || undefined,
@@ -83,11 +102,11 @@ const refreshAccessToken = () => {
                 }));
                 return accessToken;
             } catch (error) {
-                // Network/5xx failures are not proof the session is dead; keep tokens.
-                if (!error.response || error.response.status >= 500) {
-                    return null;
+                if (error?.response?.status === 401) {
+                    await endSession(error.response.data?.code);
+                } else if (__DEV__) {
+                    console.log('[session] refresh failed, keeping session:', error?.message);
                 }
-                await endSession();
                 return null;
             }
         })().finally(() => {
@@ -97,9 +116,25 @@ const refreshAccessToken = () => {
     return refreshPromise;
 };
 
+/**
+ * Renew the access token if it is expired or about to expire (no-op otherwise,
+ * and for guests). Safe to call often: app start, app foreground, before sockets.
+ * Resolves to a usable access token or null.
+ */
+export const ensureFreshAccessToken = async () => {
+    const [accessToken, refreshToken] = await Promise.all([getAccessToken(), getRefreshToken()]);
+    if (!refreshToken) return accessToken;
+    if (accessToken && !isTokenExpiring(accessToken)) return accessToken;
+    return (await refreshAccessToken()) || null;
+};
+
 const attachAuthInterceptor = (client) => {
     client.interceptors.request.use(async (config) => {
-        const token = await getAccessToken();
+        let token = await getAccessToken();
+        // Expired access token: renew first instead of earning a 401 round-trip.
+        if (token && !isAuthRoute(config.url) && isTokenExpiring(token, 0)) {
+            token = (await refreshAccessToken()) || token;
+        }
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
         }
@@ -137,6 +172,18 @@ export const orderApi = createClient(ORDER_URL);
 export const locationApi = createClient(LOCATION_URL);
 
 [authApi, userApi, productApi, cartApi, orderApi, locationApi].forEach(attachAuthInterceptor);
+
+// Mock backend (see mocks/README.md): dev builds with EXPO_PUBLIC_MOCK_API=1, or
+// profiling release builds with EXPO_PUBLIC_PERF_MOCK=1. Both env vars are inlined
+// at bundle time; in a production bundle (neither set, `__DEV__` false) the condition
+// folds to `false`, so this branch and the mocks/ folder are stripped. Keep the
+// condition inline here (not in a helper) or Metro can no longer drop the require.
+if ((__DEV__ && process.env.EXPO_PUBLIC_MOCK_API === '1') || process.env.EXPO_PUBLIC_PERF_MOCK === '1') {
+    require('../mocks').installMockApi(
+        [authApi, userApi, productApi, cartApi, orderApi, locationApi],
+        { apiBaseUrl: require('./config').API_BASE_URL },
+    );
+}
 
 const api = authApi;
 

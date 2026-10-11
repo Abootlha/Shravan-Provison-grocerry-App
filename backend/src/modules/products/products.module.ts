@@ -5,6 +5,7 @@ import { ProductsService } from './products.service';
 import { ProductsController } from './products.controller';
 import { BarcodeService } from './barcode.service';
 import { HierarchyValidator } from './validators/hierarchy.validator';
+import { ImageProcessingService } from './image-processing/image-processing.service';
 import {
   Category,
   CategorySchema,
@@ -28,7 +29,12 @@ import {
     ]),
   ],
   controllers: [ProductsController],
-  providers: [ProductsService, BarcodeService, HierarchyValidator],
-  exports: [ProductsService, BarcodeService],
+  providers: [
+    ProductsService,
+    BarcodeService,
+    HierarchyValidator,
+    ImageProcessingService,
+  ],
+  exports: [ProductsService, BarcodeService, ImageProcessingService],
 })
 export class ProductsModule {}

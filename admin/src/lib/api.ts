@@ -63,43 +63,79 @@ function clearAdminSession() {
     localStorage.removeItem(LOGIN_TIME_KEY);
 }
 
-function redirectToLogin() {
+/** Messages for the 401 codes /auth/refresh returns when a session is over. */
+export const SESSION_END_MESSAGES: Record<string, string> = {
+    SESSION_EXPIRED: 'Your session has ended. Please log in again.',
+    SESSION_REVOKED: 'You were signed out. Please log in again.',
+    REFRESH_REUSED: 'For your security you were signed out because this session was used elsewhere. Please log in again.',
+    USER_NOT_FOUND: 'This account no longer exists.',
+};
+
+/** Clears the session and opens /login?reason=CODE so the login page can explain why. */
+function redirectToLogin(reason: string = 'SESSION_EXPIRED') {
     if (typeof window === 'undefined') return;
     clearAdminSession();
     if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+        window.location.href = '/login?reason=' + encodeURIComponent(reason);
+    }
+}
+
+/** Thrown when the session could not be renewed for a transient reason (offline, 5xx). */
+export class SessionRefreshUnavailableError extends Error {
+    constructor() {
+        super('Could not reach the server to renew your session. Please retry.');
+        this.name = 'SessionRefreshUnavailableError';
     }
 }
 
 let refreshInFlight: Promise<string | null> | null = null;
+let lastRefreshTransient = false;
 
 /**
  * Exchanges the refresh token for a new token pair. Concurrent callers share one request
- * so a burst of 401s triggers a single refresh.
+ * so a burst of 401s triggers a single refresh. A 401 from /auth/refresh ends the session
+ * (redirect to /login with the reason); network errors and 5xx keep it.
  */
 function refreshAccessToken(): Promise<string | null> {
     if (refreshInFlight) return refreshInFlight;
 
     const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
-    if (!refreshToken) return Promise.resolve(null);
+    if (!refreshToken) {
+        lastRefreshTransient = false;
+        return Promise.resolve(null);
+    }
 
     refreshInFlight = (async () => {
         try {
-            const response = await fetch(`${AUTH_SERVICE}/auth/refresh`, {
+            const response = await fetch(AUTH_SERVICE + '/auth/refresh', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ refreshToken }),
             });
-            if (!response.ok) return null;
+            if (response.status === 401) {
+                const body = await response.json().catch(() => ({}));
+                lastRefreshTransient = false;
+                redirectToLogin(typeof body?.code === 'string' ? body.code : 'SESSION_EXPIRED');
+                return null;
+            }
+            if (!response.ok) {
+                lastRefreshTransient = true;
+                return null;
+            }
 
             const data = await response.json();
-            if (!data?.accessToken) return null;
+            if (!data?.accessToken) {
+                lastRefreshTransient = true;
+                return null;
+            }
 
             localStorage.setItem(TOKEN_KEY, data.accessToken);
             if (data.refreshToken) localStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
             localStorage.setItem(LOGIN_TIME_KEY, Date.now().toString());
+            lastRefreshTransient = false;
             return data.accessToken as string;
         } catch {
+            lastRefreshTransient = true;
             return null;
         } finally {
             refreshInFlight = null;
@@ -133,6 +169,7 @@ async function apiRequest(
     if (inBrowser && !skipAuth) {
         token = await getValidAccessToken();
         if (!token) {
+            if (lastRefreshTransient) throw new SessionRefreshUnavailableError();
             redirectToLogin();
             throw new Error('Session expired');
         }
@@ -155,6 +192,8 @@ async function apiRequest(
         const refreshed = await refreshAccessToken();
         if (refreshed) {
             response = await send(refreshed);
+        } else if (lastRefreshTransient) {
+            throw new SessionRefreshUnavailableError();
         }
     }
 
@@ -304,6 +343,13 @@ export const api = {
     },
     getProduct: (id: string) => apiRequest(PRODUCT_SERVICE, `/products/${id}`),
     lookupBarcode: (barcode: string) => apiRequest(PRODUCT_SERVICE, `/products/barcode/${barcode}`),
+    getImageProcessingConfig: (): Promise<{ provider: 'none' | 'removebg' | 'local'; enabled: boolean }> =>
+        apiRequest(PRODUCT_SERVICE, '/products/image/processing-config'),
+    previewProductImage: (image: string, removeBackground = true): Promise<{
+        image: string; width: number; height: number; bytes: number;
+        provider: string; backgroundRemoved: boolean; warnings: string[];
+    }> =>
+        apiRequest(PRODUCT_SERVICE, '/products/image/preview', { method: 'POST', body: JSON.stringify({ image, removeBackground }) }),
     createProduct: (data: any) =>
         apiRequest(PRODUCT_SERVICE, '/products', { method: 'POST', body: JSON.stringify(data) }),
     updateProduct: (id: string, data: any) =>

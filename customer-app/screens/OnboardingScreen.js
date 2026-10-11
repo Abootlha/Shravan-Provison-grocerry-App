@@ -1,156 +1,125 @@
-import React, { useState, useRef, useEffect } from 'react';
-import {
-    View,
-    Text,
-    StyleSheet,
-    StatusBar,
-    Dimensions,
-    TouchableOpacity,
-    Animated,
-    FlatList,
-} from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+/**
+ * OnboardingScreen — three plain slides on the flat auth surface (white; dark: canvas), DESIGN.md
+ * "Auth/onboarding": the AuthBar logo with Skip, a still life of real produce in a neutral image well
+ * (assets/onboarding/*.webp — composited from unbranded produce cut-outs), one plain headline, one
+ * honest line of copy, a page indicator and the violet Next / Start shopping button.
+ *   · No auto-advance, no timers, no mascot, no sticker clusters, no gradients, no loops.
+ *   · Swipe left / right to move between slides: the slide follows the finger, a flick or a 25% drag
+ *     commits, anything less springs back. A new slide enters from the side it came from.
+ *   · Opened from Splash, the bar logo settles in where the splash mark landed (shared position).
+ * Reduced motion: no swipe travel; the button moves on.
+ * Completion writes `onboardingComplete` and replaces to Login (unchanged).
+ */
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, useWindowDimensions } from 'react-native';
+import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { scheduleOnRN } from 'react-native-worklets';
+import { Image } from 'expo-image';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { COLORS } from '../constants';
+import { radii, space } from '../constants/theme';
+import { makeStyles, useTheme } from '../theme';
+import { durations, easings, springs } from '../theme/motion';
+import { Button, PressableScale, Screen, Text } from '../components/ui';
 import { useTranslation } from '../hooks/useTranslation';
+import { AuthBar } from './auth/AuthHero';
+import { useFromSplashHandoff } from './auth/authMotion';
 
-const { width, height } = Dimensions.get('window');
+const ENTER_FRACTION = 0.3; // a new slide enters from 30% of the width
 
-// Bold, expressive color palette inspired by Indian bazaars
-const PALETTE = {
-    saffron: '#E85D04',
-    deepAmber: '#DC2F02',
-    cream: '#FEF3E2',
-    espresso: '#1A0F0A',
-    turmeric: '#FFBA08',
-    sage: '#264653',
-    terracotta: '#BC6C25',
-};
-
-const OnboardingScreen = ({ navigation }) => {
-    const { t } = useTranslation();
-    const [currentIndex, setCurrentIndex] = useState(0);
-    const flatListRef = useRef(null);
-
-    // Dynamic onboarding data based on language
-    const ONBOARDING_DATA = [
-        {
-            id: '1',
-            icon: 'truck-fast',
-            gradient: [PALETTE.saffron, PALETTE.deepAmber],
-            accent: PALETTE.turmeric,
-            tagline: t('onboarding1.tagline'),
-            title: t('onboarding1.title'),
-            description: t('onboarding1.description'),
-            pattern: 'circles',
+const SLIDES = [
+    {
+        key: 'kirana',
+        art: require('../assets/onboarding/daily-vegetables.webp'),
+        en: {
+            title: 'Your neighbourhood kirana, on your phone',
+            body: 'Vegetables, fruit, dairy and daily staples from a store near you.',
         },
-        {
-            id: '2',
-            icon: 'leaf',
-            gradient: [PALETTE.sage, '#1D3557'],
-            accent: '#2A9D8F',
-            tagline: t('onboarding2.tagline'),
-            title: t('onboarding2.title'),
-            description: t('onboarding2.description'),
-            pattern: 'waves',
+        hi: {
+            title: 'आपकी मोहल्ले की किराना दुकान, अब फ़ोन पर',
+            body: 'पास की दुकान से सब्ज़ियाँ, फल, डेयरी और रोज़ का सामान।',
         },
-        {
-            id: '3',
-            icon: 'tag-heart',
-            gradient: [PALETTE.terracotta, PALETTE.espresso],
-            accent: PALETTE.turmeric,
-            tagline: t('onboarding3.tagline'),
-            title: t('onboarding3.title'),
-            description: t('onboarding3.description'),
-            pattern: 'dots',
+    },
+    {
+        key: 'fast',
+        art: require('../assets/onboarding/fruit-and-eggs.webp'),
+        en: {
+            title: 'At your door in about 10 minutes',
+            body: 'We start packing as soon as you order, and you can follow the rider live on the map.',
         },
-    ];
+        hi: {
+            title: 'लगभग 10 मिनट में आपके दरवाज़े पर',
+            body: 'ऑर्डर करते ही हम पैक करना शुरू कर देते हैं, और आप राइडर को मैप पर लाइव देख सकते हैं।',
+        },
+    },
+    {
+        key: 'pay',
+        art: require('../assets/onboarding/kitchen-basics.webp'),
+        en: {
+            title: 'Pay online or when it arrives',
+            body: 'Use UPI or a card at checkout, or pay cash at your door.',
+        },
+        hi: {
+            title: 'ऑनलाइन या डिलीवरी पर भुगतान',
+            body: 'चेकआउट पर UPI या कार्ड से भुगतान करें, या ऑर्डर आने पर कैश दें।',
+        },
+    },
+];
 
-    // Staggered entrance animations
-    const taglineAnim = useRef(new Animated.Value(0)).current;
-    const titleAnim = useRef(new Animated.Value(0)).current;
-    const descAnim = useRef(new Animated.Value(0)).current;
-    const iconAnim = useRef(new Animated.Value(0)).current;
-    const iconRotate = useRef(new Animated.Value(0)).current;
-    const decorAnim = useRef(new Animated.Value(0)).current;
-    const buttonAnim = useRef(new Animated.Value(0)).current;
-
-    const triggerEntranceAnimations = () => {
-        // Reset all values
-        taglineAnim.setValue(0);
-        titleAnim.setValue(0);
-        descAnim.setValue(0);
-        iconAnim.setValue(0);
-        iconRotate.setValue(0);
-        decorAnim.setValue(0);
-
-        // Orchestrated staggered reveal
-        Animated.stagger(100, [
-            // Decorative elements fade in
-            Animated.timing(decorAnim, {
-                toValue: 1,
-                duration: 600,
-                useNativeDriver: true,
-            }),
-            // Icon springs in with rotation
-            Animated.parallel([
-                Animated.spring(iconAnim, {
-                    toValue: 1,
-                    friction: 6,
-                    tension: 80,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(iconRotate, {
-                    toValue: 1,
-                    duration: 800,
-                    useNativeDriver: true,
-                }),
-            ]),
-            // Tagline slides up
-            Animated.spring(taglineAnim, {
-                toValue: 1,
-                friction: 8,
-                useNativeDriver: true,
-            }),
-            // Title slides up
-            Animated.spring(titleAnim, {
-                toValue: 1,
-                friction: 8,
-                useNativeDriver: true,
-            }),
-            // Description fades in
-            Animated.timing(descAnim, {
-                toValue: 1,
-                duration: 400,
-                useNativeDriver: true,
-            }),
-        ]).start();
-    };
-
-    // Initial button animation
+/** One slide. `drag` is the live finger offset (px); `from` (-1 | 0 | 1) is the side it enters from. */
+function Slide({ slide, isHi, drag, from, width, index, gone }) {
+    const styles = useStyles();
+    const reduce = useReducedMotion();
+    const enter = useSharedValue(reduce ? 0 : from * width * ENTER_FRACTION);
+    const fade = useSharedValue(from ? 0 : 1);
     useEffect(() => {
-        Animated.spring(buttonAnim, {
-            toValue: 1,
-            friction: 6,
-            delay: 800,
-            useNativeDriver: true,
-        }).start();
-        triggerEntranceAnimations();
-    }, []);
+        if (!from) return;
+        if (!reduce) enter.value = withSpring(0, springs.gentle);
+        fade.value = withTiming(1, { duration: durations.base, easing: easings.out });
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    // `gone` hides this slide the frame a committed swipe hands over, so it never snaps back.
+    const style = useAnimatedStyle(() => {
+        const x = enter.value + drag.value;
+        const hide = gone.value === index ? 0 : 1;
+        return { opacity: hide * fade.value * (1 - Math.min(0.6, Math.abs(x) / width)), transform: [{ translateX: x }] };
+    });
+    const copy = isHi ? slide.hi : slide.en;
+    return (
+        <Animated.View style={[styles.slide, style]}>
+            <View style={styles.well}>
+                <Image source={slide.art} style={styles.art} contentFit="contain" accessible={false} transition={0} />
+            </View>
+            <View style={styles.copy}>
+                <Text variant="display" accessibilityRole="header">{copy.title}</Text>
+                <Text variant="body" color="secondary" style={styles.desc}>{copy.body}</Text>
+            </View>
+        </Animated.View>
+    );
+}
 
-    const handleNext = async () => {
-        if (currentIndex < ONBOARDING_DATA.length - 1) {
-            flatListRef.current?.scrollToIndex({ index: currentIndex + 1 });
-            setCurrentIndex(currentIndex + 1);
-            triggerEntranceAnimations();
-        } else {
-            await completeOnboarding();
-        }
-    };
+function Dots({ count, index }) {
+    const styles = useStyles();
+    return (
+        <View style={styles.dots} accessibilityLabel={`${index + 1} / ${count}`}>
+            {Array.from({ length: count }, (_, i) => (
+                <View key={i} style={[styles.dot, i === index && styles.dotOn]} />
+            ))}
+        </View>
+    );
+}
 
-    const handleSkip = async () => {
-        await completeOnboarding();
-    };
+const OnboardingScreen = ({ navigation, route }) => {
+    const styles = useStyles();
+    const { isDark } = useTheme();
+    const logoStyle = useFromSplashHandoff(route, navigation);
+    const { t, isHi } = useTranslation();
+    const reduce = useReducedMotion();
+    const { width } = useWindowDimensions();
+    const [currentIndex, setCurrentIndex] = useState(0);
+    const [enterFrom, setEnterFrom] = useState(0);
+    const drag = useSharedValue(0);
+    const gone = useSharedValue(-1);
+    const isLast = currentIndex === SLIDES.length - 1;
 
     const completeOnboarding = async () => {
         try {
@@ -161,329 +130,108 @@ const OnboardingScreen = ({ navigation }) => {
         }
     };
 
-    const currentSlide = ONBOARDING_DATA[currentIndex];
-    const iconRotation = iconRotate.interpolate({
-        inputRange: [0, 1],
-        outputRange: ['-15deg', '0deg'],
-    });
+    const goTo = useCallback((i) => {
+        setCurrentIndex((cur) => {
+            const next = Math.max(0, Math.min(SLIDES.length - 1, i));
+            if (next !== cur) setEnterFrom(next > cur ? 1 : -1);
+            return next;
+        });
+    }, []);
 
-    const renderSlide = ({ item, index }) => (
-        <View style={[styles.slide, { backgroundColor: item.gradient[0] }]}>
-            {/* Gradient overlay */}
-            <View style={[styles.gradientOverlay, { backgroundColor: item.gradient[1] }]} />
+    useEffect(() => {
+        drag.value = 0;
+        gone.value = -1;
+    }, [currentIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
-            {/* Decorative floating elements */}
-            <Animated.View
-                style={[
-                    styles.decorCircle1,
-                    {
-                        backgroundColor: item.accent,
-                        opacity: decorAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.15] }),
-                        transform: [{ scale: decorAnim }],
-                    }
-                ]}
-            />
-            <Animated.View
-                style={[
-                    styles.decorCircle2,
-                    {
-                        backgroundColor: item.accent,
-                        opacity: decorAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.1] }),
-                        transform: [{ scale: decorAnim }],
-                    }
-                ]}
-            />
-            <Animated.View
-                style={[
-                    styles.decorCircle3,
-                    {
-                        borderColor: item.accent,
-                        opacity: decorAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.2] }),
-                    }
-                ]}
-            />
+    const commitSwipe = (dir) => goTo(currentIndex + dir);
+    const leaving = currentIndex;
+    const atStart = currentIndex === 0;
+    const atEnd = isLast;
+    const pan = Gesture.Pan()
+        .enabled(!reduce)
+        .activeOffsetX([-12, 12])
+        .failOffsetY([-18, 18])
+        .onUpdate((e) => {
+            const dx = e.translationX;
+            // rubber-band past the first / last slide
+            drag.value = (dx > 0 && atStart) || (dx < 0 && atEnd) ? dx * 0.25 : dx;
+        })
+        .onEnd((e) => {
+            const dx = e.translationX;
+            const dir = dx < 0 ? 1 : -1;
+            const blocked = (dir === 1 && atEnd) || (dir === -1 && atStart);
+            const commit = !blocked && (Math.abs(dx) > width * 0.25 || Math.abs(e.velocityX) > 600);
+            if (commit) {
+                drag.value = withTiming(-dir * width * 0.5, { duration: durations.fast, easing: easings.out }, (done) => {
+                    if (!done) return;
+                    gone.value = leaving;
+                    drag.value = 0;
+                    scheduleOnRN(commitSwipe, dir);
+                });
+            } else {
+                drag.value = withSpring(0, springs.drag);
+            }
+        });
 
-            {/* Content */}
-            <View style={styles.slideContent}>
-                {/* Icon */}
-                <Animated.View
-                    style={[
-                        styles.iconWrapper,
-                        {
-                            backgroundColor: `${item.accent}25`,
-                            borderColor: item.accent,
-                            opacity: iconAnim,
-                            transform: [
-                                { scale: iconAnim },
-                                { rotate: iconRotation },
-                            ],
-                        }
-                    ]}
-                >
-                    <MaterialCommunityIcons
-                        name={item.icon}
-                        size={64}
-                        color={item.accent}
-                    />
-                </Animated.View>
+    const handleNext = async () => {
+        if (!isLast) goTo(currentIndex + 1);
+        else await completeOnboarding();
+    };
 
-                {/* Tagline */}
-                <Animated.Text
-                    style={[
-                        styles.tagline,
-                        {
-                            color: item.accent,
-                            opacity: taglineAnim,
-                            transform: [{
-                                translateY: taglineAnim.interpolate({
-                                    inputRange: [0, 1],
-                                    outputRange: [30, 0],
-                                }),
-                            }],
-                        }
-                    ]}
-                >
-                    {item.tagline}
-                </Animated.Text>
-
-                {/* Title */}
-                <Animated.Text
-                    style={[
-                        styles.title,
-                        {
-                            opacity: titleAnim,
-                            transform: [{
-                                translateY: titleAnim.interpolate({
-                                    inputRange: [0, 1],
-                                    outputRange: [40, 0],
-                                }),
-                            }],
-                        }
-                    ]}
-                >
-                    {item.title}
-                </Animated.Text>
-
-                {/* Description */}
-                <Animated.Text
-                    style={[
-                        styles.description,
-                        { opacity: descAnim }
-                    ]}
-                >
-                    {item.description}
-                </Animated.Text>
-            </View>
-        </View>
-    );
+    const slide = SLIDES[currentIndex];
 
     return (
-        <View style={styles.container}>
-            <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-
-            {/* Skip Button */}
-            <TouchableOpacity style={styles.skipButton} onPress={handleSkip}>
-                <Text style={styles.skipText}>{t('skip')}</Text>
-                <MaterialCommunityIcons name="chevron-double-right" size={16} color="rgba(255,255,255,0.7)" />
-            </TouchableOpacity>
-
-            {/* Slides */}
-            <FlatList
-                ref={flatListRef}
-                data={ONBOARDING_DATA}
-                renderItem={renderSlide}
-                horizontal
-                pagingEnabled
-                showsHorizontalScrollIndicator={false}
-                scrollEnabled={false}
-                keyExtractor={(item) => item.id}
+        <Screen edges={['bottom']} background={isDark ? 'canvas' : 'surface'}>
+            <AuthBar
+                logoStyle={logoStyle}
+                right={
+                    isLast ? null : (
+                        <PressableScale onPress={completeOnboarding} style={styles.skip} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('skip')}>
+                            <Text variant="label" color="secondary">{t('skip')}</Text>
+                        </PressableScale>
+                    )
+                }
             />
 
-            {/* Bottom Controls */}
-            <View style={styles.bottomControls}>
-                {/* Pagination */}
-                <View style={styles.pagination}>
-                    {ONBOARDING_DATA.map((_, index) => (
-                        <View
-                            key={index}
-                            style={[
-                                styles.dot,
-                                index === currentIndex && styles.activeDot,
-                            ]}
-                        />
-                    ))}
+            <GestureDetector gesture={pan}>
+                <View style={styles.stage}>
+                    <Slide key={slide.key} slide={slide} isHi={isHi} drag={drag} gone={gone} from={enterFrom} width={width} index={currentIndex} />
                 </View>
+            </GestureDetector>
 
-                {/* Next Button */}
-                <Animated.View style={{ transform: [{ scale: buttonAnim }] }}>
-                    <TouchableOpacity
-                        style={[
-                            styles.nextButton,
-                            { backgroundColor: currentSlide.accent }
-                        ]}
-                        onPress={handleNext}
-                        activeOpacity={0.85}
-                    >
-                        <Text style={styles.nextButtonText}>
-                            {currentIndex === ONBOARDING_DATA.length - 1 ? t('letsGo') : t('next')}
-                        </Text>
-                        <View style={styles.buttonIconWrapper}>
-                            <MaterialCommunityIcons
-                                name={currentIndex === ONBOARDING_DATA.length - 1 ? 'rocket-launch' : 'arrow-right'}
-                                size={20}
-                                color={currentSlide.accent}
-                            />
-                        </View>
-                    </TouchableOpacity>
-                </Animated.View>
+            <View style={styles.bottom}>
+                <Dots count={SLIDES.length} index={currentIndex} />
+                <Button
+                    size="lg"
+                    fullWidth
+                    label={isLast ? (isHi ? 'खरीदारी शुरू करें' : 'Start shopping') : t('next')}
+                    onPress={handleNext}
+                />
             </View>
-        </View>
+        </Screen>
     );
 };
 
-const styles = StyleSheet.create({
-    container: {
+const useStyles = makeStyles((t) => ({
+    stage: { flex: 1, overflow: 'hidden' },
+    slide: { flex: 1, paddingHorizontal: space.lg, paddingTop: space.sm, paddingBottom: space.md, gap: space['2xl'] },
+    well: {
         flex: 1,
-        backgroundColor: PALETTE.espresso,
-    },
-    skipButton: {
-        position: 'absolute',
-        top: 55,
-        right: 24,
-        zIndex: 10,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        paddingVertical: 10,
-        paddingHorizontal: 16,
-        backgroundColor: 'rgba(255,255,255,0.15)',
-        borderRadius: 24,
-    },
-    skipText: {
-        fontSize: 14,
-        color: 'rgba(255,255,255,0.85)',
-        fontWeight: '600',
-        letterSpacing: 0.5,
-    },
-    slide: {
-        width: width,
-        height: height,
-        justifyContent: 'center',
-    },
-    gradientOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        opacity: 0.4,
-    },
-    decorCircle1: {
-        position: 'absolute',
-        top: -height * 0.15,
-        right: -width * 0.3,
-        width: width * 0.8,
-        height: width * 0.8,
-        borderRadius: width * 0.4,
-    },
-    decorCircle2: {
-        position: 'absolute',
-        bottom: height * 0.15,
-        left: -width * 0.25,
-        width: width * 0.5,
-        height: width * 0.5,
-        borderRadius: width * 0.25,
-    },
-    decorCircle3: {
-        position: 'absolute',
-        top: height * 0.25,
-        left: -width * 0.1,
-        width: width * 0.3,
-        height: width * 0.3,
-        borderRadius: width * 0.15,
-        borderWidth: 2,
-    },
-    slideContent: {
-        flex: 1,
-        paddingHorizontal: 32,
-        justifyContent: 'center',
-        paddingBottom: 180,
-    },
-    iconWrapper: {
-        width: 130,
-        height: 130,
-        borderRadius: 40,
-        borderWidth: 3,
+        minHeight: 220,
+        borderRadius: radii.card,
+        backgroundColor: t.colors.imageWell,
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: 40,
+        overflow: 'hidden',
     },
-    tagline: {
-        fontSize: 13,
-        fontWeight: '800',
-        letterSpacing: 3,
-        marginBottom: 12,
-    },
-    title: {
-        fontSize: 44,
-        fontWeight: '900',
-        color: PALETTE.cream,
-        lineHeight: 52,
-        marginBottom: 20,
-        letterSpacing: -1,
-    },
-    description: {
-        fontSize: 17,
-        color: 'rgba(255,255,255,0.75)',
-        lineHeight: 26,
-        maxWidth: 300,
-        fontWeight: '500',
-    },
-    bottomControls: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        paddingHorizontal: 32,
-        paddingBottom: 50,
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    pagination: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-    },
-    dot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: 'rgba(255,255,255,0.3)',
-    },
-    activeDot: {
-        width: 32,
-        backgroundColor: PALETTE.cream,
-    },
-    nextButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingLeft: 28,
-        paddingRight: 6,
-        paddingVertical: 6,
-        borderRadius: 32,
-        gap: 14,
-    },
-    nextButtonText: {
-        fontSize: 16,
-        fontWeight: '800',
-        color: PALETTE.espresso,
-        letterSpacing: 0.5,
-    },
-    buttonIconWrapper: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: PALETTE.cream,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-});
+    art: { width: '84%', height: '84%' },
+    copy: { gap: space.md },
+    desc: { maxWidth: 360 },
+    skip: { minHeight: 44, minWidth: 44, alignItems: 'flex-end', justifyContent: 'center', paddingHorizontal: space.sm },
+    bottom: { paddingHorizontal: space.lg, paddingBottom: space.lg, paddingTop: space.sm, gap: space.lg },
+    dots: { flexDirection: 'row', gap: space.xs + 2, alignSelf: 'flex-start' },
+    dot: { width: 8, height: 4, borderRadius: 2, backgroundColor: t.colors.borderStrong },
+    dotOn: { width: 20, backgroundColor: t.colors.brand },
+}));
 
 export default OnboardingScreen;
