@@ -21,8 +21,8 @@ export class Category {
   @Prop()
   icon?: string;
 
-  @Prop({ required: true })
-  color!: string;
+  @Prop()
+  color?: string;
 
   @Prop()
   image?: string;

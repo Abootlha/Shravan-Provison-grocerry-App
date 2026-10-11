@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type OrderDocument = Order & Document;
 
@@ -30,7 +30,9 @@ export enum PaymentStatus {
 
 @Schema({ _id: false })
 export class OrderItem {
-  @Prop({ type: Types.ObjectId, ref: 'Product', required: true })
+  // Schema.Types.ObjectId, not Types.ObjectId: with mongoose 9 the latter
+  // resolves to Mixed, which stored productId as a string and broke joins.
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Product', required: true })
   productId!: Types.ObjectId;
 
   @Prop({ required: true })

@@ -7,15 +7,24 @@ import {
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger, Inject, forwardRef } from '@nestjs/common';
+import { Logger, Inject, forwardRef, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
-import { redisConnectionOptions } from '../config/redis-options';
+import {
+  redisConnectionOptions,
+  scopedPubSubChannel,
+} from '../config/redis-options';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { OrdersService } from '../modules/orders/orders.service';
 import {
   ADMIN_ORDER_EVENTS_CHANNEL,
-  OrdersService,
-} from '../modules/orders/orders.service';
+  ORDER_EVENT_CHANNELS,
+  ORDER_EVENTS_ORIGIN,
+  ORDER_STATUS_CHANNEL,
+  OrderEventChannel,
+  OrderEventPayload,
+  localOrderEvents,
+} from './order-events';
 import { isStaffRole } from '../modules/users/schemas/user.schema';
 
 /** Room on the /orders namespace that receives order:new / order:updated. */
@@ -29,70 +38,123 @@ const ADMIN_EVENTS = new Set(['order:new', 'order:updated']);
   namespace: '/orders',
 })
 export class OrdersGateway
-  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+  implements
+    OnGatewayInit,
+    OnGatewayConnection,
+    OnGatewayDisconnect,
+    OnModuleDestroy
 {
   @WebSocketServer()
   server!: Server;
 
   private logger = new Logger('OrdersGateway');
-  private subscriber: Redis;
+  private subscriber?: Redis;
+  private subscriberHealthy = true;
+  private onLocalEvent?: (
+    channel: OrderEventChannel,
+    payload: OrderEventPayload,
+  ) => void;
 
+  // Keep the constructor free of closures over `this`. OrdersService is a
+  // forwardRef dependency, so Nest builds this gateway via
+  // Object.assign(prototypeInstance, new OrdersGateway(...)): the object the
+  // constructor sees is discarded, and @WebSocketServer() is assigned to the
+  // other one. Callbacks registered here would emit through an undefined
+  // `server` and every event would be silently dropped. All wiring therefore
+  // happens in afterInit, which runs on the managed instance.
   constructor(
     private configService: ConfigService,
     private jwtService: JwtService,
     @Inject(forwardRef(() => OrdersService))
     private ordersService: OrdersService,
-  ) {
-    // Create a separate Redis connection for subscribing
-    this.subscriber = new Redis(redisConnectionOptions(this.configService));
+  ) {}
 
-    // Subscribe to order updates channels
-    this.subscriber.subscribe(
-      'order-updates',
-      ADMIN_ORDER_EVENTS_CHANNEL,
-      (err) => {
-        if (err) {
-          this.logger.error('Failed to subscribe to order-updates:', err);
-        } else {
-          this.logger.log('Subscribed to order-updates channel');
-        }
-      },
+  afterInit() {
+    this.onLocalEvent = (channel, payload) => this.deliver(channel, payload);
+    localOrderEvents.on('event', this.onLocalEvent);
+    this.startSubscriber();
+    this.logger.log('Orders WebSocket Gateway initialized');
+  }
+
+  onModuleDestroy() {
+    if (this.onLocalEvent) localOrderEvents.off('event', this.onLocalEvent);
+    void Promise.resolve(this.subscriber?.quit()).catch(() => undefined);
+  }
+
+  /**
+   * Subscribes to this environment's order channels. Redis carries events
+   * published by other app processes; events from this process are already
+   * delivered through localOrderEvents, so their Redis echo is skipped.
+   */
+  private startSubscriber(): void {
+    const subscriber = new Redis(redisConnectionOptions(this.configService));
+    this.subscriber = subscriber;
+    subscriber.on('error', (err: Error) => {
+      if (this.subscriberHealthy) {
+        this.logger.warn(`Order events subscriber error: ${err.message}`);
+      }
+      this.subscriberHealthy = false;
+    });
+    subscriber.on('ready', () => {
+      this.subscriberHealthy = true;
+    });
+
+    const channels = new Map(
+      ORDER_EVENT_CHANNELS.map((channel) => [
+        scopedPubSubChannel(this.configService, channel),
+        channel,
+      ]),
     );
+    void subscriber.subscribe(...channels.keys(), (err) => {
+      if (err) {
+        this.logger.error('Failed to subscribe to order event channels:', err);
+      } else {
+        this.logger.log(`Subscribed to ${[...channels.keys()].join(', ')}`);
+      }
+    });
 
-    // Listen for messages
-    this.subscriber.on('message', (channel, message) => {
-      if (channel === ADMIN_ORDER_EVENTS_CHANNEL) {
-        this.relayAdminEvent(message);
+    subscriber.on('message', (scoped: string, message: string) => {
+      const channel = channels.get(scoped);
+      if (!channel) return;
+      let data: OrderEventPayload;
+      try {
+        data = JSON.parse(message);
+      } catch (err) {
+        this.logger.error(`Failed to parse ${channel} message:`, err);
         return;
       }
-      if (channel === 'order-updates') {
-        try {
-          const data = JSON.parse(message);
-          // Emit to specific order room
-          this.server.to(`order:${data.orderId}`).emit('statusUpdate', data);
-          this.logger.log(
-            `Status update sent for order ${data.orderId}: ${data.status}`,
-          );
-        } catch (err) {
-          this.logger.error('Failed to parse order update message:', err);
-        }
-      }
+      if (!data || typeof data !== 'object') return;
+      if (data.origin === ORDER_EVENTS_ORIGIN) return;
+      const payload = { ...data };
+      delete payload.origin;
+      this.deliver(channel, payload);
     });
   }
 
-  /** Relays an admin order event published by OrdersService to staff sockets. */
-  relayAdminEvent(message: string): void {
-    try {
-      const data = JSON.parse(message);
-      if (!data || !ADMIN_EVENTS.has(data.event)) return;
-      this.server.to(ADMIN_ORDERS_ROOM).emit(data.event, data.order);
-    } catch (err) {
-      this.logger.error('Failed to parse admin order event:', err);
+  /** Emits an order event to the matching Socket.IO room. */
+  deliver(channel: OrderEventChannel, data: OrderEventPayload): void {
+    if (!this.server) {
+      this.logger.warn(`Dropped ${channel} event: socket server not ready`);
+      return;
+    }
+    if (channel === ADMIN_ORDER_EVENTS_CHANNEL) {
+      const event = data.event as string;
+      if (!ADMIN_EVENTS.has(event)) return;
+      this.server.to(ADMIN_ORDERS_ROOM).emit(event, data.order);
+      return;
+    }
+    if (channel === ORDER_STATUS_CHANNEL && typeof data.orderId === 'string') {
+      this.server.to(`order:${data.orderId}`).emit('statusUpdate', data);
     }
   }
 
-  afterInit() {
-    this.logger.log('Orders WebSocket Gateway initialized');
+  /** Relays a serialized admin order event to staff sockets. */
+  relayAdminEvent(message: string): void {
+    try {
+      this.deliver(ADMIN_ORDER_EVENTS_CHANNEL, JSON.parse(message));
+    } catch (err) {
+      this.logger.error('Failed to parse admin order event:', err);
+    }
   }
 
   private extractToken(client: Socket): string | null {

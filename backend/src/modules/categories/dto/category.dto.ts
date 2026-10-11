@@ -41,10 +41,11 @@ export class CreateCategoryDto {
   @MaxLength(50)
   groupHi?: string;
 
+  /** Optional tile colour; omitted means no colour. */
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MaxLength(30)
-  color!: string;
+  color?: string;
 
   @IsOptional()
   @IsString()
@@ -108,9 +109,9 @@ export class UpdateCategoryDto {
   @MaxLength(50)
   groupHi?: string;
 
+  /** `""` clears the colour. */
   @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MaxLength(30)
   color?: string;
 

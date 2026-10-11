@@ -2,6 +2,10 @@ import 'reflect-metadata';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/category.dto';
+import {
+  CreateSubcategoryDto,
+  UpdateSubcategoryDto,
+} from '../subcategories/dto/subcategory.dto';
 import { CategoriesService } from './categories.service';
 import { CategoryType } from './schemas/category.schema';
 import { AdminCatalogListQueryDto } from '../../common/dto/admin-catalog-query.dto';
@@ -23,6 +27,31 @@ describe('Category DTOs', () => {
       }),
     ).toHaveLength(0);
     expect(await errorsFor(UpdateCategoryDto, { icon: '' })).toHaveLength(0);
+  });
+
+  it('color is optional on create and clearable on update', async () => {
+    expect(await errorsFor(CreateCategoryDto, { name: 'Dairy' })).toHaveLength(
+      0,
+    );
+    expect(await errorsFor(UpdateCategoryDto, { color: '' })).toHaveLength(0);
+    expect(
+      await errorsFor(CreateSubcategoryDto, {
+        name: 'Milk',
+        icon: 'milk',
+        parentId: '665f00000000000000000001',
+      }),
+    ).toHaveLength(0);
+    expect(await errorsFor(UpdateSubcategoryDto, { color: '' })).toHaveLength(
+      0,
+    );
+    expect(
+      (
+        await errorsFor(CreateCategoryDto, {
+          name: 'Dairy',
+          color: 'x'.repeat(31),
+        })
+      ).length,
+    ).toBeGreaterThan(0);
   });
 
   it('still validates an icon when one is sent', async () => {

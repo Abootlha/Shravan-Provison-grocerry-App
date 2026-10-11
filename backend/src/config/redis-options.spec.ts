@@ -47,7 +47,12 @@ describe('Redis database isolation (REDIS_DB)', () => {
   });
 
   it('OrdersGateway subscriber connects to the configured db', () => {
-    new OrdersGateway(config, {} as any, {} as any);
+    const gateway = new OrdersGateway(config, {} as any, {} as any);
+    jest
+      .spyOn((gateway as any).logger, 'log')
+      .mockImplementation(() => undefined);
+    gateway.afterInit();
+    gateway.onModuleDestroy();
     expect(redisCtor).toHaveBeenCalledWith(expect.objectContaining({ db: 1 }));
   });
 

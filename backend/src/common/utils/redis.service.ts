@@ -1,7 +1,10 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
-import { redisConnectionOptions } from '../../config/redis-options';
+import {
+  redisConnectionOptions,
+  scopedPubSubChannel,
+} from '../../config/redis-options';
 
 @Injectable()
 export class RedisService implements OnModuleDestroy {
@@ -68,8 +71,15 @@ export class RedisService implements OnModuleDestroy {
     await this.set(key, JSON.stringify(value), ttlSeconds);
   }
 
+  /**
+   * Publishes on the environment-scoped channel (see scopedPubSubChannel);
+   * subscribers must scope their channel names the same way.
+   */
   async publish(channel: string, message: string): Promise<void> {
-    await this.client.publish(channel, message);
+    await this.client.publish(
+      scopedPubSubChannel(this.configService, channel),
+      message,
+    );
   }
 
   static Keys = {

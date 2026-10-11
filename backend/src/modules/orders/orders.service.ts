@@ -48,9 +48,16 @@ import {
 import { isStaffRole } from '../users/schemas/user.schema';
 import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
 import { escapeRegex, pageMeta } from '../../common/dto/query-transforms';
+import {
+  ADMIN_ORDER_EVENTS_CHANNEL,
+  ORDER_STATUS_CHANNEL,
+  ORDER_EVENTS_ORIGIN,
+  OrderEventChannel,
+  OrderEventPayload,
+  emitLocalOrderEvent,
+} from '../../sockets/order-events';
 
-/** Redis channel the /orders gateway relays to the `admin:orders` room. */
-export const ADMIN_ORDER_EVENTS_CHANNEL = 'admin-order-events';
+export { ADMIN_ORDER_EVENTS_CHANNEL };
 
 export type AdminOrderEvent = 'order:new' | 'order:updated';
 
@@ -371,8 +378,30 @@ export class OrdersService {
   }
 
   /**
-   * Notifies admin dashboards (Socket.IO room `admin:orders` on /orders).
-   * Goes through Redis pub/sub so every app instance relays it. Never fails
+   * Delivers an order event to sockets on this process immediately, then
+   * fans it out to other processes over Redis pub/sub. Redis failures are
+   * logged, never thrown: the order change has already been saved.
+   */
+  private async broadcastOrderEvent(
+    channel: OrderEventChannel,
+    payload: OrderEventPayload,
+  ): Promise<void> {
+    emitLocalOrderEvent(channel, payload);
+    try {
+      await this.redisService.publish(
+        channel,
+        JSON.stringify({ ...payload, origin: ORDER_EVENTS_ORIGIN }),
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to publish ${channel} to Redis: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * Notifies admin dashboards (Socket.IO room `admin:orders` on /orders) on
+   * this process and, through Redis, on every other instance. Never fails
    * the calling request.
    */
   async publishAdminOrderEvent(
@@ -383,26 +412,23 @@ export class OrdersService {
       const id = (order._id ?? order.id)?.toString?.();
       const userId = order.userId?._id ?? order.userId;
       const riderId = order.riderId?._id ?? order.riderId;
-      await this.redisService.publish(
-        ADMIN_ORDER_EVENTS_CHANNEL,
-        JSON.stringify({
-          event,
-          order: {
-            _id: id,
-            orderId: order.orderId,
-            orderStatus: order.orderStatus,
-            paymentStatus: order.paymentStatus,
-            paymentMethod: order.paymentMethod,
-            totalAmount: order.totalAmount,
-            itemCount: Array.isArray(order.items) ? order.items.length : 0,
-            userId: userId ? userId.toString() : null,
-            riderId: riderId ? riderId.toString() : null,
-            requiresManualReview: !!order.requiresManualReview,
-            createdAt: order.createdAt ?? null,
-            updatedAt: order.updatedAt ?? new Date(),
-          },
-        }),
-      );
+      await this.broadcastOrderEvent(ADMIN_ORDER_EVENTS_CHANNEL, {
+        event,
+        order: {
+          _id: id,
+          orderId: order.orderId,
+          orderStatus: order.orderStatus,
+          paymentStatus: order.paymentStatus,
+          paymentMethod: order.paymentMethod,
+          totalAmount: order.totalAmount,
+          itemCount: Array.isArray(order.items) ? order.items.length : 0,
+          userId: userId ? userId.toString() : null,
+          riderId: riderId ? riderId.toString() : null,
+          requiresManualReview: !!order.requiresManualReview,
+          createdAt: order.createdAt ?? null,
+          updatedAt: order.updatedAt ?? new Date(),
+        },
+      });
     } catch (error) {
       this.logger.warn(
         `Failed to publish ${event} for admin dashboards: ${(error as Error).message}`,
@@ -910,14 +936,11 @@ export class OrdersService {
     );
 
     // Publish to Redis for real-time updates
-    await this.redisService.publish(
-      'order-updates',
-      JSON.stringify({
-        orderId: updated.orderId,
-        status: newStatus,
-        paymentStatus: updated.paymentStatus,
-      }),
-    );
+    await this.broadcastOrderEvent(ORDER_STATUS_CHANNEL, {
+      orderId: updated.orderId,
+      status: newStatus,
+      paymentStatus: updated.paymentStatus,
+    });
 
     const trackingOrder = await this.buildRealtimeOrderPayload(
       updated._id.toString(),
@@ -1107,14 +1130,11 @@ export class OrdersService {
   private async afterPaymentStatusChange(order: OrderDocument): Promise<void> {
     await this.cacheService.deleteOrder(order._id.toString());
     await this.publishAdminOrderEvent('order:updated', order);
-    await this.redisService.publish(
-      'order-updates',
-      JSON.stringify({
-        orderId: order.orderId,
-        status: order.orderStatus,
-        paymentStatus: order.paymentStatus,
-      }),
-    );
+    await this.broadcastOrderEvent(ORDER_STATUS_CHANNEL, {
+      orderId: order.orderId,
+      status: order.orderStatus,
+      paymentStatus: order.paymentStatus,
+    });
 
     try {
       const trackingOrder = await this.buildRealtimeOrderPayload(
@@ -1239,13 +1259,10 @@ export class OrdersService {
       OrderStatus.ASSIGNED,
       new Types.ObjectId(riderId),
     );
-    await this.redisService.publish(
-      'order-updates',
-      JSON.stringify({
-        orderId: updated.orderId,
-        status: OrderStatus.ASSIGNED,
-      }),
-    );
+    await this.broadcastOrderEvent(ORDER_STATUS_CHANNEL, {
+      orderId: updated.orderId,
+      status: OrderStatus.ASSIGNED,
+    });
 
     const trackingOrder = await this.buildRealtimeOrderPayload(
       updated._id.toString(),
@@ -1376,13 +1393,10 @@ export class OrdersService {
       OrderStatus.CONFIRMED,
     );
 
-    await this.redisService.publish(
-      'order-updates',
-      JSON.stringify({
-        orderId: updatedOrder.orderId,
-        status: OrderStatus.CONFIRMED,
-      }),
-    );
+    await this.broadcastOrderEvent(ORDER_STATUS_CHANNEL, {
+      orderId: updatedOrder.orderId,
+      status: OrderStatus.CONFIRMED,
+    });
 
     const trackingOrder = await this.buildRealtimeOrderPayload(
       updatedOrder._id.toString(),

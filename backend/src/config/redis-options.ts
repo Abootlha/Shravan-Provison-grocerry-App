@@ -23,3 +23,20 @@ export function redisConnectionOptions(
     db: configService.get<number>('redis.db') ?? 0,
   };
 }
+
+/**
+ * Pub/sub channel name for this environment. Redis channels are global to the
+ * server (SELECT/REDIS_DB does not isolate them), so production and the dev
+ * instance on the same Redis would otherwise receive each other's events.
+ */
+export function scopedPubSubChannel(
+  configService: ConfigService,
+  channel: string,
+): string {
+  const env =
+    configService.get<string>('nodeEnv') ||
+    process.env.NODE_ENV ||
+    'development';
+  const db = configService.get<number>('redis.db') ?? 0;
+  return `${env}:${db}:${channel}`;
+}
