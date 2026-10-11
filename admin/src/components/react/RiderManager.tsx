@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../lib/api';
-import { Button } from '../ui/button';
-import { Skeleton } from '../ui/Skeleton';
-import { Input } from '../ui/input';
-import { EmptyState } from '../ui/EmptyState';
+import { Button } from '../legacy-ui/button';
+import { Skeleton } from '../legacy-ui/Skeleton';
+import { Input } from '../legacy-ui/input';
+import { EmptyState } from '../legacy-ui/EmptyState';
 import {
     Bike, MapPin, Star, Package, TrendingUp, Phone, Search, RefreshCw,
     CheckCircle, XCircle, Clock, Navigation, AlertCircle, User, Calendar,
@@ -224,7 +224,7 @@ export default function RiderManager({ onAssignRider, orderId, selectedRiderId }
                             <div className="space-y-2">
                                 <label className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>Vehicle Type</label>
                                 <select
-                                    className="w-full bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)] transition-all"
+                                    className="w-full bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[var(--primary)] transition-all"
                                     style={{ color: 'var(--text-primary)' }}
                                     value={newRider.vehicleType}
                                     onChange={(e) => setNewRider({ ...newRider, vehicleType: e.target.value })}
@@ -332,7 +332,7 @@ export default function RiderManager({ onAssignRider, orderId, selectedRiderId }
                                         </p>
                                     </div>
                                     <div className="text-center p-4 rounded-xl" style={{ background: 'var(--bg-tertiary)' }}>
-                                        <Package className="w-5 h-5 mx-auto mb-1" style={{ color: 'var(--accent)' }} />
+                                        <Package className="w-5 h-5 mx-auto mb-1" style={{ color: 'var(--primary)' }} />
                                         <p className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
                                             {selectedRider.totalDeliveries || 0}
                                         </p>
@@ -464,9 +464,9 @@ export default function RiderManager({ onAssignRider, orderId, selectedRiderId }
                             onClick={() => setStatusFilter(status)}
                             className="px-4 py-2 rounded-xl text-sm font-semibold transition-all"
                             style={{
-                                background: statusFilter === status ? 'var(--accent)' : 'var(--bg-tertiary)',
+                                background: statusFilter === status ? 'var(--primary)' : 'var(--bg-tertiary)',
                                 color: statusFilter === status ? 'var(--bg-primary)' : 'var(--text-secondary)',
-                                border: `1px solid ${statusFilter === status ? 'var(--accent)' : 'var(--border)'}`,
+                                border: `1px solid ${statusFilter === status ? 'var(--primary)' : 'var(--border)'}`,
                             }}
                         >
                             {status.charAt(0).toUpperCase() + status.slice(1)}
@@ -490,7 +490,7 @@ export default function RiderManager({ onAssignRider, orderId, selectedRiderId }
                                 className={`rider-card animate-slide-up cursor-pointer ${isSelected ? 'selected' : ''}`}
                                 style={{
                                     animationDelay: `${0.1 + index * 0.05}s`,
-                                    border: isSelected ? `2px solid var(--accent)` : '1px solid var(--border)',
+                                    border: isSelected ? `2px solid var(--primary)` : '1px solid var(--border)',
                                 }}
                                 onClick={() => setSelectedRider(rider)}
                             >

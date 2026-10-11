@@ -1,0 +1,14 @@
+---
+import AdminLayout from "../layouts/AdminLayout.astro";
+import { BeingBuilt } from "../components/shared/BeingBuilt";
+import { History } from "lucide-react";
+---
+
+<AdminLayout title="Audit log">
+  <BeingBuilt
+    title="Audit log"
+    description="A record of changes made in this admin."
+    plannedFor="You will be able to see who changed prices, stock, orders and settings, and when."
+    icon={History}
+  />
+</AdminLayout>

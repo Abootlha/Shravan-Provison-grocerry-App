@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Badge } from './ui/badge';
-import { Button } from './ui/button';
-import { Skeleton } from './ui/Skeleton';
-import { BarChart, LineChart, DonutChart } from './ui/Chart';
-import { EmptyState } from './ui/EmptyState';
+import { Card, CardContent, CardHeader, CardTitle } from './legacy-ui/card';
+import { Badge } from './legacy-ui/badge';
+import { Button } from './legacy-ui/button';
+import { Skeleton } from './legacy-ui/Skeleton';
+import { BarChart, LineChart, DonutChart } from './legacy-ui/Chart';
+import { EmptyState } from './legacy-ui/EmptyState';
 import {
     ShoppingCart,
     IndianRupee,
@@ -255,7 +255,7 @@ export default function Dashboard() {
                             </p>
                             <p className="text-sm text-[var(--text-muted)]">Pending Orders</p>
                         </div>
-                        <a href="/orders" className="text-[var(--accent)] hover:underline text-sm font-medium flex items-center gap-1">
+                        <a href="/orders" className="text-[var(--primary)] hover:underline text-sm font-medium flex items-center gap-1">
                             View <ArrowRight className="w-3 h-3" />
                         </a>
                     </div>
@@ -270,7 +270,7 @@ export default function Dashboard() {
                             </p>
                             <p className="text-sm text-[var(--text-muted)]">Out for Delivery</p>
                         </div>
-                        <a href="/orders" className="text-[var(--accent)] hover:underline text-sm font-medium flex items-center gap-1">
+                        <a href="/orders" className="text-[var(--primary)] hover:underline text-sm font-medium flex items-center gap-1">
                             Track <ArrowRight className="w-3 h-3" />
                         </a>
                     </div>
@@ -299,7 +299,7 @@ export default function Dashboard() {
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <div className="w-10 h-10 rounded-xl bg-[var(--accent-glow)] flex items-center justify-center">
-                                        <Activity className="w-5 h-5 text-[var(--accent)]" />
+                                        <Activity className="w-5 h-5 text-[var(--primary)]" />
                                     </div>
                                     <div>
                                         <h3 className="section-title">Revenue Trend</h3>
@@ -307,7 +307,7 @@ export default function Dashboard() {
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <button className="px-3 py-1.5 text-xs font-semibold bg-[var(--accent)] text-[var(--bg-primary)] rounded-lg">
+                                    <button className="px-3 py-1.5 text-xs font-semibold bg-[var(--primary)] text-[var(--bg-primary)] rounded-lg">
                                         Weekly
                                     </button>
                                     <button className="px-3 py-1.5 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors">
@@ -363,7 +363,7 @@ export default function Dashboard() {
                                         <p className="text-sm text-[var(--text-muted)]">Sales by category</p>
                                     </div>
                                 </div>
-                                <a href="/analytics" className="text-[var(--accent)] hover:underline text-sm font-medium flex items-center gap-1">
+                                <a href="/analytics" className="text-[var(--primary)] hover:underline text-sm font-medium flex items-center gap-1">
                                     Details <ArrowUpRight className="w-3 h-3" />
                                 </a>
                             </div>
@@ -419,7 +419,7 @@ export default function Dashboard() {
                                         <p className="text-sm text-[var(--text-muted)]">Latest transactions</p>
                                     </div>
                                 </div>
-                                <a href="/orders" className="text-[var(--accent)] hover:underline text-sm font-medium flex items-center gap-1">
+                                <a href="/orders" className="text-[var(--primary)] hover:underline text-sm font-medium flex items-center gap-1">
                                     View All <ArrowUpRight className="w-3 h-3" />
                                 </a>
                             </div>

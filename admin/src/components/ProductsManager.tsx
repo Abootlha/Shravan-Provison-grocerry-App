@@ -5,13 +5,13 @@ import {
     validateProductRows, runWithConcurrency, MAX_IMPORT_ROWS, MAX_IMPORT_FILE_BYTES, IMPORT_CONCURRENCY,
     type ValidProductRow, type RowError,
 } from '../lib/productCsv';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Badge } from './ui/badge';
-import { Skeleton } from './ui/Skeleton';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/Tabs';
-import { EmptyState } from './ui/EmptyState';
+import { Button } from './legacy-ui/button';
+import { Input } from './legacy-ui/input';
+import { Card, CardContent, CardHeader, CardTitle } from './legacy-ui/card';
+import { Badge } from './legacy-ui/badge';
+import { Skeleton } from './legacy-ui/Skeleton';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from './legacy-ui/Tabs';
+import { EmptyState } from './legacy-ui/EmptyState';
 import {
     Plus, Pencil, Search, Package, X, Scan, Camera, StopCircle, Upload, Link, ImageIcon,
     Filter, ChevronLeft, ChevronRight, MoreHorizontal, Eye, Trash2, CheckCircle, XCircle, Boxes,
@@ -550,7 +550,7 @@ export default function ProductsManager() {
                     <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
                         <div>
                             <div className="flex items-center gap-3 mb-2">
-                                <Boxes className="w-5 h-5" style={{ color: 'var(--accent)' }} />
+                                <Boxes className="w-5 h-5" style={{ color: 'var(--primary)' }} />
                                 <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
                                     Product Catalog
                                 </span>
@@ -592,7 +592,7 @@ export default function ProductsManager() {
                             <Filter className="w-4 h-4 mr-2" />
                             Filters
                             {(categoryFilter || stockFilter !== 'all' || statusFilter !== 'all') && (
-                                <span className="ml-2 w-5 h-5 rounded-full text-xs flex items-center justify-center" style={{ background: 'var(--accent)', color: 'var(--bg-primary)' }}>
+                                <span className="ml-2 w-5 h-5 rounded-full text-xs flex items-center justify-center" style={{ background: 'var(--primary)', color: 'var(--bg-primary)' }}>
                                     {[categoryFilter, stockFilter !== 'all', statusFilter !== 'all'].filter(Boolean).length}
                                 </span>
                             )}
@@ -742,7 +742,7 @@ export default function ProductsManager() {
                                             </td>
                                             <td>{product.unit}</td>
                                             <td>
-                                                <span className="font-semibold" style={{ color: 'var(--accent)' }}>₹{product.price}</span>
+                                                <span className="font-semibold" style={{ color: 'var(--primary)' }}>₹{product.price}</span>
                                                 {product.originalPrice > product.price && (
                                                     <span className="text-xs line-through ml-1" style={{ color: 'var(--text-muted)' }}>₹{product.originalPrice}</span>
                                                 )}
@@ -1292,8 +1292,8 @@ export default function ProductsManager() {
                                                         className="flex-1 py-2.5 px-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
                                                         style={{
                                                             background: imageMode === 'url' ? 'var(--accent-glow)' : 'var(--bg-tertiary)',
-                                                            color: imageMode === 'url' ? 'var(--accent)' : 'var(--text-muted)',
-                                                            border: imageMode === 'url' ? '2px solid var(--accent)' : '2px solid transparent'
+                                                            color: imageMode === 'url' ? 'var(--primary)' : 'var(--text-muted)',
+                                                            border: imageMode === 'url' ? '2px solid var(--primary)' : '2px solid transparent'
                                                         }}
                                                     >
                                                         <Link className="w-4 h-4" /> Image URLs
@@ -1304,8 +1304,8 @@ export default function ProductsManager() {
                                                         className="flex-1 py-2.5 px-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
                                                         style={{
                                                             background: imageMode === 'file' ? 'var(--accent-glow)' : 'var(--bg-tertiary)',
-                                                            color: imageMode === 'file' ? 'var(--accent)' : 'var(--text-muted)',
-                                                            border: imageMode === 'file' ? '2px solid var(--accent)' : '2px solid transparent'
+                                                            color: imageMode === 'file' ? 'var(--primary)' : 'var(--text-muted)',
+                                                            border: imageMode === 'file' ? '2px solid var(--primary)' : '2px solid transparent'
                                                         }}
                                                     >
                                                         <Upload className="w-4 h-4" /> Upload File
@@ -1373,7 +1373,7 @@ export default function ProductsManager() {
                                                     <div
                                                         key={tab}
                                                         className="w-2 h-2 rounded-full"
-                                                        style={{ background: activeTab === tab ? 'var(--accent)' : 'var(--bg-elevated)' }}
+                                                        style={{ background: activeTab === tab ? 'var(--primary)' : 'var(--bg-elevated)' }}
                                                     />
                                                 ))}
                                             </div>
@@ -1413,7 +1413,7 @@ export default function ProductsManager() {
                                     <>
                                         <div className="p-4 rounded-xl" style={{ background: 'var(--bg-tertiary)' }}>
                                             <div className="flex items-start gap-3">
-                                                <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: 'var(--accent)' }} />
+                                                <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: 'var(--primary)' }} />
                                                 <div className="text-sm space-y-2" style={{ color: 'var(--text-secondary)' }}>
                                                     <p>Upload a CSV file to add multiple products at once.</p>
                                                     <p>Make sure your CSV matches the template format. Category must be the name of an existing category. Rows are validated first so you can review errors before importing.</p>
@@ -1487,7 +1487,7 @@ export default function ProductsManager() {
                                                 className="h-2.5 rounded-full transition-all duration-300" 
                                                 style={{ 
                                                     width: `${bulkImportProgress.total > 0 ? (bulkImportProgress.current / bulkImportProgress.total) * 100 : 0}%`,
-                                                    background: 'var(--accent)'
+                                                    background: 'var(--primary)'
                                                 }}
                                             ></div>
                                         </div>
@@ -1618,7 +1618,7 @@ export default function ProductsManager() {
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="p-4 rounded-xl" style={{ background: 'var(--bg-tertiary)' }}>
                                             <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Selling Price</p>
-                                            <p className="text-2xl font-bold" style={{ color: 'var(--accent)' }}>₹{viewProduct.price}</p>
+                                            <p className="text-2xl font-bold" style={{ color: 'var(--primary)' }}>₹{viewProduct.price}</p>
                                             <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>per {viewProduct.unit}</p>
                                         </div>
                                         {viewProduct.originalPrice && viewProduct.originalPrice > viewProduct.price && (

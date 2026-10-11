@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../lib/api';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Skeleton } from '../ui/Skeleton';
+import { Button } from '../legacy-ui/button';
+import { Input } from '../legacy-ui/input';
+import { Skeleton } from '../legacy-ui/Skeleton';
 import {
     X, Search, MapPin, Navigation, CheckCircle, Bike, Phone
 } from 'lucide-react';
@@ -193,8 +193,8 @@ export default function RiderAssigner({ orderId, onClose, onAssign }: RiderAssig
 
                                 {assigning === rider._id && (
                                     <div className="mt-3 pt-3 flex items-center justify-center" style={{ borderTop: '1px solid var(--border)' }}>
-                                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-[var(--accent)] border-t-transparent" />
-                                        <span className="ml-2 text-sm" style={{ color: 'var(--accent)' }}>
+                                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-[var(--primary)] border-t-transparent" />
+                                        <span className="ml-2 text-sm" style={{ color: 'var(--primary)' }}>
                                             Assigning rider...
                                         </span>
                                     </div>

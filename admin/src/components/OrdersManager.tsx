@@ -2,12 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { api } from '../lib/api';
 import { getTrackingServiceUrl } from '../lib/config';
-import { Button } from './ui/button';
-import { Card, CardContent } from './ui/card';
-import { Badge } from './ui/badge';
-import { Input } from './ui/input';
-import { Skeleton } from './ui/Skeleton';
-import { EmptyState } from './ui/EmptyState';
+import { Button } from './legacy-ui/button';
+import { Card, CardContent } from './legacy-ui/card';
+import { Badge } from './legacy-ui/badge';
+import { Input } from './legacy-ui/input';
+import { Skeleton } from './legacy-ui/Skeleton';
+import { EmptyState } from './legacy-ui/EmptyState';
 import {
     ShoppingCart, ChevronLeft, ChevronRight, Clock, Package, User, Phone, MapPin,
     CheckCircle, Truck, XCircle, RefreshCw, Search, X, Eye, Zap, LayoutGrid, List, UserPlus
@@ -281,7 +281,7 @@ export default function OrdersManager() {
                     <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
                         <div>
                             <div className="flex items-center gap-3 mb-2">
-                                <Zap className="w-5 h-5" style={{ color: 'var(--accent)' }} />
+                                <Zap className="w-5 h-5" style={{ color: 'var(--primary)' }} />
                                 <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
                                     {pageMode === 'live' ? 'Live Operations' : pageMode === 'completed' ? 'History' : 'Returns'}
                                 </span>
@@ -302,7 +302,7 @@ export default function OrdersManager() {
                                     onClick={() => setViewMode('cards')}
                                     className="p-2 rounded-lg transition-all"
                                     style={{
-                                        background: viewMode === 'cards' ? 'var(--accent)' : 'transparent',
+                                        background: viewMode === 'cards' ? 'var(--primary)' : 'transparent',
                                         color: viewMode === 'cards' ? 'var(--bg-primary)' : 'var(--text-muted)'
                                     }}
                                 >
@@ -312,7 +312,7 @@ export default function OrdersManager() {
                                     onClick={() => setViewMode('table')}
                                     className="p-2 rounded-lg transition-all"
                                     style={{
-                                        background: viewMode === 'table' ? 'var(--accent)' : 'transparent',
+                                        background: viewMode === 'table' ? 'var(--primary)' : 'transparent',
                                         color: viewMode === 'table' ? 'var(--bg-primary)' : 'var(--text-muted)'
                                     }}
                                 >
@@ -338,9 +338,9 @@ export default function OrdersManager() {
                         }}
                         className="px-4 py-2 rounded-xl text-sm font-semibold transition-all"
                         style={{
-                            background: (!statusFilter || statusFilter === 'DELIVERED,CANCELLED') ? 'var(--accent)' : 'var(--bg-tertiary)',
+                            background: (!statusFilter || statusFilter === 'DELIVERED,CANCELLED') ? 'var(--primary)' : 'var(--bg-tertiary)',
                             color: (!statusFilter || statusFilter === 'DELIVERED,CANCELLED') ? 'var(--bg-primary)' : 'var(--text-secondary)',
-                            border: '1px solid ' + ((!statusFilter || statusFilter === 'DELIVERED,CANCELLED') ? 'var(--accent)' : 'var(--border)')
+                            border: '1px solid ' + ((!statusFilter || statusFilter === 'DELIVERED,CANCELLED') ? 'var(--primary)' : 'var(--border)')
                         }}
                     >
                         All ({orders.length})
@@ -461,7 +461,7 @@ export default function OrdersManager() {
                                                 className="flex items-center justify-between pt-4"
                                                 style={{ borderTop: '1px solid var(--border)' }}
                                             >
-                                                <span className="text-xl font-display font-bold" style={{ color: 'var(--accent)' }}>
+                                                <span className="text-xl font-display font-bold" style={{ color: 'var(--primary)' }}>
                                                     ₹{order.totalAmount}
                                                 </span>
                                                 <button
@@ -510,7 +510,7 @@ export default function OrdersManager() {
                                             <td>{order.userId?.name || 'Guest'}</td>
                                             <td>{order.items?.length || 0} items</td>
                                             <td>
-                                                <span className="font-semibold" style={{ color: 'var(--accent)' }}>
+                                                <span className="font-semibold" style={{ color: 'var(--primary)' }}>
                                                     ₹{order.totalAmount}
                                                 </span>
                                             </td>
@@ -694,7 +694,7 @@ export default function OrdersManager() {
                                             style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-elevated)' }}
                                         >
                                             <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>Total</span>
-                                            <span className="text-xl font-display font-bold" style={{ color: 'var(--accent)' }}>
+                                            <span className="text-xl font-display font-bold" style={{ color: 'var(--primary)' }}>
                                                 ₹{selectedOrder.totalAmount}
                                             </span>
                                         </div>

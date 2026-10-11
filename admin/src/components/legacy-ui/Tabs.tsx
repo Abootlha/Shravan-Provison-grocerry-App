@@ -68,7 +68,7 @@ function TabsTrigger({ value, className, children, ...props }: TabsTriggerProps)
             className={cn(
                 "px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200",
                 isActive
-                    ? "bg-[var(--accent)] text-[var(--bg-primary)] shadow-lg shadow-[var(--accent-glow)]"
+                    ? "bg-[var(--primary)] text-[var(--bg-primary)] shadow-lg shadow-[var(--accent-glow)]"
                     : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]",
                 className
             )}

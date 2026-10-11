@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
-import { Badge } from './ui/badge';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Skeleton } from './ui/Skeleton';
-import { EmptyState } from './ui/EmptyState';
+import { Badge } from './legacy-ui/badge';
+import { Button } from './legacy-ui/button';
+import { Input } from './legacy-ui/input';
+import { Skeleton } from './legacy-ui/Skeleton';
+import { EmptyState } from './legacy-ui/EmptyState';
 import {
     Package, AlertTriangle, Search, RefreshCw, TrendingDown, ArrowUpDown,
     ChevronLeft, ChevronRight, Boxes, CheckCircle2, XCircle
@@ -99,7 +99,7 @@ export default function InventoryManager() {
                     <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
                         <div>
                             <div className="flex items-center gap-3 mb-2">
-                                <Boxes className="w-5 h-5" style={{ color: 'var(--accent)' }} />
+                                <Boxes className="w-5 h-5" style={{ color: 'var(--primary)' }} />
                                 <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
                                     Stock Control
                                 </span>
@@ -121,7 +121,7 @@ export default function InventoryManager() {
                 {/* Stats Cards */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 animate-slide-up delay-2">
                     <div
-                        className={`kpi-card group cursor-pointer ${filter === 'all' ? 'ring-2 ring-[var(--accent)]' : ''}`}
+                        className={`kpi-card group cursor-pointer ${filter === 'all' ? 'ring-2 ring-[var(--primary)]' : ''}`}
                         onClick={() => setFilter('all')}
                     >
                         <div className="flex items-center gap-4">

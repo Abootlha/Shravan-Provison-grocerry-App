@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
+import { Card, CardContent, CardHeader, CardTitle } from './legacy-ui/card';
+import { Button } from './legacy-ui/button';
+import { Input } from './legacy-ui/input';
 import { Store, MapPin, Clock, Truck, Phone, Save, Check, Navigation, Edit3, Loader2, Search } from 'lucide-react';
 import { authRequest } from '../lib/api';
 

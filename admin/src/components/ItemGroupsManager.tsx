@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Badge } from './ui/badge';
-import { Skeleton } from './ui/Skeleton';
-import { EmptyState } from './ui/EmptyState';
+import { Button } from './legacy-ui/button';
+import { Input } from './legacy-ui/input';
+import { Badge } from './legacy-ui/badge';
+import { Skeleton } from './legacy-ui/Skeleton';
+import { EmptyState } from './legacy-ui/EmptyState';
 import { Plus, Pencil, Trash2, X, Search as SearchIcon, RefreshCw, ToggleLeft, ToggleRight, Sparkles, ChevronDown, Boxes, ImageIcon } from 'lucide-react';
 import { Icon } from '@iconify/react';
 
@@ -205,7 +205,7 @@ export default function ItemGroupsManager() {
                     <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
                         <div>
                             <div className="flex items-center gap-3 mb-2">
-                                <Sparkles className="w-5 h-5" style={{ color: 'var(--accent)' }} />
+                                <Sparkles className="w-5 h-5" style={{ color: 'var(--primary)' }} />
                                 <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
                                     Step 3: Item Groups
                                 </span>

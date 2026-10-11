@@ -2,11 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { api } from '../lib/api';
 import { getTrackingServiceUrl } from '../lib/config';
-import { Button } from './ui/button';
-import { Badge } from './ui/badge';
-import { Input } from './ui/input';
-import { Skeleton } from './ui/Skeleton';
-import { EmptyState } from './ui/EmptyState';
+import { Button } from './legacy-ui/button';
+import { Badge } from './legacy-ui/badge';
+import { Input } from './legacy-ui/input';
+import { Skeleton } from './legacy-ui/Skeleton';
+import { EmptyState } from './legacy-ui/EmptyState';
 import RiderTrackingMap from './RiderTrackingMap';
 import {
     Clock, Package, Truck, CheckCircle, XCircle, RefreshCw, Search,
@@ -481,9 +481,9 @@ export default function OrderTrackingManager() {
                         onClick={() => { setStatusFilter(''); setPage(1); }}
                         className="px-4 py-2 rounded-xl text-sm font-semibold transition-all"
                         style={{
-                            background: !statusFilter ? 'var(--accent)' : 'var(--bg-tertiary)',
+                            background: !statusFilter ? 'var(--primary)' : 'var(--bg-tertiary)',
                             color: !statusFilter ? 'var(--bg-primary)' : 'var(--text-secondary)',
-                            border: '1px solid ' + (!statusFilter ? 'var(--accent)' : 'var(--border)')
+                            border: '1px solid ' + (!statusFilter ? 'var(--primary)' : 'var(--border)')
                         }}
                     >
                         All ({orders.length})
@@ -562,7 +562,7 @@ export default function OrderTrackingManager() {
                                             </td>
                                             <td>{order.items?.length || 0} items</td>
                                             <td>
-                                                <span className="font-semibold" style={{ color: 'var(--accent)' }}>
+                                                <span className="font-semibold" style={{ color: 'var(--primary)' }}>
                                                     ₹{order.totalAmount}
                                                 </span>
                                             </td>
@@ -853,7 +853,7 @@ export default function OrderTrackingManager() {
                                             style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-elevated)' }}
                                         >
                                             <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>Total</span>
-                                            <span className="text-xl font-display font-bold" style={{ color: 'var(--accent)' }}>
+                                            <span className="text-xl font-display font-bold" style={{ color: 'var(--primary)' }}>
                                                 ₹{selectedOrder.totalAmount}
                                             </span>
                                         </div>

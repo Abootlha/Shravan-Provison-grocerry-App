@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Badge } from './ui/badge';
-import { Skeleton } from './ui/Skeleton';
-import { EmptyState } from './ui/EmptyState';
+import { Button } from './legacy-ui/button';
+import { Input } from './legacy-ui/input';
+import { Badge } from './legacy-ui/badge';
+import { Skeleton } from './legacy-ui/Skeleton';
+import { EmptyState } from './legacy-ui/EmptyState';
 import { Plus, Pencil, Trash2, Tags, X, Search as SearchIcon, Grid3X3, RefreshCw, ToggleLeft, ToggleRight, Sparkles, Package } from 'lucide-react';
 
 interface Category {
@@ -182,7 +182,7 @@ export default function CategoriesManager() {
                     <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
                         <div>
                             <div className="flex items-center gap-3 mb-2">
-                                <Sparkles className="w-5 h-5" style={{ color: 'var(--accent)' }} />
+                                <Sparkles className="w-5 h-5" style={{ color: 'var(--primary)' }} />
                                 <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
                                     Product Organization
                                 </span>
@@ -404,9 +404,9 @@ export default function CategoriesManager() {
                                             onClick={() => setForm({ ...form, iconType: 'url' })}
                                             className="flex-1 px-4 py-3 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2"
                                             style={{
-                                                background: form.iconType === 'url' ? 'var(--accent)' : 'var(--bg-tertiary)',
+                                                background: form.iconType === 'url' ? 'var(--primary)' : 'var(--bg-tertiary)',
                                                 color: form.iconType === 'url' ? 'white' : 'var(--text-secondary)',
-                                                border: form.iconType === 'url' ? '2px solid var(--accent)' : '2px solid var(--border)'
+                                                border: form.iconType === 'url' ? '2px solid var(--primary)' : '2px solid var(--border)'
                                             }}
                                         >
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -419,9 +419,9 @@ export default function CategoriesManager() {
                                             onClick={() => setForm({ ...form, iconType: 'upload' })}
                                             className="flex-1 px-4 py-3 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2"
                                             style={{
-                                                background: form.iconType === 'upload' ? 'var(--accent)' : 'var(--bg-tertiary)',
+                                                background: form.iconType === 'upload' ? 'var(--primary)' : 'var(--bg-tertiary)',
                                                 color: form.iconType === 'upload' ? 'white' : 'var(--text-secondary)',
-                                                border: form.iconType === 'upload' ? '2px solid var(--accent)' : '2px solid var(--border)'
+                                                border: form.iconType === 'upload' ? '2px solid var(--primary)' : '2px solid var(--border)'
                                             }}
                                         >
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -523,7 +523,7 @@ export default function CategoriesManager() {
                                             />
                                             <label
                                                 htmlFor="category-image-upload"
-                                                className="flex flex-col items-center justify-center gap-3 py-12 px-4 border-2 border-dashed rounded-xl cursor-pointer transition-all hover:border-[var(--accent)]"
+                                                className="flex flex-col items-center justify-center gap-3 py-12 px-4 border-2 border-dashed rounded-xl cursor-pointer transition-all hover:border-[var(--primary)]"
                                                 style={{ 
                                                     borderColor: 'var(--border)',
                                                     background: 'var(--bg-tertiary)'

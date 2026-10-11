@@ -37,7 +37,7 @@ function BarChart({ data, maxValue, className, showLabels = true, showValues = t
                             className="h-full rounded-full transition-all duration-700 ease-out"
                             style={{
                                 width: `${max > 0 ? (item.value / max) * 100 : 0}%`,
-                                background: item.color ?? 'var(--accent)'
+                                background: item.color ?? 'var(--primary)'
                             }}
                         />
                     </div>

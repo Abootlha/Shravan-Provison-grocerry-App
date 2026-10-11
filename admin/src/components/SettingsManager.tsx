@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Badge } from './ui/badge';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/Tabs';
+import { Card, CardContent, CardHeader, CardTitle } from './legacy-ui/card';
+import { Button } from './legacy-ui/button';
+import { Input } from './legacy-ui/input';
+import { Badge } from './legacy-ui/badge';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from './legacy-ui/Tabs';
 import {
     Settings, Store, Truck, Receipt, FileText, Shield, Bell, Save, Check
 } from 'lucide-react';

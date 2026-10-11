@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Badge } from './ui/badge';
-import { Button } from './ui/button';
-import { Skeleton } from './ui/Skeleton';
-import { BarChart, LineChart, DonutChart } from './ui/Chart';
+import { Card, CardContent, CardHeader, CardTitle } from './legacy-ui/card';
+import { Badge } from './legacy-ui/badge';
+import { Button } from './legacy-ui/button';
+import { Skeleton } from './legacy-ui/Skeleton';
+import { BarChart, LineChart, DonutChart } from './legacy-ui/Chart';
 import {
     TrendingUp,
     TrendingDown,
