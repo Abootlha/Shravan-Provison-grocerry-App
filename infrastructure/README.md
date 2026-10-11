@@ -39,6 +39,25 @@ To run the CI-built image instead of building on the host, set
 To use MongoDB Atlas, set `MONGODB_URI` to the Atlas URI and remove the `mongodb`
 service and its `depends_on` entry.
 
+## Login sessions live in Redis
+
+Each signed-in device has a session record in Redis (`refresh:{role}:{userId}:{sessionId}`).
+Sessions slide: every token refresh rotates the refresh token and resets the idle timer
+(`JWT_REFRESH_IDLE_DAYS`, default 365 for customers and riders; `JWT_ADMIN_REFRESH_IDLE_DAYS`,
+default 28 for staff). Access tokens are short-lived (`JWT_EXPIRES_IN`, default 15m).
+
+- Redis must persist to disk. The compose files run `redis-server --appendonly yes` and keep
+  data in the `redis_data` volume; keep that volume when redeploying.
+- Do not set an evicting `maxmemory-policy` (keep the default `noeviction`): an evicted key is a
+  signed-out device.
+- `FLUSHALL`, losing the volume, or pointing the backend at a fresh Redis signs everyone out.
+- `JWT_REFRESH_IDLE_DAYS=0` removes the idle timeout entirely (records have no TTL). Sessions then
+  end only on logout, `POST /auth/logout-all`, account disable/role change, or refresh-token
+  reuse detection. A lost phone stays signed in until the session is revoked.
+- `POST /auth/refresh` failures are `401` with `code` = `SESSION_EXPIRED`, `SESSION_REVOKED`,
+  `REFRESH_REUSED` or `USER_NOT_FOUND`. The apps sign out only on these; network errors and
+  5xx keep the user signed in.
+
 ## Local development
 
 Use the root `docker-compose.yml` instead (backend + MongoDB + Redis, with MongoDB/Redis bound to 127.0.0.1). See the root `README.md`.

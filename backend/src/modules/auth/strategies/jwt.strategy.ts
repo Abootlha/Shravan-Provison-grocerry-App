@@ -24,6 +24,8 @@ export interface JwtPayload {
   sub: string;
   role: string;
   jti?: string;
+  /** Session id (one per signed-in device). */
+  sid?: string;
   type?: string;
   iat?: number;
   exp?: number;
@@ -33,6 +35,7 @@ export interface AuthenticatedUser {
   userId: string;
   role: string;
   jti?: string;
+  sid?: string;
   exp?: number;
 }
 
@@ -78,6 +81,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       userId: payload.sub,
       role: payload.role,
       jti: payload.jti,
+      sid: payload.sid,
       exp: payload.exp,
     };
   }
