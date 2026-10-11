@@ -22,6 +22,8 @@ import { MapsModule } from './modules/maps/maps.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { RedisModule } from './common/utils/redis.module';
 import { HttpThrottlerGuard } from './modules/auth/guards/http-throttler.guard';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
 
 // Config
 import configuration from './config/configuration';
@@ -101,7 +103,10 @@ import configuration from './config/configuration';
     MapsModule,
     PaymentsModule,
   ],
+  // Root routes: GET /api/v1 and the GET /api/v1/health probe used by deploys.
+  controllers: [AppController],
   providers: [
+    AppService,
     // Apply rate limiting globally to all HTTP routes.
     { provide: APP_GUARD, useClass: HttpThrottlerGuard },
   ],
