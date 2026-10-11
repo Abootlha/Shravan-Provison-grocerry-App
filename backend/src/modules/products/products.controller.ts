@@ -8,6 +8,7 @@ import {
   Query,
   UseGuards,
   BadRequestException,
+  HttpCode,
 } from '@nestjs/common';
 import { ProductsService } from './products.service';
 import { BarcodeService } from './barcode.service';
@@ -16,6 +17,9 @@ import { AdminGuard } from '../auth/guards/admin.guard';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateStockDto } from './dto/update-stock.dto';
+import { PreviewImageDto } from './dto/preview-image.dto';
+import { ImageProcessingService } from './image-processing/image-processing.service';
+import { ImageInputError } from './image-processing/product-image-pipeline';
 import { Types } from 'mongoose';
 
 const MAX_PAGE_SIZE = 100;
@@ -32,6 +36,7 @@ export class ProductsController {
   constructor(
     private readonly productsService: ProductsService,
     private readonly barcodeService: BarcodeService,
+    private readonly imageProcessing: ImageProcessingService,
   ) {}
 
   @Get()
@@ -69,6 +74,44 @@ export class ProductsController {
     return data;
   }
 
+  /** Which background-removal provider the server is configured with. */
+  @Get('image/processing-config')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  getImageProcessingConfig() {
+    return this.imageProcessing.getProcessingConfig();
+  }
+
+  /** Runs the pack-shot pipeline without saving; returns a PNG data URI. */
+  @Post('image/preview')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  async previewImage(@Body() body: PreviewImageDto) {
+    if (body.image.startsWith('/')) {
+      throw new BadRequestException(
+        'Server-relative image paths cannot be previewed',
+      );
+    }
+    try {
+      const result = await this.imageProcessing.processImage(body.image, {
+        removeBackground: body.removeBackground,
+      });
+      return {
+        image: result.dataUri,
+        width: result.width,
+        height: result.height,
+        bytes: result.buffer.length,
+        provider: result.provider,
+        backgroundRemoved: result.backgroundRemoved,
+        warnings: result.warnings,
+      };
+    } catch (error) {
+      if (error instanceof ImageInputError) {
+        throw new BadRequestException(error.message);
+      }
+      throw new BadRequestException('Could not process this image');
+    }
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string) {
     const product = await this.productsService.findById(id);
@@ -77,7 +120,12 @@ export class ProductsController {
 
   @Post()
   @UseGuards(JwtAuthGuard, AdminGuard)
-  async create(@Body() data: CreateProductDto) {
+  async create(@Body() body: CreateProductDto) {
+    const { removeBackground, ...rest } = body;
+    const data = await this.imageProcessing.processProductImages(
+      rest,
+      removeBackground,
+    );
     const productData: any = {
       ...data,
       categoryId: new Types.ObjectId(data.categoryId),
@@ -94,7 +142,12 @@ export class ProductsController {
 
   @Put(':id')
   @UseGuards(JwtAuthGuard, AdminGuard)
-  async update(@Param('id') id: string, @Body() data: UpdateProductDto) {
+  async update(@Param('id') id: string, @Body() body: UpdateProductDto) {
+    const { removeBackground, ...rest } = body;
+    const data = await this.imageProcessing.processProductImages(
+      rest,
+      removeBackground,
+    );
     const productData: any = { ...data };
     if (data.categoryId) {
       productData.categoryId = new Types.ObjectId(data.categoryId);

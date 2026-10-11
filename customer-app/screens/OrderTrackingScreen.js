@@ -1,25 +1,42 @@
-import React, { useEffect, useRef, useState } from 'react';
-import {
-    View,
-    Text,
-    StyleSheet,
-    SafeAreaView,
-    StatusBar,
-    TouchableOpacity,
-    ActivityIndicator,
-    Animated,
-    Dimensions,
-    Platform,
-    ScrollView,
-} from 'react-native';
+/**
+ * OrderTrackingScreen — live order tracking.
+ *
+ * Layout: full-bleed map (~42% of the screen) with round back / help buttons (the only glass on the
+ * screen) and a solid "#CODE · Live" label (MapChrome), then a r16 sheet (the one floating shadow) whose
+ * surface head panel carries the "Arriving in **8 mins**" headline, the "On time" note and the 4-icon progress line,
+ * followed by the stacked cards (TrackingBottomSheet). Delivered / cancelled orders drop the map.
+ * Tapping the map or the "View map" button expands it to ~72% of the screen:
+ * the sheet springs down and the map slides so its centre stays in view (transform only — the map
+ * itself never resizes). Back / the collapse button / tapping the sheet reverses it.
+ *
+ * Data flow is unchanged: REST GET /orders/:id (carries the delivery OTP), socket room for live
+ * status + rider fixes, route refresh every 25 s or when the rider drifts off the route.
+ *
+ * Motion: skeleton → live layout → delivered/cancelled layout crossfade (ContentSwap, no pop); a status
+ * change crossfades the headline copy and taps a haptic (success when delivered); the progress line
+ * springs between steps; the delivery OTP digits fade in. No idle loops.
+ * Theme: everything from useTheme(); the basemap follows the scheme (see OrderTrackingMap*).
+ */
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BackHandler, Linking, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import Animated, { interpolate, useAnimatedStyle, useReducedMotion, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { COLORS } from '../constants';
+import { radii, space } from '../constants/theme';
+import { makeStyles, useTheme } from '../theme';
+import { springs, durations, easings } from '../theme/motion';
+import { AnimatedScreen, ContentSwap, Screen, Text, haptic, toast } from '../components/ui';
 import { OrderService, SettingsService } from '../services';
 import socketService from '../services/socketService';
 import OrderTrackingMap from '../components/OrderTrackingMap';
 import TrackingBottomSheet from '../components/TrackingBottomSheet';
+import { EtaHead, MapChrome, TrackingBar } from './tracking/TrackingHeader';
+import DeliveryStepper from './tracking/DeliveryStepper';
+import { TrackingSkeleton } from './tracking/TrackingStates';
+import { getHeaderCopy } from './tracking/trackingCopy';
+import { getEtaMinutes, getRider, shortOrderCode } from './orders/orderUtils';
+import { useTranslation } from '../hooks/useTranslation';
 import {
     fetchRoute,
     calculateBearing,
@@ -29,7 +46,6 @@ import {
     setCurrentOrder,
     clearCurrentOrder,
     clearRiderLocation,
-    setError,
     setLoading,
     setRouteCoordinates,
     setRouteInfo,
@@ -37,12 +53,9 @@ import {
     setRiderHeading,
 } from '../store/slices/orderTrackingSlice';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-const ZEPTO_PURPLE = '#7C3AED';
-const ZEPTO_GREEN = '#10B981';
-
 const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
+    const styles = useStyles();
+    const { colors } = useTheme();
     const insets = useSafeAreaInsets();
     const dispatch = useDispatch();
     const { orderId } = navRoute.params || {};
@@ -59,37 +72,45 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
         error,
         isLoading,
         activeLeg,
+        durationRemaining,
     } = useSelector((state) => state.orderTracking);
 
     const { token } = useSelector((state) => state.auth);
-    const [mapReady, setMapReady] = useState(false);
-    const [showFullMap, setShowFullMap] = useState(false);
+    const { isHi } = useTranslation();
+    const [expanded, setExpanded] = useState(false);
+    const [storePhone, setStorePhone] = useState(null);
     const [socketOrderId, setSocketOrderId] = useState(orderId || null);
-    const headerOpacity = useRef(new Animated.Value(0)).current;
     const lastRouteRefreshRef = useRef(0);
     const latestRiderLocationRef = useRef(null);
     const latestDestinationRef = useRef(null);
     const socketOrderIdRef = useRef(orderId || null);
 
+    // After checkout this screen *replaces* the tabs (useCheckout → navigation.replace), so there is
+    // nothing under it: back must rebuild the store (Home tab) instead of leaving the app.
     const handleSafeBack = () => {
         if (navigation.canGoBack()) {
             navigation.goBack();
         } else {
-            navigation.navigate('Home');
+            navigation.reset({ index: 0, routes: [{ name: 'Main', params: { screen: 'Home' } }] });
         }
     };
+
+    // Android hardware back / back gesture: same rule (the expanded-map handler below runs first).
+    useEffect(() => {
+        const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+            if (navigation.canGoBack()) return false;
+            handleSafeBack();
+            return true;
+        });
+        return () => sub.remove();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [navigation]);
 
     useEffect(() => {
         if (!orderId) {
             handleSafeBack();
             return;
         }
-
-        Animated.timing(headerOpacity, {
-            toValue: 1,
-            duration: 400,
-            useNativeDriver: true,
-        }).start();
 
         if (token) {
             socketService.connect(token);
@@ -226,6 +247,9 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
             try {
                 const data = await SettingsService.getStoreSettings();
                 const settings = data?.settings || data;
+                if (settings?.contactPhone) {
+                    setStorePhone(settings.contactPhone);
+                }
                 if (settings?.location) {
                     dispatch(setStoreLocation({
                         latitude: settings.location.latitude,
@@ -326,651 +350,324 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
 
     const shouldShowMap = () => {
         if (!currentOrder) return false;
-        return ['PENDING', 'CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(currentOrder.orderStatus);
+        return ['PENDING', 'CONFIRMED', 'ASSIGNED', 'PACKED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ARRIVED'].includes(currentOrder.orderStatus);
     };
+
+
+    const customerLocation = useMemo(getCustomerLocation, [
+        currentOrder?.deliveryAddress?.coordinates?.coordinates?.[0],
+        currentOrder?.deliveryAddress?.coordinates?.coordinates?.[1],
+    ]);
+
+    // ---- Map expand / collapse (transform only) -------------------------------------------
+    // Collapsed, the map owns ~42% of the screen (Part C §10: map 40%) and the sheet's r24 top
+    // overlaps it. Tapping the map (or "View map") expands it to ~72%; the sheet springs down.
+    const { height: winH } = useWindowDimensions();
+    const [bodyH, setBodyH] = useState(0);
+    const reduce = useReducedMotion();
+    const screenH = bodyH || winH;
+    const mapCollapsed = Math.max(260, Math.round(screenH * 0.42));
+    const expandedH = Math.max(mapCollapsed + 120, Math.min(Math.round(screenH * 0.72), screenH - 140));
+    const diff = expandedH - mapCollapsed;
+    const chromeH = insets.top + space.sm + 44;
+    const progress = useSharedValue(0);
+
+    useEffect(() => {
+        progress.value = reduce
+            ? withTiming(expanded ? 1 : 0, { duration: durations.base, easing: easings.out })
+            : withSpring(expanded ? 1 : 0, springs.sheet);
+    }, [expanded, reduce, progress]);
+
+    useEffect(() => {
+        if (!expanded) return undefined;
+        const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+            setExpanded(false);
+            return true;
+        });
+        return () => sub.remove();
+    }, [expanded]);
+
+    const mapStyle = useAnimatedStyle(() => ({
+        transform: [{ translateY: interpolate(progress.value, [0, 1], [-diff / 2, 0]) }],
+    }));
+    const sheetStyle = useAnimatedStyle(() => ({
+        transform: [{ translateY: progress.value * diff }],
+    }));
+    const collapseBtnStyle = useAnimatedStyle(() => ({
+        opacity: progress.value,
+        transform: [{ translateY: (1 - progress.value) * 12 }],
+    }));
+    const viewMapStyle = useAnimatedStyle(() => ({ opacity: 1 - progress.value }));
+
+    const expand = () => {
+        haptic.light();
+        setExpanded(true);
+    };
+    const collapse = () => setExpanded(false);
+    const onBack = () => (expanded ? collapse() : handleSafeBack());
+
+    // Status change → a haptic beat (the headline crossfades itself, see EtaHead). Not on first load.
+    const liveStatus = String(currentOrder?.orderStatus || '').toUpperCase();
+    const lastStatusRef = useRef(null);
+    useEffect(() => {
+        if (!liveStatus) return;
+        const prev = lastStatusRef.current;
+        lastStatusRef.current = liveStatus;
+        if (prev && prev !== liveStatus) {
+            if (liveStatus === 'DELIVERED') haptic.success();
+            else if (liveStatus === 'CANCELLED') haptic.warning();
+            else haptic.selection();
+        }
+    }, [liveStatus]);
+
+    const onHelp = useCallback(() => {
+        if (storePhone) {
+            Linking.openURL(`tel:${storePhone}`);
+        } else {
+            toast.info(isHi ? 'सहायता जल्द उपलब्ध होगी' : 'Support will be available shortly', {
+                description: isHi ? 'कृपया थोड़ी देर बाद प्रयास करें।' : 'Please try again in a little while.',
+            });
+        }
+    }, [storePhone, isHi]);
 
     if (isLoading || !currentOrder) {
         return (
-            <SafeAreaView style={styles.loadingContainer}>
-                <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
-                <View style={styles.loadingContent}>
-                    <View style={styles.loadingIconContainer}>
-                        <ActivityIndicator size="large" color={ZEPTO_PURPLE} />
-                    </View>
-                    <Text style={styles.loadingTitle}>Finding your order</Text>
-                    <Text style={styles.loadingSubtitle}>Setting up live tracking...</Text>
-                </View>
-            </SafeAreaView>
+            <Screen edges={[]} wash={false}>
+                <AnimatedScreen>
+                    <ContentSwap stateKey="loading" style={styles.flex}>
+                        <TrackingSkeleton topInset={insets.top} mapHeight={mapCollapsed} />
+                    </ContentSwap>
+                </AnimatedScreen>
+            </Screen>
         );
     }
 
-    const renderCarousel = () => (
-        <View style={styles.carouselContainer}>
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                pagingEnabled
-                style={styles.carouselScroll}
-            >
-                <View style={styles.carouselItem}>
-                    <View style={[styles.carouselCard, { backgroundColor: '#1A1A1A' }]}>
-                        <View style={styles.carouselInfo}>
-                            <Text style={styles.carouselBadge}>PREMIUM</Text>
-                            <Text style={styles.carouselTitle}>15% discount on First Year Premium</Text>
-                            <Text style={styles.carouselSubtitle}>100% premium back with special exit value benefit</Text>
-                            <TouchableOpacity style={styles.applyBtn}>
-                                <Text style={styles.applyBtnText}>APPLY NOW</Text>
-                                <MaterialCommunityIcons name="chevron-right" size={12} color={ZEPTO_PURPLE} />
-                            </TouchableOpacity>
-                        </View>
-                        <View style={styles.carouselImagePlaceholder}>
-                            <MaterialCommunityIcons name="wallet-giftcard" size={40} color="rgba(255,255,255,0.2)" />
-                        </View>
+    const status = String(currentOrder.orderStatus || '').toUpperCase();
+    const showMap = shouldShowMap();
+    const legNow = currentOrder?.tracking?.activeLeg || activeLeg;
+    const rider = getRider(currentOrder);
+    const copy = getHeaderCopy(status, isHi, { activeLeg: legNow, riderName: rider?.name });
+    const etaMinutes = getEtaMinutes({ order: currentOrder, durationRemaining, routeInfo });
+    const canonicalId = currentOrder?._id || currentOrder?.id || orderId;
+    const orderCode = shortOrderCode(currentOrder);
+    const terminal = ['DELIVERED', 'CANCELLED'].includes(status);
+
+    // "On time": the live ETA still lands inside the promised window (+2 min grace) and the
+    // rider's location isn't stale. Without a promised time we only claim it while live.
+    const lastFix = currentOrder?.tracking?.lastLocationUpdateAt || riderLocation?.timestamp || null;
+    const stale = lastFix != null && Date.now() - new Date(lastFix).getTime() > 30000;
+    const promised = currentOrder?.estimatedDeliveryTime ? new Date(currentOrder.estimatedDeliveryTime).getTime() : NaN;
+    const onTime = Boolean(copy?.eta) && Number.isFinite(etaMinutes) && !stale
+        && (!Number.isFinite(promised) || Date.now() + etaMinutes * 60000 <= promised + 120000);
+
+    const viewportPadding = expanded
+        ? { top: chromeH, bottom: radii.xl + 56 }
+        : { top: diff / 2 + chromeH, bottom: diff / 2 + radii.xl };
+
+    const sheetBody = (
+        <>
+            {!terminal ? (
+                <View style={[styles.headPanel, showMap ? styles.headPanelSheet : styles.headPanelFlat]}>
+                    {showMap ? <View style={styles.handle} /> : null}
+                    <EtaHead copy={copy} stateKey={status} etaMinutes={etaMinutes} onTime={onTime} isHi={isHi} />
+                    <View style={styles.stepper}>
+                        <DeliveryStepper status={status} isHi={isHi} />
                     </View>
                 </View>
-                <View style={styles.carouselItem}>
-                    <View style={[styles.carouselCard, { backgroundColor: ZEPTO_PURPLE }]}>
-                        <View style={styles.carouselInfo}>
-                            <Text style={styles.carouselBadge}>OFFER</Text>
-                            <Text style={styles.carouselTitle}>Get FREE Delivery on next 5 orders</Text>
-                            <Text style={styles.carouselSubtitle}>Valid for active ShravanKirana Pass members</Text>
-                        </View>
-                    </View>
-                </View>
-            </ScrollView>
-
-            <TouchableOpacity
-                style={styles.viewMapBtn}
-                onPress={() => setShowFullMap(!showFullMap)}
-            >
-                <View style={styles.viewMapContent}>
-                    <View style={styles.viewMapIconBox}>
-                        <MaterialCommunityIcons name="map-marker-distance" size={16} color="white" />
-                        <View style={styles.viewMapCross} />
-                    </View>
-                    <Text style={styles.viewMapText}>VIEW MAP</Text>
-                </View>
-            </TouchableOpacity>
-        </View>
-    );
-
-    if (!shouldShowMap()) {
-        return (
-            <SafeAreaView style={styles.container}>
-                <StatusBar barStyle="dark-content" backgroundColor="white" />
-
-                <View style={styles.header}>
-                    <TouchableOpacity
-                        style={styles.backBtn}
-                        onPress={handleSafeBack}
-                    >
-                        <MaterialCommunityIcons name="chevron-left" size={28} color="#333" />
-                    </TouchableOpacity>
-                    <View style={styles.headerCenter}>
-                        <Text style={styles.headerTitleText}>Order Status</Text>
-                        <Text style={styles.headerSubtitleText}>#{orderId?.slice(-8).toUpperCase() || 'ORDER'}</Text>
-                    </View>
-                    <TouchableOpacity style={styles.getHelpBtn}>
-                        <MaterialCommunityIcons name="chat-question-outline" size={18} color={ZEPTO_PURPLE} />
-                        <Text style={styles.getHelpText}>Get Help</Text>
-                    </TouchableOpacity>
-                </View>
-
-                {renderCarousel()}
-
-                <View style={styles.preDeliveryContainer}>
-                    <PreDeliveryAnimation orderStatus={currentOrder.orderStatus} />
-                </View>
-
+            ) : null}
+            <View style={styles.cards}>
                 <TrackingBottomSheet
                     order={currentOrder}
                     riderLocation={riderLocation}
-                    routeInfo={routeInfo}
-                    connectionStatus={connectionStatus}
+                    activeLeg={legNow}
+                    isHi={isHi}
+                    onHelp={onHelp}
+                    onViewDetails={canonicalId ? () => navigation.navigate('OrderDetails', { orderId: canonicalId }) : undefined}
+                    onShop={() => navigation.navigate('Main', { screen: 'Home' })}
                 />
-            </SafeAreaView>
+            </View>
+        </>
+    );
+
+    if (!showMap) {
+        return (
+            <Screen edges={[]}>
+                <AnimatedScreen>
+                <ContentSwap stateKey="flat" style={styles.flex}>
+                    <View style={[styles.flex, { paddingTop: insets.top }]}>
+                        <TrackingBar orderCode={orderCode} onBack={handleSafeBack} onHelp={onHelp} isHi={isHi} />
+                        <ScrollView
+                            showsVerticalScrollIndicator={false}
+                            contentContainerStyle={{ paddingBottom: insets.bottom + space['3xl'] }}
+                        >
+                            {sheetBody}
+                        </ScrollView>
+                    </View>
+                </ContentSwap>
+                </AnimatedScreen>
+            </Screen>
         );
     }
 
     return (
-        <SafeAreaView style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+        <Screen edges={[]} wash={false}>
+            <AnimatedScreen>
+            <ContentSwap stateKey="map" style={styles.flex}>
+            <View style={styles.body} onLayout={(e) => setBodyH(e.nativeEvent.layout.height)}>
+                <Animated.View style={[styles.mapLayer, { height: expandedH }, mapStyle]}>
+                    <OrderTrackingMap
+                        riderLocation={riderLocation}
+                        customerLocation={customerLocation}
+                        storeLocation={storeLocation}
+                        routeCoordinates={routeCoordinates?.length ? routeCoordinates : (currentOrder?.tracking?.routeCoordinates || [])}
+                        riderHeading={riderHeading}
+                        orderStatus={currentOrder.orderStatus}
+                        activeLeg={legNow}
+                        viewportPadding={viewportPadding}
+                        fitKey={expanded ? 'expanded' : 'collapsed'}
+                    />
+                </Animated.View>
 
-                        <OrderTrackingMap
-                            riderLocation={riderLocation}
-                            customerLocation={getCustomerLocation()}
-                            storeLocation={storeLocation}
-                            routeCoordinates={routeCoordinates?.length ? routeCoordinates : (currentOrder?.tracking?.routeCoordinates || [])}
-                            riderHeading={riderHeading}
-                            orderStatus={currentOrder.orderStatus}
-                            activeLeg={currentOrder?.tracking?.activeLeg || activeLeg}
-                            onMapReady={() => setMapReady(true)}
-                            showFullMap={showFullMap}
-                        />
+                {!expanded ? (
+                    <Pressable
+                        onPress={expand}
+                        style={[styles.mapHit, { top: chromeH, height: mapCollapsed - radii.xl - chromeH }]}
+                        accessibilityRole="button"
+                        accessibilityLabel={isHi ? 'नक्शा बड़ा करें' : 'Expand map'}
+                    >
+                        <Animated.View style={viewMapStyle}>
+                            <View style={styles.viewMap}>
+                                <MaterialCommunityIcons name="arrow-expand" size={15} color={colors.ink} />
+                                <Text variant="label">{isHi ? 'नक्शा देखें' : 'View map'}</Text>
+                            </View>
+                        </Animated.View>
+                    </Pressable>
+                ) : null}
 
-            <Animated.View style={[styles.floatingHeader, { opacity: headerOpacity, top: Math.max(insets.top + 8, Platform.OS === 'ios' ? 60 : 50) }]}>
-                <TouchableOpacity
-                    style={styles.floatingBackBtn}
-                    onPress={handleSafeBack}
-                >
-                    <MaterialCommunityIcons name="chevron-left" size={28} color={COLORS.text} />
-                </TouchableOpacity>
-
-                <View style={styles.floatingHeaderCenter}>
-                    <Text style={styles.floatingHeaderTitle}>Order Status</Text>
-                    <View style={styles.liveIndicator}>
-                        <View style={[
-                            styles.liveDot,
-                            connectionStatus === 'connected' && styles.liveDotOnline,
-                        ]} />
-                        <Text style={[styles.liveText, connectionStatus === 'connected' && { color: ZEPTO_GREEN }]}>
-                            {connectionStatus === 'connected' ? 'LIVE' : 'CONNECTING'}
-                        </Text>
+                {error ? (
+                    <View style={[styles.errorPill, { top: chromeH + space.sm }, { pointerEvents: 'none' }]}>
+                        <MaterialCommunityIcons name="wifi-strength-alert-outline" size={14} color={colors.errorInk} />
+                        <Text variant="caption" color="error" numberOfLines={1}>{error}</Text>
                     </View>
-                </View>
+                ) : null}
 
-                <TouchableOpacity style={styles.getHelpBtnHeader}>
-                    <MaterialCommunityIcons name="chat-question-outline" size={18} color={ZEPTO_PURPLE} />
-                </TouchableOpacity>
-            </Animated.View>
+                <Animated.View
+                    style={[styles.collapseBtn, { top: expandedH - radii.xl - 60 }, collapseBtnStyle, { pointerEvents: expanded ? 'auto' : 'none' }]}
+                >
+                    <Pressable
+                        onPress={collapse}
+                        accessibilityRole="button"
+                        accessibilityLabel={isHi ? 'नक्शा छोटा करें' : 'Collapse map'}
+                    >
+                        <View style={styles.viewMap}>
+                            <MaterialCommunityIcons name="arrow-collapse" size={15} color={colors.ink} />
+                            <Text variant="label">{isHi ? 'विवरण दिखाएँ' : 'Show details'}</Text>
+                        </View>
+                    </Pressable>
+                </Animated.View>
 
-            {error && (
-                <View style={[styles.errorBanner, { top: Math.max(insets.top + 72, 120) }]}>
-                    <MaterialCommunityIcons name="alert-circle" size={16} color="#F44336" />
-                    <Text style={styles.errorText} numberOfLines={1}>{error}</Text>
-                </View>
-            )}
+                <MapChrome
+                    orderCode={orderCode}
+                    live={connectionStatus === 'connected'}
+                    showLive={!terminal}
+                    onBack={onBack}
+                    onHelp={onHelp}
+                    topInset={insets.top}
+                    isHi={isHi}
+                />
 
-                        <TrackingBottomSheet
-                            order={currentOrder}
-                            riderLocation={riderLocation}
-                            routeInfo={routeInfo}
-                            connectionStatus={connectionStatus}
-                            activeLeg={currentOrder?.tracking?.activeLeg || activeLeg}
-                        />
-        </SafeAreaView>
-    );
-};
-
-const PreDeliveryAnimation = ({ orderStatus }) => {
-    const pulseAnim = useRef(new Animated.Value(1)).current;
-    const rotateAnim = useRef(new Animated.Value(0)).current;
-
-    useEffect(() => {
-        Animated.loop(
-            Animated.sequence([
-                Animated.timing(pulseAnim, {
-                    toValue: 1.15,
-                    duration: 1200,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(pulseAnim, {
-                    toValue: 1,
-                    duration: 1200,
-                    useNativeDriver: true,
-                }),
-            ])
-        ).start();
-
-        Animated.loop(
-            Animated.timing(rotateAnim, {
-                toValue: 1,
-                duration: 8000,
-                useNativeDriver: true,
-            })
-        ).start();
-    }, []);
-
-    const spin = rotateAnim.interpolate({
-        inputRange: [0, 1],
-        outputRange: ['0deg', '360deg'],
-    });
-
-    const getStatusConfig = () => {
-        switch (orderStatus) {
-            case 'PENDING':
-                return {
-                    icon: 'clock-outline',
-                    title: 'Order Placed!',
-                    subtitle: 'Waiting for store confirmation',
-                    color: ZEPTO_PURPLE,
-                    bgColor: 'rgba(124, 58, 237, 0.08)',
-                };
-            case 'CONFIRMED':
-                return {
-                    icon: 'store',
-                    title: 'Order Confirmed',
-                    subtitle: 'Store is preparing your items',
-                    color: '#FF9800',
-                    bgColor: '#FFF3E0',
-                };
-            case 'PACKED':
-                return {
-                    icon: 'package-variant-closed',
-                    title: 'Order Packed!',
-                    subtitle: 'Looking for a delivery partner',
-                    color: ZEPTO_GREEN,
-                    bgColor: 'rgba(16, 185, 129, 0.08)',
-                };
-            default:
-                return {
-                    icon: 'clock-outline',
-                    title: 'Processing',
-                    subtitle: 'Please wait...',
-                    color: '#666',
-                    bgColor: '#F5F5F5',
-                };
-        }
-    };
-
-    const config = getStatusConfig();
-
-    return (
-        <View style={styles.preDeliveryContent}>
-            <Animated.View
-                style={[
-                    styles.animatedRing,
-                    { borderColor: config.color + '30', transform: [{ rotate: spin }] },
-                ]}
-            />
-
-            <Animated.View
-                style={[
-                    styles.preDeliveryIcon,
-                    { backgroundColor: config.bgColor, transform: [{ scale: pulseAnim }] },
-                ]}
-            >
-                <MaterialCommunityIcons name={config.icon} size={48} color={config.color} />
-            </Animated.View>
-
-            <Text style={[styles.preDeliveryTitle, { color: config.color }]}>
-                {config.title}
-            </Text>
-            <Text style={styles.preDeliverySubtitle}>
-                {config.subtitle}
-            </Text>
-
-            <View style={styles.dotsContainer}>
-                {[0, 1, 2].map((i) => (
-                    <DotAnimation key={i} delay={i * 300} color={config.color} />
-                ))}
+                {/* Shadow on the outer layer, rounded clipping on the inner one: iOS drops the shadow of a view with overflow hidden. */}
+                <Animated.View style={[styles.sheet, { top: mapCollapsed - radii.xl }, sheetStyle]}>
+                    <View style={styles.sheetClip}>
+                        <ScrollView
+                            scrollEnabled={!expanded}
+                            showsVerticalScrollIndicator={false}
+                            contentContainerStyle={{ paddingBottom: insets.bottom + space['3xl'] }}
+                        >
+                            {sheetBody}
+                        </ScrollView>
+                        {expanded ? (
+                            <Pressable
+                                style={StyleSheet.absoluteFill}
+                                onPress={collapse}
+                                accessibilityRole="button"
+                                accessibilityLabel={isHi ? 'ऑर्डर विवरण दिखाएँ' : 'Show order details'}
+                            />
+                        ) : null}
+                    </View>
+                </Animated.View>
             </View>
-        </View>
+            </ContentSwap>
+            </AnimatedScreen>
+        </Screen>
     );
 };
 
-const DotAnimation = ({ delay, color }) => {
-    const anim = useRef(new Animated.Value(0)).current;
-
-    useEffect(() => {
-        const timeout = setTimeout(() => {
-            Animated.loop(
-                Animated.sequence([
-                    Animated.timing(anim, {
-                        toValue: 1,
-                        duration: 400,
-                        useNativeDriver: true,
-                    }),
-                    Animated.timing(anim, {
-                        toValue: 0,
-                        duration: 400,
-                        useNativeDriver: true,
-                    }),
-                    Animated.delay(200),
-                ])
-            ).start();
-        }, delay);
-
-        return () => clearTimeout(timeout);
-    }, []);
-
-    return (
-        <Animated.View
-            style={[
-                styles.dot,
-                {
-                    backgroundColor: color,
-                    opacity: anim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [0.3, 1],
-                    }),
-                    transform: [
-                        {
-                            translateY: anim.interpolate({
-                                inputRange: [0, 1],
-                                outputRange: [0, -8],
-                            }),
-                        },
-                    ],
-                },
-            ]}
-        />
-    );
-};
-
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#F5F5F5',
-    },
-
-    loadingContainer: {
-        flex: 1,
-        backgroundColor: COLORS.white,
-    },
-    loadingContent: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    loadingIconContainer: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        backgroundColor: 'rgba(124, 58, 237, 0.08)',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 20,
-    },
-    loadingTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: COLORS.text,
-        marginTop: 8,
-    },
-    loadingSubtitle: {
-        fontSize: 14,
-        color: COLORS.textSecondary,
-        marginTop: 4,
-    },
-
-    header: {
+const useStyles = makeStyles((t) => ({
+    flex: { flex: 1 },
+    body: { flex: 1, overflow: 'hidden', backgroundColor: t.colors.canvas },
+    mapLayer: { position: 'absolute', top: 0, left: 0, right: 0 },
+    mapHit: { position: 'absolute', left: 0, right: 0, justifyContent: 'flex-end', alignItems: 'flex-end', padding: space.md },
+    viewMap: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: COLORS.white,
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        paddingTop: Platform.OS === 'ios' ? 50 : 12,
-        borderBottomWidth: 1,
-        borderBottomColor: '#F0F0F0',
+        gap: space.xs + 2,
+        minHeight: 40,
+        paddingHorizontal: space.md,
+        borderRadius: radii.button,
+        borderWidth: 1,
+        borderColor: t.colors.hairline,
+        backgroundColor: t.colors.surfaceRaised,
+        ...t.shadows.floating, // a map control floating over the map
     },
-    backBtn: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+    errorPill: {
+        position: 'absolute',
+        left: space.lg,
+        maxWidth: '90%',
+        flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#F5F5F5',
+        gap: space.xs,
+        paddingHorizontal: space.md,
+        paddingVertical: space.xs,
+        borderRadius: radii.chip,
+        backgroundColor: t.colors.errorTint,
     },
-    headerCenter: {
+    collapseBtn: { position: 'absolute', right: space.md },
+    sheet: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: t.colors.canvas,
+        borderTopLeftRadius: radii.xl,
+        borderTopRightRadius: radii.xl,
+        ...t.shadows.floating,
+    },
+    sheetClip: {
         flex: 1,
-        marginLeft: 12,
-    },
-    headerTitleText: {
-        fontSize: 16,
-        fontWeight: '800',
-        color: '#1F1F1F',
-    },
-    headerSubtitleText: {
-        fontSize: 12,
-        color: '#888',
-        fontWeight: '600',
-        marginTop: 1,
-    },
-    getHelpBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(124, 58, 237, 0.04)',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 12,
-        gap: 4,
-    },
-    getHelpText: {
-        fontSize: 12,
-        fontWeight: '700',
-        color: ZEPTO_PURPLE,
-    },
-    getHelpBtnHeader: {
-        width: 40,
-        height: 40,
-        borderRadius: 12,
-        backgroundColor: '#F5F5F5',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-
-    carouselContainer: {
-        paddingVertical: 16,
-        backgroundColor: COLORS.white,
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    carouselScroll: {
-        flex: 1,
-    },
-    carouselItem: {
-        width: SCREEN_WIDTH - 120,
-        marginLeft: 16,
-    },
-    carouselCard: {
-        borderRadius: 20,
-        padding: 16,
-        height: 120,
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-    },
-    carouselInfo: {
-        flex: 1,
-        justifyContent: 'center',
-        gap: 4,
-    },
-    carouselBadge: {
-        fontSize: 9,
-        fontWeight: '900',
-        color: 'rgba(255,255,255,0.6)',
-        letterSpacing: 0.5,
-    },
-    carouselTitle: {
-        fontSize: 14,
-        fontWeight: '800',
-        color: 'white',
-        lineHeight: 18,
-    },
-    carouselSubtitle: {
-        fontSize: 10,
-        color: 'rgba(255,255,255,0.7)',
-        fontWeight: '600',
-    },
-    applyBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'white',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 8,
-        alignSelf: 'flex-start',
-        marginTop: 4,
-        gap: 2,
-    },
-    applyBtnText: {
-        fontSize: 9,
-        fontWeight: '900',
-        color: ZEPTO_PURPLE,
-    },
-    carouselImagePlaceholder: {
-        width: 40,
-        alignItems: 'flex-end',
-    },
-    viewMapBtn: {
-        marginHorizontal: 16,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    viewMapContent: {
-        alignItems: 'center',
-        gap: 4,
-    },
-    viewMapIconBox: {
-        width: 64,
-        height: 64,
-        borderRadius: 16,
-        backgroundColor: '#E5E7EB',
-        alignItems: 'center',
-        justifyContent: 'center',
+        borderTopLeftRadius: radii.xl,
+        borderTopRightRadius: radii.xl,
         overflow: 'hidden',
     },
-    viewMapCross: {
-        position: 'absolute',
-        width: 20,
-        height: 20,
-        // Small map icon overlay
+    headPanel: {
+        backgroundColor: t.colors.surface,
+        paddingHorizontal: space.xl,
+        paddingBottom: space.xl,
+        borderBottomWidth: 1,
+        borderBottomColor: t.colors.hairline,
     },
-    viewMapText: {
-        fontSize: 9,
-        fontWeight: '900',
-        color: '#6B7280',
-    },
-
-    floatingHeader: {
-        position: 'absolute',
-        top: Platform.OS === 'ios' ? 60 : (Platform.OS === 'web' ? 16 : 50),
-        left: 16,
-        right: 16,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        backgroundColor: 'rgba(255, 255, 255, 0.95)',
-        borderRadius: 20,
-        paddingHorizontal: 8,
-        paddingVertical: 8,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.1,
-        shadowRadius: 12,
-        elevation: 10,
-        zIndex: 999,
-        borderWidth: 1,
-        borderColor: '#F0F0F0',
-    },
-    floatingBackBtn: {
+    headPanelSheet: { paddingTop: space.sm, borderTopLeftRadius: radii.xl, borderTopRightRadius: radii.xl },
+    headPanelFlat: { paddingTop: space.lg, marginHorizontal: space.lg, borderRadius: radii.card, borderWidth: 1, borderColor: t.colors.hairline },
+    handle: {
+        alignSelf: 'center',
         width: 40,
-        height: 40,
-        borderRadius: 12,
-        backgroundColor: '#F5F5F5',
-        alignItems: 'center',
-        justifyContent: 'center',
+        height: 5,
+        borderRadius: radii.pill,
+        backgroundColor: t.colors.border,
+        marginBottom: space.md,
     },
-    floatingHeaderCenter: {
-        flex: 1,
-        alignItems: 'center',
-        gap: 2,
-    },
-    floatingHeaderTitle: {
-        fontSize: 15,
-        fontWeight: '800',
-        color: COLORS.text,
-    },
-    liveIndicator: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#F8F8F8',
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: 8,
-        gap: 4,
-    },
-    liveDot: {
-        width: 6,
-        height: 6,
-        borderRadius: 3,
-        backgroundColor: '#AAA',
-    },
-    liveDotOnline: {
-        backgroundColor: ZEPTO_GREEN,
-    },
-    liveText: {
-        fontSize: 9,
-        fontWeight: '900',
-        color: '#888',
-        letterSpacing: 0.5,
-    },
-
-    errorBanner: {
-        position: 'absolute',
-        top: 120,
-        left: 16,
-        right: 16,
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#FFEBEE',
-        padding: 10,
-        borderRadius: 12,
-        gap: 8,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 4,
-    },
-    errorText: {
-        flex: 1,
-        fontSize: 12,
-        color: '#F44336',
-        fontWeight: '500',
-    },
-
-    preDeliveryContainer: {
-        flex: 1,
-        backgroundColor: COLORS.white,
-    },
-    preDeliveryContent: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingBottom: 200,
-    },
-    animatedRing: {
-        position: 'absolute',
-        width: 160,
-        height: 160,
-        borderRadius: 80,
-        borderWidth: 3,
-        borderStyle: 'dashed',
-    },
-    preDeliveryIcon: {
-        width: 100,
-        height: 100,
-        borderRadius: 50,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 20,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.08,
-        shadowRadius: 10,
-        elevation: 6,
-    },
-    preDeliveryTitle: {
-        fontSize: 22,
-        fontWeight: '800',
-    },
-    preDeliverySubtitle: {
-        fontSize: 14,
-        color: '#999',
-        marginTop: 6,
-        fontWeight: '500',
-    },
-    dotsContainer: {
-        flexDirection: 'row',
-        gap: 6,
-        marginTop: 20,
-    },
-    dot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-    },
-});
+    stepper: { marginTop: space.xl },
+    cards: { paddingHorizontal: space.lg, paddingTop: space.lg },
+}));
 
 export default OrderTrackingScreen;

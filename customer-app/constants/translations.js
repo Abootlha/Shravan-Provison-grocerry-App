@@ -178,6 +178,44 @@ export const translations = {
         pieces: 'pcs',
         dozen: 'dozen',
         pack: 'pack',
+
+        // Home feed (curated sections). {n}, {p}, {eta} are filled in at render time.
+        homeFeed: {
+            items: '{n} items',
+            itemOne: '1 item',
+            eyebrow: {
+                morning: 'Good morning',
+                afternoon: 'Good afternoon',
+                evening: 'Good evening',
+                late: 'Up late?',
+            },
+            moment: {
+                breakfast: { lead: 'Breakfast in', emphasis: '{eta} mins' },
+                snack: { lead: 'Snack', emphasis: "o'clock" },
+                dinner: { lead: "Tonight's", emphasis: 'dinner', trail: 'basics' },
+                lateNight: { lead: 'Midnight', emphasis: 'cravings' },
+            },
+            momentCount: '{n} picks for right now',
+            buyAgain: { lead: 'Buy', emphasis: 'again', subtitle: 'From your past orders' },
+            priceStore: { lead: 'Shop by', emphasis: 'price', under: 'Under ₹{p}', filterLabel: 'Filter by price' },
+            fresh: {
+                lead: 'Fresh',
+                emphasis: 'produce',
+                subtitle: '{n} fruits & vegetables in stock',
+                chilled: 'Keep chilled',
+                shelf: 'Best within {n} days',
+                shelfOne: 'Best within a day',
+            },
+            deals: { lead: 'Top', emphasis: 'deals', subtitle: 'Up to {n}% off right now' },
+            season: {
+                festive: { eyebrow: 'Festive season', lead: 'Festive', emphasis: 'pantry', subtitle: '{n} essentials for the festive kitchen' },
+                winter: { eyebrow: 'Winter', lead: 'Winter', emphasis: 'warmers', subtitle: '{n} picks for chilly mornings' },
+                summer: { eyebrow: 'Summer', lead: 'Summer', emphasis: 'coolers', subtitle: '{n} picks to beat the heat' },
+                monsoon: { eyebrow: 'Monsoon', lead: 'Monsoon', emphasis: 'munchies', subtitle: '{n} picks for chai and rainy evenings' },
+                staples: { eyebrow: 'Every day', lead: 'Pantry', emphasis: 'staples', subtitle: '{n} kitchen essentials' },
+            },
+            seeAll: 'See all',
+        },
     },
     
     hi: {
@@ -358,6 +396,44 @@ export const translations = {
         pieces: 'पीस',
         dozen: 'दर्जन',
         pack: 'पैक',
+
+        // होम फ़ीड (चुने हुए सेक्शन)
+        homeFeed: {
+            items: '{n} आइटम',
+            itemOne: '1 आइटम',
+            eyebrow: {
+                morning: 'सुप्रभात',
+                afternoon: 'नमस्ते',
+                evening: 'शुभ संध्या',
+                late: 'देर रात तक जाग रहे हैं?',
+            },
+            moment: {
+                breakfast: { lead: 'नाश्ता', emphasis: '{eta} मिनट', trail: 'में' },
+                snack: { lead: 'स्नैक', emphasis: 'टाइम' },
+                dinner: { lead: 'आज रात के', emphasis: 'खाने', trail: 'का सामान' },
+                lateNight: { lead: 'आधी रात की', emphasis: 'भूख' },
+            },
+            momentCount: 'इस वक़्त के लिए {n} चीज़ें',
+            buyAgain: { lead: 'फिर से', emphasis: 'खरीदें', subtitle: 'आपके पिछले ऑर्डर से' },
+            priceStore: { lead: 'कीमत से', emphasis: 'खरीदें', under: '₹{p} से कम', filterLabel: 'कीमत से फ़िल्टर करें' },
+            fresh: {
+                lead: 'ताज़े',
+                emphasis: 'फल-सब्ज़ियाँ',
+                subtitle: '{n} फल और सब्ज़ियाँ स्टॉक में',
+                chilled: 'ठंडा रखें',
+                shelf: '{n} दिन में इस्तेमाल करें',
+                shelfOne: 'एक दिन में इस्तेमाल करें',
+            },
+            deals: { lead: 'आज की', emphasis: 'टॉप डील्स', subtitle: 'अभी {n}% तक की छूट' },
+            season: {
+                festive: { eyebrow: 'त्योहार का मौसम', lead: 'त्योहार की', emphasis: 'रसोई', subtitle: 'त्योहार की रसोई के लिए {n} चीज़ें' },
+                winter: { eyebrow: 'सर्दी', lead: 'सर्दी की', emphasis: 'गर्माहट', subtitle: 'ठंडी सुबह के लिए {n} चीज़ें' },
+                summer: { eyebrow: 'गर्मी', lead: 'गर्मी में', emphasis: 'ठंडक', subtitle: 'गर्मी से राहत की {n} चीज़ें' },
+                monsoon: { eyebrow: 'बारिश', lead: 'बारिश के', emphasis: 'स्नैक्स', subtitle: 'चाय और बारिश के लिए {n} चीज़ें' },
+                staples: { eyebrow: 'हर दिन', lead: 'रसोई की', emphasis: 'ज़रूरतें', subtitle: 'रसोई की {n} ज़रूरी चीज़ें' },
+            },
+            seeAll: 'सभी देखें',
+        },
     },
 };
 

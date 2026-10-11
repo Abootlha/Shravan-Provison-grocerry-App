@@ -1,69 +1,77 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Platform, Animated as RNAnimated, TouchableOpacity } from 'react-native';
+/**
+ * OrderTrackingMap (native) — react-native-maps live tracking map.
+ *
+ * Props
+ *   riderLocation, customerLocation, storeLocation   { latitude, longitude } | null
+ *   routeCoordinates   [{ latitude, longitude }]
+ *   riderHeading       degrees (0 = north)
+ *   orderStatus        order status string
+ *   onMapReady         () => void
+ *   viewportPadding    { top, bottom } — px of the map hidden behind other UI; fitting keeps markers clear of it
+ *   fitKey             any value; when it changes the camera re-fits all markers (map expanded/collapsed)
+ *
+ * The rider glides between socket fixes over the real update interval (constant motion, no
+ * stop-and-go) and the marker rotates through the shortest angle. The camera only re-fits on
+ * meaningful changes (status, first fix, expand/collapse), not on every animation frame.
+ *
+ * Theme: the basemap follows the scheme (OrderTrackingMapStyle — a custom JSON style on Android /
+ * Google, `userInterfaceStyle` on iOS Apple Maps). Route, pins and rider take theme colours.
+ */
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { View, StyleSheet } from 'react-native';
+import { makeStyles, useTheme } from '../theme';
+import { trackingMapStyle } from './OrderTrackingMapStyle';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { COLORS } from '../constants';
+import { radii } from '../constants/theme';
 import { snapPointToRoute } from '../services/directionsService';
+import { NATIVE_MAPS_AVAILABLE } from './mapTheme';
 
-let MapView, Marker, Polyline;
+let MapView;
+let Marker;
+let Polyline;
 let mapsAvailable = false;
-
 try {
     const maps = require('react-native-maps');
     MapView = maps.default;
     Marker = maps.Marker;
     Polyline = maps.Polyline;
-    mapsAvailable = true;
+    mapsAvailable = NATIVE_MAPS_AVAILABLE;
 } catch (e) {
     mapsAvailable = false;
 }
 
-const ZEPTO_PURPLE = '#7C3AED';
-const ZEPTO_GREEN = '#10B981';
-const normalizeHeadingDelta = (delta) => {
-    if (delta > 180) return delta - 360;
-    if (delta < -180) return delta + 360;
-    return delta;
+const valid = (p) => p && Number.isFinite(p.latitude) && Number.isFinite(p.longitude) && (p.latitude !== 0 || p.longitude !== 0);
+
+const straightPath = (start, end, points = 24) => {
+    if (!start || !end) return [];
+    return Array.from({ length: points + 1 }, (_, i) => ({
+        latitude: start.latitude + ((end.latitude - start.latitude) * i) / points,
+        longitude: start.longitude + ((end.longitude - start.longitude) * i) / points,
+    }));
 };
 
-const RiderMarkerView = () => (
-    <View style={styles.riderMarkerContainer}>
-        <View style={styles.scooterIconBox}>
-            <MaterialCommunityIcons name="moped" size={20} color="white" />
+const Pin = ({ bg, fg, icon }) => {
+    const styles = useStyles();
+    return (
+    <View style={styles.pinWrap}>
+        <View style={[styles.pin, { backgroundColor: bg }]}>
+            <MaterialCommunityIcons name={icon} size={18} color={fg} />
         </View>
-        <View style={styles.scooterPointer} />
+        <View style={[styles.pinTail, { backgroundColor: bg }]} />
     </View>
-);
+    );
+};
 
-const StoreMarkerView = () => (
-    <View style={styles.storeMarkerContainer}>
-        <View style={styles.storePin}>
-            <MaterialCommunityIcons name="storefront" size={16} color="white" />
+const RiderDot = () => {
+    const styles = useStyles();
+    const { colors } = useTheme();
+    return (
+    <View style={styles.riderWrap}>
+        <View style={styles.rider}>
+            <MaterialCommunityIcons name="navigation" size={16} color={colors.onBrand} />
         </View>
-        <View style={styles.storePinTail} />
     </View>
-);
-
-const CustomerMarkerView = () => (
-    <View style={styles.customerMarkerContainer}>
-        <View style={styles.customerPin}>
-            <MaterialCommunityIcons name="home-variant" size={16} color="white" />
-        </View>
-        <View style={styles.customerPinTail} />
-    </View>
-);
-
-const createStaticOrderPath = (start, end, points = 24) => {
-    if (!start || !end) return [];
-
-    const coordinates = [];
-    for (let i = 0; i <= points; i++) {
-        const fraction = i / points;
-        coordinates.push({
-            latitude: start.latitude + (end.latitude - start.latitude) * fraction,
-            longitude: start.longitude + (end.longitude - start.longitude) * fraction,
-        });
-    }
-    return coordinates;
+    );
 };
 
 const OrderTrackingMap = ({
@@ -73,191 +81,100 @@ const OrderTrackingMap = ({
     routeCoordinates = [],
     riderHeading = 0,
     orderStatus,
-    activeLeg,
     onMapReady,
-    showFullMap,
+    viewportPadding,
+    fitKey,
 }) => {
+    const styles = useStyles();
+    const { colors, isDark } = useTheme();
     const mapRef = useRef(null);
     const [isMapReady, setIsMapReady] = useState(false);
-    const [displayRiderLocation, setDisplayRiderLocation] = useState(riderLocation || null);
-    const [displayHeading, setDisplayHeading] = useState(riderHeading || 0);
-    const animationFrameRef = useRef(null);
-    const headingAnimationFrameRef = useRef(null);
+    const [rider, setRider] = useState(null);
+    const riderRef = useRef(null);
+    const lastFixAt = useRef(0);
+    const frame = useRef(null);
+    const [heading, setHeading] = useState(Number.isFinite(riderHeading) ? riderHeading : 0);
 
+    // Glide the rider between fixes (linear over the measured interval).
     useEffect(() => {
-        if (!riderLocation) {
-            setDisplayRiderLocation(null);
-            return;
+        if (!valid(riderLocation)) {
+            riderRef.current = null;
+            setRider(null);
+            return undefined;
         }
-
-        const snapped = routeCoordinates.length > 1
-            ? snapPointToRoute(riderLocation, routeCoordinates, 90).point
-            : riderLocation;
-
-        if (!displayRiderLocation) {
-            setDisplayRiderLocation(snapped);
-            return;
+        const target = routeCoordinates.length > 1 ? snapPointToRoute(riderLocation, routeCoordinates, 90).point : riderLocation;
+        const from = riderRef.current;
+        const now = Date.now();
+        const duration = Math.min(Math.max(now - lastFixAt.current, 500), 2500);
+        lastFixAt.current = now;
+        if (!from) {
+            riderRef.current = target;
+            setRider(target);
+            return undefined;
         }
-
-        const start = displayRiderLocation;
-        const end = snapped;
-        const duration = 900;
-        const startedAt = Date.now();
-
-        if (animationFrameRef.current) {
-            cancelAnimationFrame(animationFrameRef.current);
-        }
-
-        const animate = () => {
-            const elapsed = Date.now() - startedAt;
-            const progress = Math.min(1, elapsed / duration);
-            const eased = 1 - Math.pow(1 - progress, 3);
-
-            setDisplayRiderLocation({
-                latitude: start.latitude + (end.latitude - start.latitude) * eased,
-                longitude: start.longitude + (end.longitude - start.longitude) * eased,
-            });
-
-            if (progress < 1) {
-                animationFrameRef.current = requestAnimationFrame(animate);
-            }
+        const startedAt = now;
+        if (frame.current) cancelAnimationFrame(frame.current);
+        const step = () => {
+            const p = Math.min(1, (Date.now() - startedAt) / duration);
+            const next = {
+                latitude: from.latitude + (target.latitude - from.latitude) * p,
+                longitude: from.longitude + (target.longitude - from.longitude) * p,
+            };
+            riderRef.current = next;
+            setRider(next);
+            if (p < 1) frame.current = requestAnimationFrame(step);
         };
-
-        animationFrameRef.current = requestAnimationFrame(animate);
-
-        return () => {
-            if (animationFrameRef.current) {
-                cancelAnimationFrame(animationFrameRef.current);
-            }
-        };
+        frame.current = requestAnimationFrame(step);
+        return () => frame.current && cancelAnimationFrame(frame.current);
     }, [riderLocation?.latitude, riderLocation?.longitude, routeCoordinates]);
 
+    // Shortest-angle heading (marker rotation is applied natively).
     useEffect(() => {
-        const nextHeading = Number.isFinite(riderHeading) ? riderHeading : 0;
-
-        if (!Number.isFinite(displayHeading)) {
-            setDisplayHeading(nextHeading);
-            return;
-        }
-
-        const startHeading = displayHeading;
-        const delta = normalizeHeadingDelta(nextHeading - startHeading);
-        const duration = 500;
-        const startedAt = Date.now();
-
-        if (headingAnimationFrameRef.current) {
-            cancelAnimationFrame(headingAnimationFrameRef.current);
-        }
-
-        const animateHeading = () => {
-            const elapsed = Date.now() - startedAt;
-            const progress = Math.min(1, elapsed / duration);
-            const eased = 1 - Math.pow(1 - progress, 3);
-            const interpolated = startHeading + delta * eased;
-            const normalized = ((interpolated % 360) + 360) % 360;
-
-            setDisplayHeading(normalized);
-
-            if (progress < 1) {
-                headingAnimationFrameRef.current = requestAnimationFrame(animateHeading);
-            }
-        };
-
-        headingAnimationFrameRef.current = requestAnimationFrame(animateHeading);
-
-        return () => {
-            if (headingAnimationFrameRef.current) {
-                cancelAnimationFrame(headingAnimationFrameRef.current);
-            }
-        };
+        if (!Number.isFinite(riderHeading)) return;
+        setHeading((current) => current + ((((riderHeading - current) % 360) + 540) % 360) - 180);
     }, [riderHeading]);
 
+    const hasRider = Boolean(rider);
     useEffect(() => {
         if (!isMapReady || !mapRef.current) return;
-
-        const coordinates = [];
-        if (displayRiderLocation && displayRiderLocation.latitude !== 0 && displayRiderLocation.longitude !== 0) coordinates.push(displayRiderLocation);
-        if (customerLocation && customerLocation.latitude !== 0 && customerLocation.longitude !== 0) coordinates.push(customerLocation);
-        if (storeLocation && storeLocation.latitude !== 0 && storeLocation.longitude !== 0) coordinates.push(storeLocation);
-
-        if (showFullMap && coordinates.length >= 2) {
-            mapRef.current.fitToCoordinates(coordinates, {
-                edgePadding: { top: 56, right: 32, bottom: 160, left: 32 },
-                animated: true,
-            });
-        } else if (displayRiderLocation) {
-            mapRef.current.animateToRegion({
-                ...displayRiderLocation,
-                latitudeDelta: 0.0035,
-                longitudeDelta: 0.0035,
-            }, 1000);
-        } else if (coordinates.length >= 2) {
-            mapRef.current.fitToCoordinates(coordinates, {
-                edgePadding: { top: 56, right: 32, bottom: 160, left: 32 },
-                animated: true,
-            });
+        const coords = [rider, customerLocation, storeLocation].filter(valid);
+        const edgePadding = {
+            top: (viewportPadding?.top || 0) + 48,
+            bottom: (viewportPadding?.bottom || 0) + 48,
+            left: 48,
+            right: 48,
+        };
+        if (coords.length >= 2) {
+            mapRef.current.fitToCoordinates(coords, { edgePadding, animated: true });
+        } else if (coords.length === 1) {
+            mapRef.current.animateToRegion({ ...coords[0], latitudeDelta: 0.008, longitudeDelta: 0.008 }, 600);
         }
-    }, [
-        isMapReady,
-        showFullMap,
-        orderStatus,
-        displayRiderLocation?.latitude,
-        displayRiderLocation?.longitude,
-        customerLocation?.latitude,
-        customerLocation?.longitude,
-        storeLocation?.latitude,
-        storeLocation?.longitude,
-    ]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isMapReady, fitKey, orderStatus, hasRider, customerLocation?.latitude, storeLocation?.latitude, viewportPadding?.top, viewportPadding?.bottom]);
 
-    const handleMapReady = () => {
-        setIsMapReady(true);
-        onMapReady?.();
-    };
-
-    const initialRegion = customerLocation
-        ? {
-            latitude: customerLocation.latitude,
-            longitude: customerLocation.longitude,
-            latitudeDelta: 0.006,
-            longitudeDelta: 0.006,
-        }
-        : {
-            latitude: 26.7606,
-            longitude: 83.3732,
+    const initialRegion = useMemo(
+        () => ({
+            latitude: customerLocation?.latitude ?? 26.7606,
+            longitude: customerLocation?.longitude ?? 83.3732,
             latitudeDelta: 0.01,
             longitudeDelta: 0.01,
-        };
-
-    const mapStyle = [
-        { elementType: 'geometry', stylers: [{ color: '#f5f5f5' }] },
-        { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
-        { elementType: 'labels.text.fill', stylers: [{ color: '#616161' }] },
-        { elementType: 'labels.text.stroke', stylers: [{ color: '#f5f5f5' }] },
-        { featureType: 'administrative.land_parcel', elementType: 'labels.text.fill', stylers: [{ color: '#bdbdbd' }] },
-        { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#eeeeee' }] },
-        { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#757575' }] },
-        { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#e5e5e5' }] },
-        { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#9e9e9e' }] },
-        { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
-        { featureType: 'road.arterial', elementType: 'labels.text.fill', stylers: [{ color: '#757575' }] },
-        { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#dadada' }] },
-        { featureType: 'road.highway', elementType: 'labels.text.fill', stylers: [{ color: '#616161' }] },
-        { featureType: 'road.local', elementType: 'labels.text.fill', stylers: [{ color: '#9e9e9e' }] },
-        { featureType: 'transit.line', elementType: 'geometry', stylers: [{ color: '#e5e5e5' }] },
-        { featureType: 'transit.station', elementType: 'geometry', stylers: [{ color: '#eeeeee' }] },
-        { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#c9c9c9' }] },
-        { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#9e9e9e' }] },
-    ];
+        }),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        []
+    );
 
     if (!mapsAvailable) return <View style={styles.container} />;
+
+    const showPlannedPath = routeCoordinates.length === 0 && ['PENDING', 'CONFIRMED'].includes(orderStatus) && valid(storeLocation) && valid(customerLocation);
 
     return (
         <View style={styles.container}>
             <MapView
                 ref={mapRef}
-                style={styles.map}
+                style={StyleSheet.absoluteFill}
                 initialRegion={initialRegion}
-                customMapStyle={mapStyle}
+                customMapStyle={trackingMapStyle(isDark)}
+                userInterfaceStyle={isDark ? 'dark' : 'light'}
                 showsUserLocation={false}
                 showsMyLocationButton={false}
                 showsCompass={false}
@@ -265,170 +182,73 @@ const OrderTrackingMap = ({
                 showsTraffic={false}
                 showsIndoors={false}
                 showsPointsOfInterest={false}
-                mapPadding={{ top: 0, right: 0, bottom: 300, left: 0 }}
-                onMapReady={handleMapReady}
+                toolbarEnabled={false}
+                onMapReady={() => {
+                    setIsMapReady(true);
+                    onMapReady?.();
+                }}
             >
-                {routeCoordinates.length === 0 && ['PENDING', 'CONFIRMED'].includes(orderStatus) && storeLocation && customerLocation && (
+                {showPlannedPath && (
                     <Polyline
-                        coordinates={createStaticOrderPath(storeLocation, customerLocation)}
-                        strokeColor="#9CA3AF"
+                        coordinates={straightPath(storeLocation, customerLocation)}
+                        strokeColor={colors.inkMuted}
                         strokeWidth={3}
-                        lineDashPattern={[8, 6]}
+                        lineDashPattern={[2, 8]}
                         lineCap="round"
                     />
                 )}
-
                 {routeCoordinates.length > 1 && (
-                    <Polyline
-                        coordinates={routeCoordinates}
-                        strokeColor={ZEPTO_PURPLE}
-                        strokeWidth={4}
-                        lineDashPattern={[0]}
-                        lineCap="round"
-                    />
+                    <>
+                        <Polyline coordinates={routeCoordinates} strokeColor={colors.surface} strokeWidth={9} lineCap="round" lineJoin="round" />
+                        <Polyline coordinates={routeCoordinates} strokeColor={colors.brandText} strokeWidth={5} lineCap="round" lineJoin="round" />
+                    </>
                 )}
-
-                {storeLocation && (
+                {valid(storeLocation) && (
                     <Marker coordinate={storeLocation} anchor={{ x: 0.5, y: 1 }}>
-                        <StoreMarkerView />
+                        <Pin bg={colors.brand} fg={colors.onBrand} icon="storefront" />
                     </Marker>
                 )}
-
-                {customerLocation && (
+                {valid(customerLocation) && (
                     <Marker coordinate={customerLocation} anchor={{ x: 0.5, y: 1 }}>
-                        <CustomerMarkerView />
+                        <Pin bg={colors.surfaceInverse} fg={colors.inkInverse} icon="home-variant" />
                     </Marker>
                 )}
-
-                {displayRiderLocation && (
-                    <Marker
-                        coordinate={displayRiderLocation}
-                        anchor={{ x: 0.5, y: 0.5 }}
-                        rotation={displayHeading}
-                        flat={true}
-                    >
-                        <RiderMarkerView />
+                {rider && (
+                    <Marker coordinate={rider} anchor={{ x: 0.5, y: 0.5 }} rotation={heading} flat>
+                        <RiderDot />
                     </Marker>
                 )}
             </MapView>
-
-            <TouchableOpacity
-                style={styles.fitButton}
-                onPress={() => {
-                    const coords = [];
-                    if (displayRiderLocation) coords.push(displayRiderLocation);
-                    if (customerLocation) coords.push(customerLocation);
-                    if (storeLocation) coords.push(storeLocation);
-                    mapRef.current?.fitToCoordinates(coords, {
-                        edgePadding: { top: 56, right: 32, bottom: 160, left: 32 },
-                        animated: true,
-                    });
-                }}
-            >
-                <MaterialCommunityIcons name="arrow-expand-all" size={24} color="#333" />
-            </TouchableOpacity>
         </View>
     );
 };
 
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#F5F5F5',
-    },
-    map: {
-        ...StyleSheet.absoluteFillObject,
-    },
-    fitButton: {
-        position: 'absolute',
-        right: 16,
-        bottom: 320,
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: 'white',
-        alignItems: 'center',
-        justifyContent: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.2,
-        shadowRadius: 4,
-        elevation: 5,
-    },
-
-    // Rider Marker
-    riderMarkerContainer: {
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    scooterIconBox: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: ZEPTO_PURPLE,
-        alignItems: 'center',
-        justifyContent: 'center',
+const useStyles = makeStyles((t) => ({
+    container: { flex: 1, backgroundColor: t.colors.surfaceSunken },
+    pinWrap: { alignItems: 'center', width: 40, height: 48 },
+    pin: {
+        width: 36,
+        height: 36,
+        borderRadius: radii.pill,
         borderWidth: 3,
-        borderColor: 'white',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 5,
-        elevation: 8,
-    },
-    scooterPointer: {
-        width: 0,
-        height: 0,
-        backgroundColor: 'transparent',
-        borderStyle: 'solid',
-        borderLeftWidth: 6,
-        borderRightWidth: 6,
-        borderTopWidth: 10,
-        borderLeftColor: 'transparent',
-        borderRightColor: 'transparent',
-        borderTopColor: ZEPTO_PURPLE,
-        marginTop: -2,
-    },
-
-    // Store Marker
-    storeMarkerContainer: {
+        borderColor: t.colors.surface,
         alignItems: 'center',
+        justifyContent: 'center',
+        ...t.shadows.md,
     },
-    storePin: {
+    pinTail: { width: 10, height: 10, marginTop: -6, transform: [{ rotate: '45deg' }] },
+    riderWrap: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
+    rider: {
         width: 32,
         height: 32,
         borderRadius: 16,
-        backgroundColor: '#1F2937',
+        backgroundColor: t.colors.brand,
+        borderWidth: 3,
+        borderColor: t.colors.surface,
         alignItems: 'center',
         justifyContent: 'center',
-        borderWidth: 2,
-        borderColor: 'white',
+        ...t.shadows.md,
     },
-    storePinTail: {
-        width: 2,
-        height: 8,
-        backgroundColor: '#1F2937',
-    },
-
-    // Customer Marker
-    customerMarkerContainer: {
-        alignItems: 'center',
-    },
-    customerPin: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: ZEPTO_GREEN,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 2,
-        borderColor: 'white',
-    },
-    customerPinTail: {
-        width: 2,
-        height: 8,
-        backgroundColor: ZEPTO_GREEN,
-    },
-});
+}));
 
 export default OrderTrackingMap;

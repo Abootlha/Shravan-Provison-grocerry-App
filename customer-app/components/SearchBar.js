@@ -1,17 +1,33 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+/**
+ * SearchBar — the 48pt search field (Part C #2): input radius 10, sunken fill (dark: raised) with a
+ * hairline, flat (no shadow — it sits inside the header).
+ *
+ * Read-only (default): a PressableScale that opens the Search screen, with a rotating
+ * "Search for 'milk'" hint. Interactive (`editable` or `onChangeText`): a real TextInput.
+ *
+ * Search morph: in read-only mode `onPress(fromRect)` receives the pill's window rect
+ * `{ x, y, width, height }` (measured at tap time), so the caller can pass it to the Search screen
+ * (`navigation.navigate('Search', { fromRect })`) and Search grows its field out of this bar.
+ *
+ * Props
+ *   onPress        open search (read-only mode, also fired by the mic) — called with `fromRect`
+ *   onChangeText / value / placeholder / editable / autoFocus   interactive mode
+ *   showVoice      mic affordance on the right (default true)
+ *   showCamera     camera affordance (default false)
+ *   suggestions    words cycled in the hint (default: staples)
+ *   style
+ */
+import React, { memo, useCallback, useRef, useState } from 'react';
+import { StyleSheet, TextInput, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Search01Icon, Mic01Icon, Camera01Icon } from 'hugeicons-react-native';
-import { COLORS, SHADOWS } from '../constants';
+import { PressableScale, RotatingPlaceholder, Text } from './ui';
+import { radii, space, type, HIT } from '../constants/theme';
+import { makeStyles, useTheme } from '../theme';
+import { press } from '../theme/motion';
 import { useTranslation } from '../hooks/useTranslation';
 
-const ROTATING_PLACEHOLDERS = [
-    "Search 'atta, dal, rice'",
-    "Search 'milk, paneer, butter'",
-    "Search 'chips, snacks, drinks'",
-    "Search 'oil, ghee, masala'",
-    "Search 'chocolates, ice cream'",
-];
+const DEFAULT_SUGGESTIONS = ['milk', 'atta', 'chips', 'paneer', 'bread', 'eggs', 'cold drinks', 'tomato'];
+const DEFAULT_SUGGESTIONS_HI = ['दूध', 'आटा', 'चिप्स', 'पनीर', 'ब्रेड', 'अंडे', 'कोल्ड ड्रिंक', 'टमाटर'];
 
 const SearchBar = ({
     onPress,
@@ -22,227 +38,151 @@ const SearchBar = ({
     autoFocus = false,
     showVoice = true,
     showCamera = false,
-    showQuickTags = false,
+    suggestions,
+    style,
 }) => {
-    const { t } = useTranslation();
-    const isInteractive = editable || onChangeText;
+    const styles = useStyles();
+    const { colors, isDark } = useTheme();
+    const { t, isHi } = useTranslation();
+    const [focused, setFocused] = useState(false);
+    const pillRef = useRef(null);
 
-    const [placeholderIndex, setPlaceholderIndex] = useState(0);
-    const fadeAnim = useRef(new Animated.Value(1)).current;
-    const translateYAnim = useRef(new Animated.Value(0)).current;
+    // Measure the pill at tap time and hand its window rect to onPress (the Search morph origin).
+    // measureInWindow is cheap and reports post-transform coordinates (Home's header may be mid-collapse).
+    const pressWithRect = useCallback(() => {
+        if (!onPress) return;
+        const node = pillRef.current;
+        if (!node || typeof node.measureInWindow !== 'function') {
+            onPress();
+            return;
+        }
+        let done = false;
+        const go = (rect) => {
+            if (done) return;
+            done = true;
+            onPress(rect);
+        };
+        // never let a missing callback hold up navigation
+        const guard = setTimeout(() => go(undefined), 100);
+        node.measureInWindow((x, y, width, height) => {
+            clearTimeout(guard);
+            go(width > 0 && height > 0 ? { x, y, width, height } : undefined);
+        });
+    }, [onPress]);
+    const isInteractive = editable || !!onChangeText;
+    const words = suggestions || (isHi ? DEFAULT_SUGGESTIONS_HI : DEFAULT_SUGGESTIONS);
+    const prefix = isHi ? 'खोजें ' : 'Search for ';
 
-    useEffect(() => {
-        if (placeholder || isInteractive) return;
+    const trailing = (
+        <View style={styles.trailing}>
+            {showVoice ? (
+                <>
+                    <View style={styles.divider} />
+                    <PressableScale
+                        onPress={isInteractive ? onPress : pressWithRect}
+                        haptic="light"
+                        scaleTo={press.deep}
+                        accessibilityLabel={isHi ? 'आवाज़ से खोजें' : 'Search by voice'}
+                        style={styles.iconHit}
+                    >
+                        <MaterialCommunityIcons name="microphone-outline" size={20} color={colors.inkSecondary} />
+                    </PressableScale>
+                </>
+            ) : null}
+            {showCamera ? (
+                <PressableScale
+                    onPress={isInteractive ? onPress : pressWithRect}
+                    haptic="light"
+                    scaleTo={press.deep}
+                    accessibilityLabel={isHi ? 'फ़ोटो से खोजें' : 'Search by photo'}
+                    style={styles.iconHit}
+                >
+                    <MaterialCommunityIcons name="camera-outline" size={20} color={colors.inkSecondary} />
+                </PressableScale>
+            ) : null}
+        </View>
+    );
 
-        const interval = setInterval(() => {
-            // Slide up & Fade out
-            Animated.parallel([
-                Animated.timing(fadeAnim, {
-                    toValue: 0,
-                    duration: 300,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(translateYAnim, {
-                    toValue: -14,
-                    duration: 300,
-                    useNativeDriver: true,
-                }),
-            ]).start(() => {
-                // Change text & reset position to bottom
-                setPlaceholderIndex((prev) => (prev + 1) % ROTATING_PLACEHOLDERS.length);
-                translateYAnim.setValue(14);
-                // Slide up from bottom & Fade in
-                Animated.parallel([
-                    Animated.timing(fadeAnim, {
-                        toValue: 1,
-                        duration: 350,
-                        useNativeDriver: true,
-                    }),
-                    Animated.timing(translateYAnim, {
-                        toValue: 0,
-                        duration: 350,
-                        useNativeDriver: true,
-                    }),
-                ]).start();
-            });
-        }, 3000);
-
-        return () => clearInterval(interval);
-    }, [placeholder, isInteractive, fadeAnim, translateYAnim]);
-
-    const activePlaceholder = placeholder || ROTATING_PLACEHOLDERS[placeholderIndex];
-
-    return (
-        <TouchableOpacity
-            style={styles.container}
-            onPress={!isInteractive ? onPress : undefined}
-            activeOpacity={isInteractive ? 1 : 0.9}
-            disabled={isInteractive}
-        >
-            <View style={styles.searchBox}>
-                {/* Search Icon */}
-                <View style={styles.searchIconWrapper}>
-                    <Search01Icon
-                        size={20}
-                        color={COLORS.primary || '#16A34A'}
-                        strokeWidth={2}
-                    />
-                </View>
-
-                {/* Input / Animated Placeholder Display */}
-                {isInteractive ? (
+    if (isInteractive) {
+        return (
+            <View style={[styles.pill, style]}>
+                <MaterialCommunityIcons name="magnify" size={22} color={colors.ink} style={styles.lead} />
+                <View style={styles.field}>
                     <TextInput
                         style={styles.input}
-                        placeholder={placeholder || t('searchPlaceholder')}
-                        placeholderTextColor="#94A3B8"
-                        editable={true}
                         value={value}
                         onChangeText={onChangeText}
                         autoFocus={autoFocus}
                         returnKeyType="search"
+                        onFocus={() => setFocused(true)}
+                        onBlur={() => setFocused(false)}
+                        placeholder={placeholder}
+                        placeholderTextColor={colors.inkMuted}
+                        selectionColor={colors.brand}
+                        cursorColor={colors.brandText}
+                        keyboardAppearance={isDark ? 'dark' : 'light'}
+                        accessibilityLabel={placeholder || t('searchPlaceholder')}
                     />
-                ) : (
-                    <View style={styles.textWrapper}>
-                        <Animated.Text
-                            style={[
-                                styles.placeholderText,
-                                {
-                                    opacity: fadeAnim,
-                                    transform: [{ translateY: translateYAnim }],
-                                },
-                            ]}
-                            numberOfLines={1}
-                        >
-                            {activePlaceholder}
-                        </Animated.Text>
-                    </View>
-                )}
-
-                {/* Right Actions */}
-                <View style={styles.rightActions}>
-                    {showVoice && (
-                        <>
-                            <View style={styles.divider} />
-                            <TouchableOpacity style={styles.actionButton} onPress={onPress} activeOpacity={0.7}>
-                                <Mic01Icon
-                                    size={20}
-                                    color="#64748B"
-                                    strokeWidth={2}
-                                />
-                            </TouchableOpacity>
-                        </>
-                    )}
-                    {showCamera && (
-                        <TouchableOpacity style={styles.actionButton} onPress={onPress} activeOpacity={0.7}>
-                            <Camera01Icon
-                                size={20}
-                                color="#64748B"
-                                strokeWidth={2}
-                            />
-                        </TouchableOpacity>
-                    )}
+                    {!value && !placeholder ? (
+                        <RotatingPlaceholder items={words} prefix={prefix} paused={focused} style={[styles.overlay, { pointerEvents: 'none' }]} />
+                    ) : null}
                 </View>
+                {trailing}
             </View>
+        );
+    }
 
-            {/* Quick Search Tags */}
-            {!isInteractive && showQuickTags && (
-                <View style={styles.quickTags}>
-                    <Text style={styles.quickTagsLabel}>{t('popular')}:</Text>
-                    {['Atta', 'Oil', 'Milk', 'Sugar'].map((tag) => (
-                        <TouchableOpacity key={tag} style={styles.quickTag} onPress={onPress}>
-                            <Text style={styles.quickTagText}>{tag}</Text>
-                        </TouchableOpacity>
-                    ))}
+    // The pill is a View with two sibling pressables (field + mic) so buttons never nest.
+    return (
+        <View ref={pillRef} collapsable={false} style={[styles.pill, style]}>
+            <PressableScale
+                onPress={pressWithRect}
+                scaleTo={press.subtle}
+                accessibilityLabel={t('searchPlaceholder')}
+                style={styles.fieldPress}
+            >
+                <MaterialCommunityIcons name="magnify" size={22} color={colors.brandText} style={styles.lead} />
+                <View style={[styles.field, { pointerEvents: 'none' }]}>
+                    {placeholder ? (
+                        <Text variant="body" color="muted" numberOfLines={1}>
+                            {placeholder}
+                        </Text>
+                    ) : (
+                        <RotatingPlaceholder items={words} prefix={prefix} />
+                    )}
                 </View>
-            )}
-        </TouchableOpacity>
+            </PressableScale>
+            {trailing}
+        </View>
     );
 };
 
-const styles = StyleSheet.create({
-    container: {
-        paddingHorizontal: 0,
-        marginVertical: 4,
-    },
-    searchBox: {
+const useStyles = makeStyles((t) => ({
+    pill: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: COLORS.white,
-        borderRadius: 14,
-        paddingHorizontal: 12,
-        height: 48,
-        borderWidth: 1,
-        borderColor: 'rgba(0, 0, 0, 0.08)',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 6,
-        elevation: 2,
+        minHeight: 48,
+        borderRadius: radii.input,
+        // light: the sunken fill on the white header; dark: the raised layer + a slightly stronger line
+        backgroundColor: t.isDark ? t.colors.surfaceRaised : t.colors.surfaceSunken,
+        borderWidth: StyleSheet.hairlineWidth * 2,
+        borderColor: t.isDark ? t.colors.border : t.colors.hairline,
+        paddingLeft: space.md,
     },
-    searchIconWrapper: {
-        width: 32,
-        height: 32,
-        borderRadius: 10,
-        backgroundColor: '#F0FDF4',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
+    fieldPress: { flex: 1, flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch' },
+    lead: { marginRight: space.sm },
+    field: { flex: 1, justifyContent: 'center', minHeight: 48 },
     input: {
-        flex: 1,
-        fontSize: 14,
-        color: '#1E293B',
-        marginLeft: 10,
-        fontWeight: '500',
+        ...type.body,
+        color: t.colors.ink,
+        minHeight: 48,
+        paddingVertical: 0,
+        outlineStyle: 'none',
     },
-    textWrapper: {
-        flex: 1,
-        marginLeft: 10,
-        justifyContent: 'center',
-        overflow: 'hidden',
-        height: '100%',
-    },
-    placeholderText: {
-        fontSize: 13.5,
-        color: '#64748B',
-        fontWeight: '500',
-    },
-    rightActions: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    divider: {
-        width: 1,
-        height: 20,
-        backgroundColor: '#E2E8F0',
-        marginHorizontal: 8,
-    },
-    actionButton: {
-        padding: 4,
-    },
-    quickTags: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginTop: 10,
-        gap: 8,
-    },
-    quickTagsLabel: {
-        fontSize: 12,
-        color: COLORS.textSecondary,
-        fontWeight: '500',
-    },
-    quickTag: {
-        backgroundColor: COLORS.white,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: COLORS.border,
-    },
-    quickTagText: {
-        fontSize: 12,
-        color: COLORS.text,
-        fontWeight: '600',
-    },
-});
+    overlay: { ...StyleSheet.absoluteFill, justifyContent: 'center' },
+    trailing: { flexDirection: 'row', alignItems: 'center', paddingRight: space.xs },
+    divider: { width: StyleSheet.hairlineWidth * 2, height: 20, backgroundColor: t.isDark ? t.colors.border : t.colors.hairline, marginLeft: space.xs },
+    iconHit: { width: HIT, height: HIT, alignItems: 'center', justifyContent: 'center' },
+}));
 
-export default SearchBar;
+export default memo(SearchBar);
