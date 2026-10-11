@@ -31,7 +31,7 @@ export class AuthService {
     private configService: ConfigService,
     private otpService: OtpService,
     private redisService: RedisService,
-  ) {}
+  ) { }
 
   /**
    * Refresh tokens are high-entropy JWTs, so a fast SHA-256 is appropriate.

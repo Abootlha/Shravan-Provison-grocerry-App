@@ -11,14 +11,14 @@ const DEV_TRACKING_URL = 'http://localhost:3000/tracking';
 
 const resolveLocalhost = (url) => {
     if (IS_PRODUCTION || !url || !url.includes('localhost')) return url;
-    
+
     let host = 'localhost';
     if (Constants.expoConfig?.hostUri) {
         host = Constants.expoConfig.hostUri.split(':')[0];
     } else if (typeof window !== 'undefined' && window.location?.hostname) {
         host = window.location.hostname;
     }
-    
+
     return url.replace('localhost', host);
 };
 
