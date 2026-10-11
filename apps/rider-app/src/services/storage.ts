@@ -6,6 +6,7 @@ const TOKEN_KEY = 'rider_token';
 const REFRESH_TOKEN_KEY = 'rider_refresh_token';
 const USER_KEY = 'rider_user';
 const ACTIVE_ORDER_KEY = 'rider_active_order';
+const SESSION_NOTICE_KEY = 'rider_session_notice';
 
 // Tokens go to the OS keychain/keystore on native. expo-secure-store has no web
 // implementation, so web falls back to AsyncStorage (localStorage).
@@ -112,6 +113,22 @@ export const storage = {
 
   async clearActiveOrder(): Promise<void> {
     await AsyncStorage.removeItem(ACTIVE_ORDER_KEY);
+  },
+
+  /** Message for the Login screen after the server ended the session. */
+  async setSessionNotice(message: string): Promise<void> {
+    await AsyncStorage.setItem(SESSION_NOTICE_KEY, message);
+  },
+
+  /** Reads and clears the session-ended notice. */
+  async takeSessionNotice(): Promise<string | null> {
+    try {
+      const message = await AsyncStorage.getItem(SESSION_NOTICE_KEY);
+      if (message) await AsyncStorage.removeItem(SESSION_NOTICE_KEY);
+      return message;
+    } catch {
+      return null;
+    }
   },
 
   async clearAll(): Promise<void> {

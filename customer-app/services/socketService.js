@@ -9,6 +9,11 @@ import {
     setError,
 } from '../store/slices/orderTrackingSlice';
 
+const isAuthError = (error) => {
+    const message = typeof error === 'string' ? error : error?.message || '';
+    return /unauthori[sz]ed|jwt|token/i.test(message);
+};
+
 class SocketService {
     constructor() {
         this.socket = null;
@@ -18,6 +23,42 @@ class SocketService {
         this.maxReconnectAttempts = 10;
         this.reconnectionDelay = 1000;
         this.reconnectionDelayMax = 10000;
+        this.authRetries = 0;
+        this.authRetryTimer = null;
+    }
+
+    /**
+     * The server refused our access token (expired, or signed out elsewhere).
+     * Renew it and reconnect. If the session is really over, refreshAccessToken()
+     * ends it (SessionKeeper then disconnects us). Offline: try again later.
+     */
+    async handleAuthFailure(source) {
+        if (!this.socket || this.authRefreshing) return;
+        if (this.authRetries >= 3) {
+            if (__DEV__) console.warn('Socket auth keeps failing; giving up until the next connect()');
+            return;
+        }
+        this.authRefreshing = true;
+        this.authRetries += 1;
+        try {
+            if (__DEV__) console.log('Socket auth failed (' + source + '); refreshing token');
+            // Required lazily: api.js pulls in the store and the mock wiring.
+            const { refreshAccessToken } = require('./api');
+            const { getRefreshToken } = require('./tokenStorage');
+            const token = await refreshAccessToken();
+            if (!this.socket) return; // disconnected meanwhile (e.g. session ended)
+            if (token) {
+                this.socket.auth = { token };
+                this.socket.disconnect();
+                this.socket.connect();
+            } else if (await getRefreshToken()) {
+                // Refresh failed for a transient reason; the session is still valid.
+                clearTimeout(this.authRetryTimer);
+                this.authRetryTimer = setTimeout(() => this.handleAuthFailure('retry'), 15000);
+            }
+        } finally {
+            this.authRefreshing = false;
+        }
     }
 
     getTrackingWsUrl() {
@@ -72,6 +113,7 @@ class SocketService {
             console.log('Socket connected:', this.socket.id);
             store.dispatch(setConnectionStatus('connected'));
             this.reconnectAttempts = 0;
+            this.authRetries = 0;
             this.joinedOrderId = null;
 
             if (this.currentOrderId) {
@@ -82,10 +124,16 @@ class SocketService {
         this.socket.on('disconnect', (reason) => {
             console.log('Socket disconnected:', reason);
             store.dispatch(setConnectionStatus('disconnected'));
+            // The backend drops sockets whose token fails verification.
+            if (reason === 'io server disconnect') this.handleAuthFailure('server disconnect');
         });
 
         this.socket.on('connect_error', (error) => {
             console.warn('Socket connection warning:', error.message);
+            if (isAuthError(error)) {
+                this.handleAuthFailure('connect_error');
+                return;
+            }
             this.reconnectAttempts++;
 
             if (this.reconnectAttempts >= this.maxReconnectAttempts) {
@@ -190,6 +238,10 @@ class SocketService {
 
         this.socket.on('exception', (error) => {
             console.warn('Socket exception:', error);
+            if (isAuthError(error)) {
+                this.handleAuthFailure('exception');
+                return;
+            }
             const message = typeof error === 'string' ? error : error?.message || 'Realtime connection error';
             store.dispatch(setError(message));
         });
@@ -238,6 +290,9 @@ class SocketService {
     }
 
     disconnect() {
+        clearTimeout(this.authRetryTimer);
+        this.authRetryTimer = null;
+        this.authRetries = 0;
         if (this.socket) {
             console.log('Disconnecting socket');
 

@@ -1,6 +1,7 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import { authApi } from '../../services/api';
 import { storage } from '../../services/storage';
+import { ensureFreshAccessToken } from '../../services/authSession';
 import type { Rider } from '../../types/rider';
 
 interface AuthState {
@@ -9,6 +10,8 @@ interface AuthState {
   token: string | null;
   loading: boolean;
   error: string | null;
+  /** Shown on Login after the server ended the session. */
+  sessionNotice: string | null;
 }
 
 const initialState: AuthState = {
@@ -17,6 +20,7 @@ const initialState: AuthState = {
   token: null,
   loading: false,
   error: null,
+  sessionNotice: null,
 };
 
 export const login = createAsyncThunk(
@@ -65,11 +69,14 @@ export const loadUser = createAsyncThunk(
   async (_, { rejectWithValue }) => {
     try {
       const token = await storage.getToken();
+      const refreshToken = await storage.getRefreshToken();
       const user = await storage.getUser<Rider>();
-      if (token && user) {
-        return { token, user };
+      // A refresh token alone is enough: restore now, renew the access token in
+      // the background (App.tsx) instead of making the rider wait or log in.
+      if (user && (token || refreshToken)) {
+        return { token, user, notice: null };
       }
-      return null;
+      return { token: null, user: null, notice: await storage.takeSessionNotice() };
     } catch {
       return rejectWithValue('Failed to load user');
     }
@@ -78,6 +85,8 @@ export const loadUser = createAsyncThunk(
 
 export const logout = createAsyncThunk('auth/logout', async () => {
   try {
+    // /auth/logout needs a live access token to end this device's session.
+    await ensureFreshAccessToken();
     await authApi.logout();
   } catch {
     // Best effort: local tokens are cleared regardless.
@@ -99,10 +108,14 @@ const authSlice = createSlice({
     tokenRefreshed: (state, action: PayloadAction<string>) => {
       state.token = action.payload;
     },
-    sessionExpired: (state) => {
+    sessionExpired: (state, action: PayloadAction<string | undefined>) => {
       state.isAuthenticated = false;
       state.user = null;
       state.token = null;
+      state.sessionNotice = action.payload ?? null;
+    },
+    clearSessionNotice: (state) => {
+      state.sessionNotice = null;
     },
   },
   extraReducers: (builder) => {
@@ -113,6 +126,7 @@ const authSlice = createSlice({
       })
       .addCase(login.fulfilled, (state, action) => {
         state.loading = false;
+        state.sessionNotice = null;
         state.isAuthenticated = true;
         state.token = action.payload.token;
         state.user = action.payload.user as Rider;
@@ -138,6 +152,7 @@ const authSlice = createSlice({
       })
       .addCase(verifyOtp.fulfilled, (state, action) => {
         state.loading = false;
+        state.sessionNotice = null;
         state.isAuthenticated = true;
         state.token = action.payload.token;
         state.user = action.payload.user as Rider;
@@ -151,10 +166,12 @@ const authSlice = createSlice({
       })
       .addCase(loadUser.fulfilled, (state, action) => {
         state.loading = false;
-        if (action.payload) {
+        if (action.payload?.user) {
           state.isAuthenticated = true;
           state.token = action.payload.token;
           state.user = action.payload.user;
+        } else if (action.payload?.notice) {
+          state.sessionNotice = action.payload.notice;
         }
       })
       .addCase(loadUser.rejected, (state) => {
@@ -168,5 +185,5 @@ const authSlice = createSlice({
   },
 });
 
-export const { clearError, setUser, tokenRefreshed, sessionExpired } = authSlice.actions;
+export const { clearError, setUser, tokenRefreshed, sessionExpired, clearSessionNotice } = authSlice.actions;
 export default authSlice.reducer;

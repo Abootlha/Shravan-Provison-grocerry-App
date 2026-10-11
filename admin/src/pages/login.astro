@@ -111,6 +111,20 @@ const apiBase = getApiBaseUrl();
             const passwordInput = document.getElementById('password');
             const API_BASE = apiBase;
 
+            // Sent here by the session guard / API client: say why (see lib/api.ts).
+            const SESSION_END_MESSAGES = {
+                SESSION_EXPIRED: 'Your session has ended. Please log in again.',
+                SESSION_REVOKED: 'You were signed out. Please log in again.',
+                REFRESH_REUSED: 'For your security you were signed out because this session was used elsewhere. Please log in again.',
+                USER_NOT_FOUND: 'This account no longer exists.',
+            };
+            const reason = new URLSearchParams(window.location.search).get('reason');
+            if (reason && errorBox) {
+                errorBox.textContent = SESSION_END_MESSAGES[reason] || SESSION_END_MESSAGES.SESSION_EXPIRED;
+                errorBox.classList.remove('hidden');
+                window.history.replaceState(null, '', window.location.pathname);
+            }
+
             form?.addEventListener('submit', async (event) => {
                 event.preventDefault();
 

@@ -5,6 +5,7 @@ import axios from 'axios';
 import { Platform } from 'react-native';
 import { handle } from './router';
 import { findOrder } from './db';
+import { installSessionControls } from './session';
 
 const delay = () => new Promise((resolve) => setTimeout(resolve, 250 + Math.random() * 250));
 
@@ -59,6 +60,10 @@ const mockAdapter = async (config) => {
         body: parseBody(config.data),
         authorization: headerValue(config.headers, 'Authorization'),
     });
+    if (result.networkError) {
+        log(method, path, 'network error');
+        throw new axios.AxiosError('Network Error', axios.AxiosError.ERR_NETWORK, config, { mock: true });
+    }
     log(method, path, result.status);
 
     // Deep copy so callers can't mutate the mock DB through responses.
@@ -101,6 +106,10 @@ const installFetchMock = (apiBaseUrl) => {
             body: parseBody(init.body),
             authorization: headerValue(init.headers, 'Authorization'),
         });
+        if (result.networkError) {
+            log(method, path, 'network error');
+            throw new TypeError('Failed to fetch');
+        }
         log(method, path, result.status);
         return new Response(JSON.stringify(result.body ?? null), {
             status: result.status,
@@ -149,6 +158,7 @@ export const installMockApi = (clients = [], { apiBaseUrl } = {}) => {
     installed = true;
     installFetchMock(apiBaseUrl);
     installPayUFormMock();
+    installSessionControls();
     console.log(
         '%c[mock api] ENABLED - all backend calls are served from customer-app/mocks (any phone, OTP 1234)',
         'color:#fff;background:#7c3aed;padding:2px 6px;border-radius:3px',

@@ -5,6 +5,7 @@ import {
     cartApi,
     orderApi,
     locationApi,
+    ensureFreshAccessToken,
 } from './api';
 import { ENDPOINTS } from './config';
 import { getRefreshToken, clearSession } from './tokenStorage';
@@ -31,6 +32,9 @@ export const AuthService = {
     // Revokes the session server-side (best effort), then always clears local tokens.
     logout: async () => {
         try {
+            // /auth/logout needs a live access token to find this device's session;
+            // renew a stale one first so the server-side session really ends.
+            await ensureFreshAccessToken().catch(() => undefined);
             const refreshToken = await getRefreshToken();
             await authApi.post(ENDPOINTS.auth.LOGOUT, { refreshToken: refreshToken || undefined });
         } finally {

@@ -17,6 +17,8 @@ import { BricolageGrotesque_700Bold } from '@expo-google-fonts/bricolage-grotesq
 import { BricolageGrotesque_800ExtraBold } from '@expo-google-fonts/bricolage-grotesque/800ExtraBold';
 import { store } from './store';
 import { AppNavigator } from './navigation';
+import { navigationRef } from './navigation/navigationRef';
+import SessionKeeper from './components/SessionKeeper';
 import { WishlistToast } from './components';
 import { ToastHost, FlyToCartProvider, HeroTransitionProvider } from './components/ui';
 import { ThemeProvider, useTheme, useNavigationTheme } from './theme';
@@ -61,13 +63,14 @@ function ThemedApp() {
             <StatusBar style={isDark ? 'light' : 'dark'} />
             <Provider store={store}>
                 <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-                    <NavigationContainer theme={navTheme}>
+                    <NavigationContainer ref={navigationRef} theme={navTheme}>
                         {/* Signature-motion overlays (fly-to-cart, card → PDP hero) sit above the navigator. */}
                         <HeroTransitionProvider>
                             <FlyToCartProvider>
                                 <AppNavigator />
                                 <WishlistToast />
                                 <ToastHost />
+                                <SessionKeeper />
                             </FlyToCartProvider>
                         </HeroTransitionProvider>
                     </NavigationContainer>

@@ -4,6 +4,7 @@
 // joinedOrderRoom, riderLocationUpdate, etaUpdate, orderStatusUpdate.
 import { findOrder } from './db';
 import { trackingOrderView } from './router';
+import { isAccessTokenValid } from './session';
 
 const TICK_MS = 2000;
 
@@ -45,6 +46,11 @@ class MockSocket extends Emitter {
     connect() {
         if (this.connected) return this;
         setTimeout(() => {
+            // Like the backend: refuse expired / revoked access tokens.
+            if (!isAccessTokenValid(this.auth?.token)) {
+                this.fire('connect_error', new Error('Unauthorized: Invalid token'));
+                return;
+            }
             this.connected = true;
             this.id = `mock-${Math.random().toString(36).slice(2, 10)}`;
             this.fire('connect');

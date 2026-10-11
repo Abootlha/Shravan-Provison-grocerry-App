@@ -6,6 +6,7 @@ import { oid, KIND } from './fixtures/ids';
 import { orderNumber } from './fixtures/orders';
 import { db, persist, findOrder, liveTracking, tick } from './db';
 import { distanceMeters } from './geo';
+import { checkAccess, issueSession, logoutAllSessions, logoutSession, refreshSession } from './session';
 
 const ok = (body, status = 200) => ({ status, body });
 const fail = (status, message) => ({
@@ -266,14 +267,6 @@ const geocodeResult = (latitude, longitude) => {
 
 // ---------- auth ----------
 
-const issueTokens = () => {
-    const stamp = Date.now().toString(36);
-    return {
-        accessToken: `mock-access-${stamp}`,
-        refreshToken: `mock-refresh-${stamp}`,
-    };
-};
-
 const sessionUser = () => ({ id: db.profile.id, name: db.profile.name, phone: db.profile.phone, role: 'customer' });
 
 const profileView = () => ({
@@ -329,13 +322,19 @@ const routes = [
         if (!/^\d{4,6}$/.test(String(body?.otp || ''))) return fail(400, 'Invalid OTP');
         if (body?.phone) db.profile.phone = String(body.phone).replace(/^\+91/, '');
         persist();
-        return ok({ user: sessionUser(), ...issueTokens(), message: 'Login successful' });
+        return ok({ user: sessionUser(), ...issueSession(db.profile.id), message: 'Login successful' });
     }],
+    // Same contract as the backend: rotation, sliding expiry, 401 { code } (see mocks/session.js).
     ['POST', /^\/auth\/refresh$/, ({ body }) => {
-        if (!body?.refreshToken) return fail(401, 'Refresh token is required');
-        return ok({ user: sessionUser(), ...issueTokens(), message: 'Tokens refreshed' });
+        const result = refreshSession(body?.refreshToken, db.profile.id);
+        if (result.networkError || result.status !== 200) return result;
+        return ok({ user: sessionUser(), ...result.body });
     }],
-    ['POST', /^\/auth\/logout$/, () => ok({ message: 'Logged out successfully' })],
+    ['POST', /^\/auth\/logout$/, ({ authorization }) => {
+        logoutSession(authorization);
+        return ok({ message: 'Logged out successfully' });
+    }],
+    ['POST', /^\/auth\/logout-all$/, () => ok({ message: 'Logged out from all devices', sessions: logoutAllSessions() })],
 
     // users
     ['GET', /^\/users\/me$/, () => ok(profileView())],
@@ -528,17 +527,19 @@ const routes = [
 
 /**
  * @param {{ method: string, path: string, query: object, body: any, authorization?: string }} req
- * @returns {{ status: number, body: any }}
+ * @returns {{ status: number, body: any } | { networkError: true }}
  */
 export const handle = ({ method, path, query = {}, body, authorization }) => {
     const isPublic = PUBLIC.some((re) => re.test(path));
-    if (!isPublic && !/^Bearer\s+\S+/.test(authorization || '')) {
-        return fail(401, 'Unauthorized');
+    if (!isPublic) {
+        if (!/^Bearer\s+\S+/.test(authorization || '')) return fail(401, 'Unauthorized');
+        const denied = checkAccess(authorization);
+        if (denied) return denied;
     }
     for (const [m, re, fn] of routes) {
         if (m !== method) continue;
         const match = path.match(re);
-        if (match) return fn({ params: match.slice(1).map(decodeURIComponent), query, body });
+        if (match) return fn({ params: match.slice(1).map(decodeURIComponent), query, body, authorization });
     }
     return fail(404, `Mock API: no handler for ${method} ${path}`);
 };
