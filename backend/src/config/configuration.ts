@@ -42,6 +42,29 @@ function requireSecret(name: string): string {
   return devSecrets[name];
 }
 
+/**
+ * Parse a JWT-style duration ("900", "15m", "2h", "7d") into seconds.
+ * Falls back to `fallbackSeconds` when the value is missing or malformed.
+ */
+export function parseDurationSeconds(
+  value: string | undefined,
+  fallbackSeconds: number,
+): number {
+  const match = /^\s*(\d+)\s*([smhd]?)\s*$/i.exec(value || '');
+  if (!match) return fallbackSeconds;
+  const amount = parseInt(match[1], 10);
+  const unit = (match[2] || 's').toLowerCase();
+  const factor = { s: 1, m: 60, h: 3600, d: 86400 }[unit] ?? 1;
+  const seconds = amount * factor;
+  return seconds > 0 ? seconds : fallbackSeconds;
+}
+
+function parseNonNegativeInt(value: string | undefined, fallback: number) {
+  if (value === undefined || value.trim() === '') return fallback;
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
 function parseList(value?: string): string[] {
   return (value || '')
     .split(',')
@@ -78,9 +101,28 @@ export default () => {
 
     jwt: {
       secret: jwtSecret,
-      expiresIn: process.env.JWT_EXPIRES_IN || '15m',
+      // Access tokens are short-lived; clients renew them with the refresh token.
+      accessTtlSeconds: parseDurationSeconds(
+        process.env.JWT_EXPIRES_IN,
+        15 * 60,
+      ),
       refreshSecret: jwtRefreshSecret,
-      refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
+      // Sliding idle timeout for customer and rider sessions. Every refresh
+      // resets it, so an active user is never logged out. 0 = no idle expiry.
+      refreshIdleDays: parseNonNegativeInt(
+        process.env.JWT_REFRESH_IDLE_DAYS,
+        365,
+      ),
+      // Staff (admin) sessions keep a shorter idle timeout. 0 is not allowed.
+      adminRefreshIdleDays:
+        parseNonNegativeInt(process.env.JWT_ADMIN_REFRESH_IDLE_DAYS, 28) || 28,
+      // A rotated refresh token presented again within this window (e.g. the
+      // client never received the previous response) is accepted once more
+      // instead of being treated as theft.
+      refreshReuseGraceSeconds: parseNonNegativeInt(
+        process.env.JWT_REFRESH_REUSE_GRACE_SECONDS,
+        300,
+      ),
     },
 
     cors: {

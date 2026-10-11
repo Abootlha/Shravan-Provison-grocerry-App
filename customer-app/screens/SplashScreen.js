@@ -29,6 +29,7 @@ import { Logo, LogoMark, Screen, Text } from '../components/ui';
 import { getAccessToken, getRefreshToken } from '../services/tokenStorage';
 import { parsePaymentReturnUrl } from '../services/paymentService';
 import { loginSuccess } from '../store/slices/authSlice';
+import { store } from '../store';
 import { loadLanguage } from '../store/slices/languageSlice';
 import { AUTH_BAR, authBarMarkCentre } from './auth/authMotion';
 
@@ -91,7 +92,10 @@ const SplashScreen = ({ navigation }) => {
                 const token = await getAccessToken();
                 const refreshToken = await getRefreshToken();
 
-                if (!userJson || !token) {
+                // A saved refresh token is enough: the session is restored right away
+                // (no network wait) and SessionKeeper renews an expired access token
+                // in the background.
+                if (!userJson || (!token && !refreshToken)) {
                     throw new Error('No saved session');
                 }
 
@@ -119,7 +123,9 @@ const SplashScreen = ({ navigation }) => {
                     return;
                 }
 
-                await go(() => navigation.replace('Main'));
+                // If the background renewal found the session over while the splash
+                // was showing, go to Login instead (SessionKeeper leaves Splash alone).
+                await go(() => navigation.replace(store.getState().auth.isAuthenticated ? 'Main' : 'Login'));
                 return;
             } catch (error) {
                 // No valid session, check onboarding status

@@ -26,6 +26,29 @@ values are inlined at bundle time.
 Log in with any 10-digit phone and any 4-digit OTP (e.g. `1234`). The browser
 console shows a purple `[mock api] ENABLED` banner and one line per request.
 
+## Login sessions
+
+`mocks/session.js` follows the backend's session rules: 15-minute JWT-shaped access
+tokens (fake signature, readable `exp`), one session per device, refresh-token
+rotation with a sliding expiry, reuse detection, and `401 { code }` errors from
+`/auth/refresh` (`SESSION_EXPIRED`, `SESSION_REVOKED`, `REFRESH_REUSED`). Sessions are
+kept in localStorage, so a page reload stays signed in.
+
+To try the session flows on web, sign in, then reload with one of:
+
+| URL flag | What happens | Expected app behaviour |
+|---|---|---|
+| `?mockSession=expired` | current access tokens are rejected | silent refresh, stays signed in |
+| `?mockSession=revoked` | every session revoked | toast "Your session has ended…", Login |
+| `?mockSession=ended` | sessions idle-expired | same as revoked |
+| `?mockSession=offline` | `/auth/refresh` fails with a network error | stays signed in, retries later |
+| `?mockSession=online` | undo `offline` | next refresh succeeds |
+
+The flag is applied once and removed from the URL. The same controls exist in the
+browser console as `__mockSession.expireAccess()`, `.revoke()`, `.end()`,
+`.offline(true|false)` and `.state()`; for those, trigger a request afterwards (e.g.
+open Account) or switch tabs away and back.
+
 ## Profiling release builds (`EXPO_PUBLIC_PERF_MOCK=1`)
 
 Debug builds are too slow to profile, but a release build normally has no data

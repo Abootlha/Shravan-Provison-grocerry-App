@@ -106,9 +106,9 @@ function isActive(item: any): boolean {
             localStorage.removeItem(k);
           });
         }
-        function toLogin() {
+        function toLogin(reason) {
           try { clearSession(); } catch (e) {}
-          window.location.replace("/login");
+          window.location.replace("/login" + (reason ? "?reason=" + encodeURIComponent(reason) : ""));
         }
         function reveal() {
           root.classList.remove("auth-pending");
@@ -148,10 +148,23 @@ function isActive(item: any): boolean {
             body: JSON.stringify({ refreshToken: refreshToken }),
           })
             .then(function (res) {
-              return res.ok ? res.json() : null;
+              // 401 = the session is over (body.code says why). Anything else
+              // (5xx) is transient: show the page; API calls retry the refresh.
+              if (res.status === 401) {
+                return res.json().catch(function () { return {}; }).then(function (body) {
+                  toLogin((body && body.code) || "SESSION_EXPIRED");
+                  return null;
+                });
+              }
+              if (!res.ok) {
+                reveal();
+                return null;
+              }
+              return res.json();
             })
             .then(function (data) {
-              if (!data || !data.accessToken) {
+              if (!data) return;
+              if (!data.accessToken) {
                 toLogin();
                 return;
               }
@@ -160,7 +173,10 @@ function isActive(item: any): boolean {
               localStorage.setItem("adminLoginTime", String(Date.now()));
               reveal();
             })
-            .catch(toLogin);
+            .catch(function () {
+              // Offline: keep the session and show the page.
+              reveal();
+            });
         } catch (e) {
           toLogin();
         }

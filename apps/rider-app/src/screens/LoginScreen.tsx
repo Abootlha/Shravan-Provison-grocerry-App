@@ -19,7 +19,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const dispatch = useAppDispatch();
-  const { loading, error } = useAppSelector((state) => state.auth);
+  const { loading, error, sessionNotice } = useAppSelector((state) => state.auth);
 
   const handleLogin = async () => {
     if (!username.trim() || !password.trim()) {
@@ -44,6 +44,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
           <Text style={styles.title}>Welcome Rider</Text>
           <Text style={styles.subtitle}>Log in with your rider credentials</Text>
         </View>
+
+        {sessionNotice ? (
+          <View style={styles.notice} accessibilityRole="alert">
+            <Text style={styles.noticeText}>{sessionNotice}</Text>
+          </View>
+        ) : null}
 
         <View style={styles.form}>
           <TextInput
@@ -131,6 +137,19 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     borderWidth: 1,
     borderColor: COLORS.border,
+  },
+  notice: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.error,
+    padding: SPACING.md,
+    marginBottom: SPACING.lg,
+  },
+  noticeText: {
+    color: COLORS.error,
+    fontSize: 14,
+    textAlign: 'center',
   },
   error: {
     color: COLORS.error,
