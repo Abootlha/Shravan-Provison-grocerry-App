@@ -4,7 +4,6 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Card, RollingNumber, Text } from '../../components/ui';
 import { radii, space } from '../../constants/theme';
 import { makeStyles, useTheme } from '../../theme';
-import { DISCOUNT_RATE } from './bill';
 import { GROUP_RADIUS, ICON_CIRCLE } from './layout';
 
 /**
@@ -12,11 +11,11 @@ import { GROUP_RADIUS, ICON_CIRCLE } from './layout';
  * store-wide discount that OrdersService applies to every order. Nothing to apply,
  * nothing faked; it hides itself when the discount rounds to ₹0.
  */
-function OffersCardBase({ discount, isHi }) {
+function OffersCardBase({ discount, rate, isHi }) {
     const styles = useStyles();
     const { colors } = useTheme();
     if (!(discount > 0)) return null;
-    const pct = Math.round(DISCOUNT_RATE * 100);
+    const pct = rate != null ? Math.round(rate * 100) : null;
     return (
         <Card padding={0} radius={GROUP_RADIUS} style={styles.card}>
             <View style={styles.row} accessibilityRole="text">
@@ -25,7 +24,9 @@ function OffersCardBase({ discount, isHi }) {
                 </View>
                 <View style={styles.texts}>
                     <Text variant="bodyStrong">
-                        {isHi ? `${pct}% स्टोर छूट लागू` : `${pct}% store discount applied`}
+                        {pct
+                            ? (isHi ? `${pct}% स्टोर छूट लागू` : `${pct}% store discount applied`)
+                            : (isHi ? 'स्टोर छूट लागू' : 'Store discount applied')}
                     </Text>
                     <Text variant="caption" color="muted">
                         {isHi ? 'हर ऑर्डर पर अपने आप' : 'Automatic on every order · no code needed'}

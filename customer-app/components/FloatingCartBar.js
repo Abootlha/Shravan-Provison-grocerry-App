@@ -4,7 +4,7 @@
  *   56px bar, r14, ink surface (dark: raised + hairline, see nightPill), floating above the dock:
  *   stacked thumbnails of the last 3 items, "3 items · ₹349" with a free-delivery hint under it,
  *   "View cart ›" on the right. A thin savings-green progress line runs along the top edge toward
- *   free delivery (₹200); crossing it fires a ConfettiBurst + success haptic once.
+ *   free delivery (the store's fees.freeDeliveryThreshold; hidden until settings load); crossing it fires a ConfettiBurst + success haptic once.
  *
  * Motion
  *   Springs up when the cart becomes non-empty, fades/drops when it empties. On tab screens it
@@ -46,7 +46,8 @@ import { useTranslation } from '../hooks/useTranslation';
 import { useCartBarOffset } from './BottomTabsIcons';
 import CartThumbStack from './product/CartThumbStack';
 import { nightPill } from './product/nightPill';
-import { FREE_DELIVERY_THRESHOLD, formatINR } from './product/productUtils';
+import { formatINR } from './product/productUtils';
+import { useStoreFees } from '../hooks/useStoreSettings';
 
 const PILL_HEIGHT = 56;
 const PILL_RADIUS = 14; // DESIGN.md: floating bars are rounded rects, not pills
@@ -54,7 +55,11 @@ const OFFSCREEN = 160;
 
 const textLayout = LinearTransition.springify().damping(springs.snappy.damping).stiffness(springs.snappy.stiffness).mass(springs.snappy.mass);
 
-const FloatingCartBar = ({ onPress, bottomOffset, showDeliveryMeter = true }) => {
+const FloatingCartBar = ({ onPress, bottomOffset, showDeliveryMeter: wantsMeter = true }) => {
+    const fees = useStoreFees();
+    const threshold = fees?.freeDeliveryThreshold ?? null;
+    // No threshold from the server yet, or free delivery on every order: no meter.
+    const showDeliveryMeter = wantsMeter && threshold > 0;
     const styles = useStyles();
     const { colors, gradients } = useTheme();
     const { isHi } = useTranslation();
@@ -112,16 +117,20 @@ const FloatingCartBar = ({ onPress, bottomOffset, showDeliveryMeter = true }) =>
 
     // Free-delivery celebration: once per crossing of the threshold.
     const snap = snapshot.current;
-    const unlocked = snap.totalAmount >= FREE_DELIVERY_THRESHOLD;
+    const unlocked = showDeliveryMeter && snap.totalAmount >= threshold;
     const confetti = useRef(null);
     const wasUnlocked = useRef(unlocked);
+    const lastThreshold = useRef(threshold);
     useEffect(() => {
-        if (unlocked && !wasUnlocked.current && hasItems) {
+        // Only a cart change crosses the line; the threshold arriving / changing doesn't celebrate.
+        const sameThreshold = lastThreshold.current === threshold;
+        if (unlocked && !wasUnlocked.current && hasItems && sameThreshold) {
             confetti.current?.fire();
             haptic.success();
         }
         wasUnlocked.current = unlocked;
-    }, [unlocked, hasItems]);
+        lastThreshold.current = threshold;
+    }, [unlocked, hasItems, threshold]);
 
     const anim = useAnimatedStyle(() => ({
         opacity: shown.value,
@@ -132,7 +141,7 @@ const FloatingCartBar = ({ onPress, bottomOffset, showDeliveryMeter = true }) =>
 
     const count = snap.totalItems;
     const itemsWord = isHi ? 'सामान' : count === 1 ? 'item' : 'items';
-    const remaining = Math.max(0, Math.ceil(FREE_DELIVERY_THRESHOLD - snap.totalAmount));
+    const remaining = Math.max(0, Math.ceil((threshold || 0) - snap.totalAmount));
     const hint = unlocked
         ? isHi
             ? 'मुफ़्त डिलीवरी मिल गई'
@@ -154,7 +163,7 @@ const FloatingCartBar = ({ onPress, bottomOffset, showDeliveryMeter = true }) =>
                 {showDeliveryMeter ? (
                     <View style={[styles.meter, { pointerEvents: 'none' }]}>
                         <ProgressBar
-                            value={snap.totalAmount / FREE_DELIVERY_THRESHOLD}
+                            value={snap.totalAmount / threshold}
                             height={3}
                             gradient={gradients.freeDelivery}
                             trackColor={colors.haloOnBrand}

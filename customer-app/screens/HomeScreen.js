@@ -16,7 +16,7 @@ import { space, z } from '../constants/theme';
 import { useTheme } from '../theme';
 import { durations, easings, springs } from '../theme/motion';
 import { OrderService, ProductService } from '../services';
-import { useStoreStatus } from '../hooks/useStoreSettings';
+import { useStoreFees, useStoreStatus } from '../hooks/useStoreSettings';
 import { useTranslation } from '../hooks/useTranslation';
 import { translateToHindi } from '../services/translationService';
 import { describeError, friendlyError } from '../services/normalize';
@@ -29,7 +29,6 @@ import { useTabBarScroll } from './home/useTabBarScroll';
 import { useTabEnter } from './home/useTabEnter';
 import { useCartBarOffset, useTabBarHeight } from '../components/BottomTabsIcons';
 import ActiveOrderBar, { ORDER_BAR_HEIGHT, useActiveOrder } from '../components/ActiveOrderBar';
-import { FREE_DELIVERY_THRESHOLD } from '../components/product/productUtils';
 import { contentColumn } from '../hooks/useContentWidth';
 
 const AnimatedFlashList = Animated.createAnimatedComponent(FlashList);
@@ -97,6 +96,7 @@ const HomeScreen = ({ navigation }) => {
     const [partialError, setPartialError] = useState(null); // one of categories/products failed
     const [errorCause, setErrorCause] = useState(null); // the request error behind error/partialError (for the friendly copy)
     const store = useStoreStatus();
+    const fees = useStoreFees();
     const [activeTab, setActiveTab] = useState('all');
     const [catProducts, setCatProducts] = useState({}); // categoryId -> products | 'loading'
     const [headerH, setHeaderH] = useState(0);
@@ -493,7 +493,13 @@ const HomeScreen = ({ navigation }) => {
 
     const addressType = selectedAddress?.type || (isHi ? 'घर' : 'Home');
     const addressLine = selectedAddress?.address || (isHi ? 'अपना पता चुनें' : 'Select your location');
-    const offerLabel = isHi ? `₹${FREE_DELIVERY_THRESHOLD} से ऊपर मुफ़्त डिलीवरी` : `Free delivery above ₹${FREE_DELIVERY_THRESHOLD}`;
+    // From the server's fees; nothing until settings load.
+    const freeAt = fees?.freeDeliveryThreshold;
+    const offerLabel = fees == null
+        ? null
+        : freeAt > 0
+          ? (isHi ? `₹${freeAt} से ऊपर मुफ़्त डिलीवरी` : `Free delivery above ₹${freeAt}`)
+          : (isHi ? 'हर ऑर्डर पर मुफ़्त डिलीवरी' : 'Free delivery on every order');
     const avatarInitial = (user?.name || '').trim().charAt(0).toUpperCase();
     const hasOrderBar = !!activeOrder;
     const cartSpace = cartCount > 0 ? CART_PILL_H + space.sm : 0;

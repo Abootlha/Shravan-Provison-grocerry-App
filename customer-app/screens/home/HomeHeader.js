@@ -4,7 +4,7 @@
  *   ┌ GradientHeader (solid surface, hairline) ────────────────┐
  *   │ Delivery in 10 minutes  (or: Closed · opens at 8 AM)  (avatar) │  ← collapsible block (the one
  *   │ Home · 12 MG Road, Indiranagar ▾                         │    mixed-weight headline)
- *   │ [Free delivery above ₹200]  ● Open till 11 PM            │
+ *   │ [Free delivery above ₹{fees}]  ● Open till 11 PM            │
  *   │ [ Search for 'milk'                             |  mic ] │  ← sticks
  *   │  All   Fruits   Dairy   Atta   Masala ...                │  ← sticks, violet underline
  *   └──────────────────────────────────────────────────────────┘

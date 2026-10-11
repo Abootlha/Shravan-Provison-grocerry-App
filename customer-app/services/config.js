@@ -101,6 +101,7 @@ export const ENDPOINTS = {
     },
     orders: {
         LIST: '/orders',
+        QUOTE: '/orders/quote',
         DETAIL: (id) => `/orders/${id}`,
         USER: (userId) => `/orders/user/${userId}`,
         STATUS: '/orders/status',

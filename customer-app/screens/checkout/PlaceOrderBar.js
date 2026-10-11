@@ -23,9 +23,15 @@ const IconCircle = ({ name, tone = 'tint' }) => {
  * Sticky checkout footer (Part C §9): a sunken address strip, the payment row with the
  * total, and the violet slide-to-pay. `bottomPad` lets the sheet run under the floating
  * dock on the Cart tab so nothing shows through below it.
+ *
+ * `amount` is the server quote's totalAmount; `billState` other than 'ready' locks the slider
+ * ('updating' / 'refused') or swaps it for a Retry button ('error'), so nobody pays a guess.
  */
 const PlaceOrderBarBase = forwardRef(function PlaceOrderBar(
-    { address, onChangeAddress, paymentOption, onChangePayment, amount, isCod, onConfirm, bottomPad = 0, closedLabel = null, isHi },
+    {
+        address, onChangeAddress, paymentOption, onChangePayment, amount, isCod, onConfirm,
+        billState = 'ready', onRetryQuote, bottomPad = 0, closedLabel = null, isHi,
+    },
     sliderRef,
 ) {
     const styles = useStyles();
@@ -33,6 +39,10 @@ const PlaceOrderBarBase = forwardRef(function PlaceOrderBar(
     const changeLabel = isHi ? 'बदलें' : 'Change';
     const addressLine = address ? formatAddressLine(address, { pincode: false }) : '';
     const type = address?.type || 'Home';
+    const ready = billState === 'ready' && amount != null;
+    const blockedLabel = billState === 'refused'
+        ? (isHi ? 'अनुपलब्ध सामान हटाएं' : 'Remove unavailable items')
+        : (isHi ? 'कुल अपडेट हो रहा है…' : 'Updating total…');
 
     return (
         <View style={[styles.bar, { paddingBottom: space.md + bottomPad }]}>
@@ -81,11 +91,18 @@ const PlaceOrderBarBase = forwardRef(function PlaceOrderBar(
                 </PressableScale>
             </View>
 
-            {address ? (
+            {address && billState === 'error' && !closedLabel ? (
+                <View style={styles.errorBlock} accessibilityLiveRegion="polite">
+                    <Text variant="caption" color="secondary" align="center">
+                        {isHi ? 'कुल राशि की पुष्टि नहीं हो सकी, भुगतान रोका गया है।' : 'We couldn’t confirm your total, so payment is paused.'}
+                    </Text>
+                    <Button label={isHi ? 'फिर से प्रयास करें' : 'Retry'} size="lg" fullWidth onPress={onRetryQuote} />
+                </View>
+            ) : address ? (
                 <SlideToConfirm
                     ref={sliderRef}
-                    disabled={!!closedLabel}
-                    label={closedLabel || (isCod
+                    disabled={!!closedLabel || !ready}
+                    label={closedLabel || (!ready ? blockedLabel : isCod
                         ? (isHi ? `ऑर्डर के लिए स्लाइड करें · ₹${amount}` : `Slide to place order · ₹${amount}`)
                         : (isHi ? `₹${amount} भुगतान के लिए स्लाइड करें` : `Slide to pay ₹${amount}`))}
                     confirmedLabel={isCod
@@ -135,6 +152,7 @@ const useStyles = makeStyles((t) => ({
     payRow: { flexDirection: 'row', alignItems: 'center', paddingLeft: space.sm },
     payPick: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: HIT },
     payChange: { paddingRight: space.md },
+    errorBlock: { gap: space.sm },
 }));
 
 export default PlaceOrderBar;

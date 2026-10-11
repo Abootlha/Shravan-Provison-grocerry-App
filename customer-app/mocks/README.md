@@ -204,3 +204,12 @@ backend's `local` provider), normalise it the same way, then add a row below.
 | toorDal | Open Food Facts, product 8904064662124 | CC-BY-SA 3.0 | https://world.openfoodfacts.org/product/8904064662124 |
 | vimBar | Unsplash photo 1607006344152-62699f97b42c | Unsplash Licence | https://images.unsplash.com/photo-1607006344152-62699f97b42c |
 | vimGel | Open Beauty Facts, product 8901030760624 | CC-BY-SA 3.0 | https://world.openbeautyfacts.org/product/8901030760624 |
+
+## Checkout bill
+
+`GET /settings/store` carries `fees` and `isOpen`/`nextOpenAt`; `POST /orders/quote` and
+`POST /orders` price the lines from the catalogue with the backend's formula
+(`orders/pricing.ts`), so the slide-to-pay amount and the created order always match.
+A cart line whose product is missing, not `active`, unavailable or unpriced is refused
+with the backend's 400 message. Web flags: `?store=closed` previews the closed store,
+`?mockQuote=fail` makes the quote fail (payment is blocked behind a Retry).

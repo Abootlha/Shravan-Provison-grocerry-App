@@ -5,7 +5,6 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { ConfettiBurst, ProgressBar, Text, haptic } from '../../components/ui';
 import { space } from '../../constants/theme';
 import { layout, makeStyles, useTheme } from '../../theme';
-import { FREE_DELIVERY_AT } from './bill';
 
 const BAR = 6;
 
@@ -13,8 +12,9 @@ const BAR = 6;
  * Free-delivery meter inside the ETA card: a flat savings-green ProgressBar on the hairline
  * track. The fill springs; the copy swaps on the crossing and — only on the crossing, never on
  * mount — one confetti pop + success haptic. Reduced motion: no confetti.
+ * `threshold` is the server's fees.freeDeliveryThreshold.
  */
-function FreeDeliveryNudgeBase({ itemTotal, gap, isHi }) {
+function FreeDeliveryNudgeBase({ itemTotal, gap, threshold, isHi }) {
     const styles = useStyles();
     const { colors } = useTheme();
     const reduce = useReducedMotion();
@@ -54,7 +54,7 @@ function FreeDeliveryNudgeBase({ itemTotal, gap, isHi }) {
                 <ConfettiBurst ref={confetti} count={14} spread={110} />
             </View>
             <ProgressBar
-                value={itemTotal / FREE_DELIVERY_AT}
+                value={threshold > 0 ? itemTotal / threshold : 1}
                 height={BAR}
                 color={colors.success}
                 trackColor={colors.hairline}

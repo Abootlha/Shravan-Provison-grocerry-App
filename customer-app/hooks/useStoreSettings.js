@@ -3,6 +3,7 @@
  *
  *   useStoreSettings()  -> { settings, loaded, failed, reload }
  *   useStoreStatus()    -> { isOpen, nextOpenAt, etaMinutes, opensLabel(isHi), closedLine(isHi) }
+ *   useStoreFees()      -> settings.fees, or null until loaded
  *   markStoreClosed(nextOpenAt)   called when POST /orders answers 409 STORE_CLOSED
  *
  * Rules (no guessing):
@@ -156,6 +157,29 @@ export function useStoreStatus() {
             return isHi ? `बंद · ${at} खुलेगा` : `Closed · opens at ${at}`;
         },
     };
+}
+
+/** Fees from the store settings, or null when the server hasn't told us yet. */
+export const feesFrom = (settings) => {
+    const f = settings?.fees;
+    if (!f || typeof f !== 'object') return null;
+    const n = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
+    const fees = {
+        deliveryFee: n(f.deliveryFee),
+        freeDeliveryThreshold: n(f.freeDeliveryThreshold),
+        packagingFee: n(f.packagingFee),
+        discountRate: n(f.discountRate),
+    };
+    return Object.values(fees).some((v) => v === null) ? null : fees;
+};
+
+/**
+ * Checkout fees from GET /settings/store: { deliveryFee, freeDeliveryThreshold, packagingFee,
+ * discountRate }, or null until the server has answered (callers show nothing rather than guess).
+ */
+export function useStoreFees() {
+    const { settings } = useStoreSettings();
+    return feesFrom(settings);
 }
 
 export default useStoreStatus;

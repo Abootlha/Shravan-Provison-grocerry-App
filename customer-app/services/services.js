@@ -122,6 +122,16 @@ export const CartService = {
 };
 
 export const OrderService = {
+    /** POST /orders/quote: the exact bill POST /orders would charge for these lines (no stock lock). */
+    quoteOrder: async (items) => {
+        const response = await orderApi.post(ENDPOINTS.orders.QUOTE, { items });
+        const body = response.data;
+        if (!body || typeof body !== 'object' || !Number.isFinite(Number(body.totalAmount))) {
+            throw new UnexpectedResponseError('POST /orders/quote', body);
+        }
+        return body;
+    },
+
     createOrder: async (orderData) => {
         const response = await orderApi.post(ENDPOINTS.orders.LIST, orderData);
         invalidate('orders:');

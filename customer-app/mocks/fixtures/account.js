@@ -12,7 +12,13 @@ export const storeSettings = {
     contactPhone: '+919876543210',
     serviceRadiusKm: 12,
     estimatedDeliveryMinutes: 10,
+    // settings/fees.ts (resolveFees defaults)
+    fees: { deliveryFee: 25, freeDeliveryThreshold: 200, packagingFee: 5, discountRate: 0.05 },
     isActive: true,
+    // Computed by the backend from storeTimings; the mock store is always open
+    // (preview the closed states with ?store=closed, see hooks/useStoreSettings.js).
+    isOpen: true,
+    nextOpenAt: null,
 };
 
 export const MOCK_USER_ID = oid(KIND.user, 1);
