@@ -20,6 +20,9 @@ import { ItemGroupsModule } from './modules/item-groups/item-groups.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { MapsModule } from './modules/maps/maps.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { BannersModule } from './modules/banners/banners.module';
+import { AuditModule } from './modules/audit/audit.module';
+import { TeamModule } from './modules/team/team.module';
 import { RedisModule } from './common/utils/redis.module';
 import { HttpThrottlerGuard } from './modules/auth/guards/http-throttler.guard';
 import { AppController } from './app.controller';
@@ -100,6 +103,9 @@ import { redisConnectionOptions } from './config/redis-options';
     JobsModule,
     MapsModule,
     PaymentsModule,
+    BannersModule,
+    TeamModule,
+    AuditModule,
   ],
   // Root routes: GET /api/v1 and the GET /api/v1/health probe used by deploys.
   controllers: [AppController],

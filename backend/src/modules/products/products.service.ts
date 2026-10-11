@@ -1,9 +1,21 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Product, ProductDocument } from './schemas/product.schema';
+import {
+  ACTIVE_STATUS_FILTER,
+  Product,
+  ProductDocument,
+} from './schemas/product.schema';
 import { RedisService } from '../../common/utils/redis.service';
+import { CatalogCacheService } from '../../common/utils/catalog-cache.service';
 import { ConfigService } from '@nestjs/config';
+
+/** Fields that mirror each other (legacy flat field → structured path). */
+const LEGACY_FIELD_PATHS: Record<string, string> = {
+  price: 'pricing.sellingPrice',
+  originalPrice: 'pricing.mrp',
+  unit: 'pack.unit',
+};
 
 export interface PaginatedProducts {
   products: ProductDocument[];
@@ -19,7 +31,17 @@ export class ProductsService {
     @InjectModel(Product.name) private productModel: Model<ProductDocument>,
     private redisService: RedisService,
     private configService: ConfigService,
+    private catalogCache: CatalogCacheService,
   ) {}
+
+  /**
+   * Call after any admin change to the catalogue: drops the product detail
+   * cache and bumps the catalogue version so every list cache is bypassed.
+   */
+  async invalidateProduct(id?: string): Promise<void> {
+    if (id) await this.redisService.del(RedisService.Keys.product(id));
+    await this.catalogCache.bump();
+  }
 
   async findAll(query: {
     categoryId?: string;
@@ -33,8 +55,9 @@ export class ProductsService {
     const limit = query.limit || 20;
     const skip = (page - 1) * limit;
 
-    // Build filter
-    const filter: any = { isAvailable: true };
+    // Build filter: public lists only show active, available products
+    // (documents without a status are treated as active).
+    const filter: any = { isAvailable: true, ...ACTIVE_STATUS_FILTER };
     if (query.categoryId) {
       filter.$or = filter.$or || [];
       filter.$or.push(
@@ -74,7 +97,12 @@ export class ProductsService {
     }
 
     // Check cache for category products
-    const cacheKey = this.buildCacheKey(query, page, limit);
+    const cacheKey = this.buildCacheKey(
+      query,
+      page,
+      limit,
+      await this.catalogCache.version(),
+    );
     if (!query.search) {
       const cached =
         await this.redisService.getJSON<PaginatedProducts>(cacheKey);
@@ -116,8 +144,13 @@ export class ProductsService {
     return result;
   }
 
-  private buildCacheKey(query: any, page: number, limit: number): string {
-    const parts = ['products'];
+  private buildCacheKey(
+    query: any,
+    page: number,
+    limit: number,
+    version: string,
+  ): string {
+    const parts = ['products', `v${version}`];
     if (query.itemGroupId) parts.push(`itemGroup:${query.itemGroupId}`);
     else if (query.subcategoryId)
       parts.push(`subcategory:${query.subcategoryId}`);
@@ -176,26 +209,50 @@ export class ProductsService {
       { path: 'itemGroupId', select: 'name subcategoryId' },
     ]);
 
-    // Invalidate category cache
-    if (data.categoryId) {
-      await this.redisService.delPattern(
-        `products:category:${String(data.categoryId)}:*`,
-      );
-    }
-    await this.redisService.delPattern(`products:all:*`);
+    await this.invalidateProduct();
 
     return product;
   }
 
-  async update(id: string, data: Partial<Product>): Promise<ProductDocument> {
-    const updatePayload: any = { ...data };
+  /**
+   * Partial update: only fields that are present in `data` change (an
+   * omitted isAvailable, status, stock... keeps its stored value). Legacy
+   * flat fields are mirrored into their structured paths because
+   * findByIdAndUpdate does not run the pre('save') sync.
+   */
+  static buildUpdate(data: Record<string, any>): Record<string, any> {
+    const $set: Record<string, any> = {};
+    const $unset: Record<string, 1> = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (value === undefined) continue;
+      $set[key] = value;
+    }
 
     // Prevent duplicate entry on sparse unique barcode index
-    if (updatePayload.barcode === '') {
-      delete updatePayload.barcode;
-      updatePayload.$unset = updatePayload.$unset || {};
-      updatePayload.$unset.barcode = 1;
+    if ($set.barcode === '') {
+      delete $set.barcode;
+      $unset.barcode = 1;
     }
+    for (const [flat, path] of Object.entries(LEGACY_FIELD_PATHS)) {
+      if ($set[flat] !== undefined) $set[path] = $set[flat];
+    }
+    if ($set.gst !== undefined) {
+      $set['pricing.gst'] = $set.gst;
+      delete $set.gst;
+    }
+    if (Array.isArray($set.images) && $set.image === undefined) {
+      if ($set.images.length > 0) $set.image = $set.images[0];
+      else $unset.image = 1;
+    }
+
+    const update: Record<string, any> = {};
+    if (Object.keys($set).length) update.$set = $set;
+    if (Object.keys($unset).length) update.$unset = $unset;
+    return update;
+  }
+
+  async update(id: string, data: Partial<Product>): Promise<ProductDocument> {
+    const updatePayload = ProductsService.buildUpdate(data);
 
     const product = await this.productModel
       .findByIdAndUpdate(id, updatePayload, { new: true })
@@ -204,12 +261,7 @@ export class ProductsService {
       .populate('itemGroupId', 'name subcategoryId');
     if (!product) throw new NotFoundException('Product not found');
 
-    // Invalidate caches
-    await this.redisService.del(RedisService.Keys.product(id));
-    await this.redisService.delPattern(
-      `products:category:${String(product.categoryId)}:*`,
-    );
-    await this.redisService.delPattern(`products:all:*`);
+    await this.invalidateProduct(id);
 
     return product;
   }

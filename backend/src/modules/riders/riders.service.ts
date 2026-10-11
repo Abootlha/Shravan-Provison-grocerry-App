@@ -56,7 +56,7 @@ export class RidersService {
       query.status = RiderStatus.OFFLINE;
     }
 
-    return this.riderModel.find(query).lean().exec();
+    return this.riderModel.find(query).select('-password').lean().exec();
   }
 
   async findRiderById(riderId: string): Promise<RiderDocument> {
@@ -189,14 +189,21 @@ export class RidersService {
     return rider;
   }
 
-  async findAvailableRiders(): Promise<Rider[]> {
+  async findAvailableRiders(): Promise<Omit<Rider, 'password'>[]> {
     return this.riderModel
       .find({
         status: RiderStatus.AVAILABLE,
         isActive: true,
       })
       .lean()
-      .exec();
+      .exec()
+      .then((riders) =>
+        riders.map((rider) => {
+          const copy: Record<string, any> = { ...rider };
+          delete copy.password;
+          return copy as Omit<Rider, 'password'>;
+        }),
+      );
   }
 
   async findById(riderId: string): Promise<Rider> {

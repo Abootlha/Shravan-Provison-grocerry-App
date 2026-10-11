@@ -38,11 +38,25 @@ export class RedisService implements OnModuleDestroy {
     await this.client.del(key);
   }
 
+  /**
+   * Deletes keys matching a pattern with incremental SCAN (never KEYS, which
+   * blocks Redis). Prefer versioned keys (CatalogCacheService) for caches.
+   */
   async delPattern(pattern: string): Promise<void> {
-    const keys = await this.client.keys(pattern);
-    if (keys.length > 0) {
-      await this.client.del(...keys);
-    }
+    let cursor = '0';
+    do {
+      const [next, keys] = await this.client.scan(
+        cursor,
+        'MATCH',
+        pattern,
+        'COUNT',
+        200,
+      );
+      cursor = next;
+      if (keys.length > 0) {
+        await this.client.unlink(...keys);
+      }
+    } while (cursor !== '0');
   }
 
   async getJSON<T>(key: string): Promise<T | null> {

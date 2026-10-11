@@ -12,7 +12,15 @@ import Redis from 'ioredis';
 import { redisConnectionOptions } from '../config/redis-options';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { OrdersService } from '../modules/orders/orders.service';
+import {
+  ADMIN_ORDER_EVENTS_CHANNEL,
+  OrdersService,
+} from '../modules/orders/orders.service';
+import { isStaffRole } from '../modules/users/schemas/user.schema';
+
+/** Room on the /orders namespace that receives order:new / order:updated. */
+export const ADMIN_ORDERS_ROOM = 'admin:orders';
+const ADMIN_EVENTS = new Set(['order:new', 'order:updated']);
 
 @WebSocketGateway({
   cors: {
@@ -38,17 +46,25 @@ export class OrdersGateway
     // Create a separate Redis connection for subscribing
     this.subscriber = new Redis(redisConnectionOptions(this.configService));
 
-    // Subscribe to order updates channel
-    this.subscriber.subscribe('order-updates', (err) => {
-      if (err) {
-        this.logger.error('Failed to subscribe to order-updates:', err);
-      } else {
-        this.logger.log('Subscribed to order-updates channel');
-      }
-    });
+    // Subscribe to order updates channels
+    this.subscriber.subscribe(
+      'order-updates',
+      ADMIN_ORDER_EVENTS_CHANNEL,
+      (err) => {
+        if (err) {
+          this.logger.error('Failed to subscribe to order-updates:', err);
+        } else {
+          this.logger.log('Subscribed to order-updates channel');
+        }
+      },
+    );
 
     // Listen for messages
     this.subscriber.on('message', (channel, message) => {
+      if (channel === ADMIN_ORDER_EVENTS_CHANNEL) {
+        this.relayAdminEvent(message);
+        return;
+      }
       if (channel === 'order-updates') {
         try {
           const data = JSON.parse(message);
@@ -62,6 +78,17 @@ export class OrdersGateway
         }
       }
     });
+  }
+
+  /** Relays an admin order event published by OrdersService to staff sockets. */
+  relayAdminEvent(message: string): void {
+    try {
+      const data = JSON.parse(message);
+      if (!data || !ADMIN_EVENTS.has(data.event)) return;
+      this.server.to(ADMIN_ORDERS_ROOM).emit(data.event, data.order);
+    } catch (err) {
+      this.logger.error('Failed to parse admin order event:', err);
+    }
   }
 
   afterInit() {
@@ -102,7 +129,14 @@ export class OrdersGateway
       const payload = await this.jwtService.verifyAsync(token, {
         secret: this.configService.get<string>('jwt.secret'),
       });
+      if (payload?.type === 'refresh') {
+        throw new Error('refresh tokens cannot open a socket');
+      }
       client.data.user = { userId: payload.sub, role: payload.role };
+      // Admin panel sockets get live order events without asking.
+      if (isStaffRole(payload.role)) {
+        await client.join(ADMIN_ORDERS_ROOM);
+      }
       this.logger.log(`Client connected: ${client.id}`);
     } catch (error) {
       this.logger.warn(
@@ -132,7 +166,7 @@ export class OrdersGateway
     const isOwner = order?.userId?.toString() === user.userId;
     const isAssignedRider =
       user.role === 'rider' && order?.riderId?.toString() === user.userId;
-    const isAdmin = user.role === 'admin';
+    const isAdmin = isStaffRole(user.role);
 
     if (!order || (!isOwner && !isAssignedRider && !isAdmin)) {
       this.logger.warn(
@@ -144,6 +178,19 @@ export class OrdersGateway
     client.join(`order:${orderId}`);
     this.logger.log(`Client ${client.id} joined room order:${orderId}`);
     return { event: 'joined', data: { orderId } };
+  }
+
+  /** Explicit join for clients that connect before deciding to listen. */
+  @SubscribeMessage('joinAdminOrders')
+  async handleJoinAdminOrders(client: Socket) {
+    const user = client.data?.user as
+      | { userId: string; role: string }
+      | undefined;
+    if (!user || !isStaffRole(user.role)) {
+      return { event: 'error', data: { message: 'Admin access required' } };
+    }
+    await client.join(ADMIN_ORDERS_ROOM);
+    return { event: 'joinedAdminOrders', data: { room: ADMIN_ORDERS_ROOM } };
   }
 
   @SubscribeMessage('leaveOrder')

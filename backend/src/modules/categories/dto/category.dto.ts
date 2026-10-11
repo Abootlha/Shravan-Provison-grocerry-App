@@ -8,6 +8,7 @@ import {
   IsString,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { IsImageSource } from '../../products/dto/image-source.validator';
 import { CategoryType } from '../schemas/category.schema';
@@ -23,10 +24,22 @@ export class CreateCategoryDto {
   @MaxLength(100)
   nameHi?: string;
 
+  /** Optional; an empty string clears it. */
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
+  @ValidateIf((o: { icon?: string }) => !!o.icon)
   @IsImageSource({ allowPlainIcon: true })
-  icon!: string;
+  icon?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  group?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  groupHi?: string;
 
   @IsString()
   @IsNotEmpty()
@@ -78,11 +91,22 @@ export class UpdateCategoryDto {
   @MaxLength(100)
   nameHi?: string;
 
+  /** Optional; an empty string clears it. */
   @IsOptional()
   @IsString()
-  @IsNotEmpty()
+  @ValidateIf((o: { icon?: string }) => !!o.icon)
   @IsImageSource({ allowPlainIcon: true })
   icon?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  group?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  groupHi?: string;
 
   @IsOptional()
   @IsString()

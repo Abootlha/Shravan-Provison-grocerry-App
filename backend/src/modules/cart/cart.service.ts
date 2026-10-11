@@ -10,6 +10,10 @@ import { ProductsService } from '../products/products.service';
 import { RedisService } from '../../common/utils/redis.service';
 import { ConfigService } from '@nestjs/config';
 import { MAX_CART_ITEM_QUANTITY } from './dto/cart.dto';
+import {
+  checkoutPriceOf,
+  isProductSellable,
+} from '../products/schemas/product.schema';
 
 @Injectable()
 export class CartService {
@@ -57,7 +61,7 @@ export class CartService {
     // Validate product exists and has stock
     const product = await this.productsService.findById(productId);
     if (!product) throw new NotFoundException('Product not found');
-    if (!product.isAvailable)
+    if (!isProductSellable(product))
       throw new BadRequestException('Product not available');
     if (product.stock < quantity)
       throw new BadRequestException('Insufficient stock');
@@ -88,12 +92,12 @@ export class CartService {
       if (product.stock < newQuantity)
         throw new BadRequestException('Insufficient stock');
       existingItem.quantity = newQuantity;
-      existingItem.price = product.price ?? 0; // Update to current price
+      existingItem.price = checkoutPriceOf(product) ?? 0; // Update to current price
     } else {
       cart.items.push({
         productId: new Types.ObjectId(productId),
         quantity,
-        price: product.price ?? 0,
+        price: checkoutPriceOf(product) ?? 0,
       });
     }
 
@@ -128,7 +132,7 @@ export class CartService {
     if (!item) throw new NotFoundException('Item not in cart');
 
     item.quantity = quantity;
-    item.price = product.price ?? 0;
+    item.price = checkoutPriceOf(product) ?? 0;
     await cart.save();
 
     await this.redisService.del(RedisService.Keys.cart(userId));
@@ -172,7 +176,7 @@ export class CartService {
       const product = await this.productsService.findById(
         item.productId.toString(),
       );
-      if (!product || !product.isAvailable) {
+      if (!product || !isProductSellable(product)) {
         throw new BadRequestException(
           `Product ${String(item.productId)} is no longer available`,
         );
@@ -180,7 +184,7 @@ export class CartService {
       if (product.stock < item.quantity) {
         throw new BadRequestException(`Insufficient stock for ${product.name}`);
       }
-      item.price = product.price ?? 0;
+      item.price = checkoutPriceOf(product) ?? 0;
     }
 
     await cart.save();
@@ -202,7 +206,7 @@ export class CartService {
           name: product?.name,
           image: product?.image,
           unit: product?.unit,
-          isAvailable: product?.isAvailable ?? false,
+          isAvailable: isProductSellable(product),
         };
       }),
     );

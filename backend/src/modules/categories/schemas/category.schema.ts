@@ -17,8 +17,9 @@ export class Category {
   @Prop() // Hindi name field
   nameHi?: string;
 
-  @Prop({ required: true })
-  icon!: string;
+  // Optional: categories without an icon render without one.
+  @Prop()
+  icon?: string;
 
   @Prop({ required: true })
   color!: string;
@@ -52,6 +53,13 @@ export class Category {
 
   @Prop() // Hindi description field
   descriptionHi?: string;
+
+  /** Home-screen grouping (e.g. "Grocery & Kitchen"); replaces the app's hard-coded groups. */
+  @Prop()
+  group?: string;
+
+  @Prop()
+  groupHi?: string;
 }
 
 export const CategorySchema = SchemaFactory.createForClass(Category);

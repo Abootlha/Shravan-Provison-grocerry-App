@@ -1,5 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
+import { DEFAULT_FEES } from '../fees';
+import { DEFAULT_TIMEZONE } from '../store-hours';
 
 export type StoreSettingsDocument = StoreSettings & Document;
 
@@ -24,6 +26,22 @@ export class StoreTimings {
   closeTime!: string;
 }
 
+@Schema({ _id: false })
+export class StoreFees {
+  @Prop({ default: DEFAULT_FEES.deliveryFee, min: 0 })
+  deliveryFee!: number;
+
+  @Prop({ default: DEFAULT_FEES.freeDeliveryThreshold, min: 0 })
+  freeDeliveryThreshold!: number;
+
+  @Prop({ default: DEFAULT_FEES.packagingFee, min: 0 })
+  packagingFee!: number;
+
+  /** Fraction of the item total (0.05 = 5%). */
+  @Prop({ default: DEFAULT_FEES.discountRate, min: 0, max: 1 })
+  discountRate!: number;
+}
+
 @Schema({ timestamps: true })
 export class StoreSettings {
   @Prop({ required: true, unique: true, default: 'main' })
@@ -42,8 +60,25 @@ export class StoreSettings {
   })
   storeTimings!: StoreTimings;
 
-  @Prop({ required: false, default: '+919876543210' })
+  // No placeholder default: set by an admin in Settings.
+  @Prop({ required: false })
   contactPhone?: string;
+
+  @Prop()
+  contactEmail?: string;
+
+  /** Registered business address (for invoices); location.address is the pickup point. */
+  @Prop()
+  address?: string;
+
+  @Prop()
+  gstin?: string;
+
+  @Prop({ default: DEFAULT_TIMEZONE })
+  timezone!: string;
+
+  @Prop({ type: StoreFees, default: () => ({ ...DEFAULT_FEES }) })
+  fees!: StoreFees;
 
   @Prop({ required: true, default: 4 })
   serviceRadiusKm!: number; // Maximum delivery distance in kilometers

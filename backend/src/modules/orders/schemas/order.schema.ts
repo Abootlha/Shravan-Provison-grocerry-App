@@ -189,6 +189,11 @@ export const OrderSchema = SchemaFactory.createForClass(Order);
 OrderSchema.index({ orderStatus: 1, createdAt: 1 }); // Compound index for stale order queries
 OrderSchema.index({ userId: 1, createdAt: -1 });
 OrderSchema.index({ createdAt: -1 });
+// Admin order filters and rider stats / active-order lookups.
+OrderSchema.index({ riderId: 1, orderStatus: 1, updatedAt: -1 });
+OrderSchema.index({ paymentStatus: 1, createdAt: -1 });
+OrderSchema.index({ paymentMethod: 1, createdAt: -1 });
+OrderSchema.index({ requiresManualReview: 1, createdAt: -1 });
 
 // Pre-save hook for referential integrity validation
 OrderSchema.pre('save', async function () {

@@ -7,7 +7,7 @@ import { RidersService } from '../riders/riders.service';
 import { OtpService, SendOtpResult } from './otp.service';
 import { RedisService } from '../../common/utils/redis.service';
 import * as bcrypt from 'bcrypt';
-import { UserRole } from '../users/schemas/user.schema';
+import { UserRole, isStaffRole } from '../users/schemas/user.schema';
 import { AuthKeys } from './auth.keys';
 import { JwtPayload } from './strategies/jwt.strategy';
 
@@ -82,7 +82,8 @@ export class AuthService {
   async adminLogin(username: string, password: string): Promise<any> {
     const user = await this.usersService.findByUsername(username);
 
-    if (!user || user.role !== UserRole.ADMIN || !user.password) {
+    // Admin panel accounts: admins and managers.
+    if (!user || !isStaffRole(user.role) || !user.password) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -520,10 +521,9 @@ export class AuthService {
   }
 
   private refreshIdleSeconds(role: string): number {
-    const days =
-      role === (UserRole.ADMIN as string)
-        ? (this.configService.get<number>('jwt.adminRefreshIdleDays') ?? 28)
-        : (this.configService.get<number>('jwt.refreshIdleDays') ?? 365);
+    const days = isStaffRole(role)
+      ? (this.configService.get<number>('jwt.adminRefreshIdleDays') ?? 28)
+      : (this.configService.get<number>('jwt.refreshIdleDays') ?? 365);
     return Math.max(0, days) * DAY_SECONDS;
   }
 

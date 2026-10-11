@@ -38,6 +38,55 @@ import { RedisService } from '../../common/utils/redis.service';
 import { CacheService } from '../../common/utils/cache.service';
 import { TrackingGateway } from '../../sockets/tracking.gateway';
 import { ETAService } from './eta.service';
+import { calculateBill, OrderBill } from './pricing';
+import { resolveFees } from '../settings/fees';
+import { computeStoreOpenState } from '../settings/store-hours';
+import {
+  checkoutPriceOf,
+  isProductSellable,
+} from '../products/schemas/product.schema';
+import { isStaffRole } from '../users/schemas/user.schema';
+import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
+import { escapeRegex, pageMeta } from '../../common/dto/query-transforms';
+
+/** Redis channel the /orders gateway relays to the `admin:orders` room. */
+export const ADMIN_ORDER_EVENTS_CHANNEL = 'admin-order-events';
+
+export type AdminOrderEvent = 'order:new' | 'order:updated';
+
+export interface OrderLineInput {
+  productId: string;
+  quantity: number;
+  name?: string;
+}
+
+export interface OrderQuote extends OrderBill {
+  isOpen: boolean;
+  nextOpenAt: string | null;
+  items: {
+    productId: string;
+    name: string;
+    quantity: number;
+    price: number;
+    lineTotal: number;
+    image?: string;
+  }[];
+}
+
+/** Thrown when an order is placed outside store hours or while closed. */
+export class StoreClosedException extends ConflictException {
+  constructor(nextOpenAt: string | null) {
+    super({
+      statusCode: 409,
+      code: 'STORE_CLOSED',
+      error: 'Conflict',
+      message: nextOpenAt
+        ? 'The store is closed right now. Please order once it opens.'
+        : 'The store is not taking orders right now.',
+      nextOpenAt,
+    });
+  }
+}
 
 export const MAX_DELIVERY_OTP_ATTEMPTS = 5;
 
@@ -136,23 +185,22 @@ export class OrdersService {
     private etaService: ETAService,
   ) {}
 
-  async createOrder(
+  /**
+   * Prices the requested lines against the live catalogue (or the user's
+   * server cart when no lines are sent). Shared by createOrder and quote so
+   * the quote always equals what the order will charge.
+   */
+  private async buildOrderLines(
     userId: string,
-    data: {
-      deliveryAddress: any;
-      paymentMethod: PaymentMethod;
-      deliveryInstructions?: string;
-      items?: any[];
-    },
-  ): Promise<OrderDocument> {
-    let orderItems = [];
+    items?: OrderLineInput[],
+  ): Promise<{ orderItems: any[]; itemTotal: number }> {
+    const orderItems: any[] = [];
     let itemTotal = 0;
 
-    if (data.items && data.items.length > 0) {
-      // Process items from frontend payload securely
-      for (const item of data.items) {
+    if (items && items.length > 0) {
+      for (const item of items) {
         const product = await this.productsService.findById(item.productId);
-        if (!product || !product.isAvailable) {
+        if (!product || !isProductSellable(product)) {
           throw new BadRequestException(
             `Product ${item.name || item.productId} is no longer available`,
           );
@@ -162,30 +210,79 @@ export class OrdersService {
             `Insufficient stock for ${product.name}`,
           );
         }
+        const price = checkoutPriceOf(product) as number;
         orderItems.push({
           productId: product._id,
           name: product.name,
           quantity: item.quantity,
-          price: product.price ?? 0,
+          price,
           image: product.image,
         });
-        itemTotal += (product.price ?? 0) * item.quantity;
+        itemTotal += price * item.quantity;
       }
-    } else {
-      // Fallback: Recalculate backend cart
-      const cart = await this.cartService.recalculateCart(userId);
-      if (!cart.items || cart.items.length === 0) {
-        throw new BadRequestException('Cart is empty');
-      }
-      orderItems = cart.items.map((item: any) => ({
+      return { orderItems, itemTotal };
+    }
+
+    // Fallback: Recalculate backend cart
+    const cart = await this.cartService.recalculateCart(userId);
+    if (!cart.items || cart.items.length === 0) {
+      throw new BadRequestException('Cart is empty');
+    }
+    return {
+      orderItems: cart.items.map((item: any) => ({
         productId: item.productId,
         name: item.name,
         quantity: item.quantity,
         price: item.price,
         image: item.image,
-      }));
-      itemTotal = cart.total;
+      })),
+      itemTotal: cart.total,
+    };
+  }
+
+  /** Exact bill for a cart, computed exactly like createOrder (no stock lock). */
+  async quoteOrder(
+    userId: string,
+    items: OrderLineInput[],
+  ): Promise<OrderQuote> {
+    const settings = await this.settingsService.getStoreSettings();
+    const { isOpen, nextOpenAt } = computeStoreOpenState(settings);
+    const { orderItems, itemTotal } = await this.buildOrderLines(userId, items);
+    return {
+      ...calculateBill(itemTotal, resolveFees(settings.fees)),
+      isOpen,
+      nextOpenAt,
+      items: orderItems.map((item) => ({
+        productId: item.productId.toString(),
+        name: item.name,
+        quantity: item.quantity,
+        price: item.price,
+        lineTotal: Math.round(item.price * item.quantity * 100) / 100,
+        image: item.image,
+      })),
+    };
+  }
+
+  async createOrder(
+    userId: string,
+    data: {
+      deliveryAddress: any;
+      paymentMethod: PaymentMethod;
+      deliveryInstructions?: string;
+      items?: OrderLineInput[];
+    },
+  ): Promise<OrderDocument> {
+    // Orders are only accepted while the store is open (and not paused).
+    const settings = await this.settingsService.getStoreSettings();
+    const openState = computeStoreOpenState(settings);
+    if (!openState.isOpen) {
+      throw new StoreClosedException(openState.nextOpenAt);
     }
+
+    const { orderItems, itemTotal: rawItemTotal } = await this.buildOrderLines(
+      userId,
+      data.items,
+    );
 
     // Lock stock atomically
     const stockItems = orderItems.map((item: any) => ({
@@ -202,11 +299,9 @@ export class OrdersService {
     // Generate order ID
     const orderId = `ORD-${dayjs().format('YYYYMMDD')}-${uuidv4().slice(0, 8).toUpperCase()}`;
 
-    // Calculate totals using the securely computed itemTotal
-    const deliveryFee = itemTotal >= 200 ? 0 : 25;
-    const packagingFee = 5;
-    const discount = Math.round(itemTotal * 0.05); // 5% discount
-    const totalAmount = itemTotal + deliveryFee + packagingFee - discount;
+    // Same calculation as POST /orders/quote, using the fees from settings.
+    const { itemTotal, deliveryFee, packagingFee, discount, totalAmount } =
+      calculateBill(rawItemTotal, resolveFees(settings.fees));
 
     const deliveryAddress = {
       type: data.deliveryAddress.type,
@@ -270,7 +365,49 @@ export class OrdersService {
     // Clear user's cart
     await this.cartService.clearCart(userId);
 
+    await this.publishAdminOrderEvent('order:new', order);
+
     return order;
+  }
+
+  /**
+   * Notifies admin dashboards (Socket.IO room `admin:orders` on /orders).
+   * Goes through Redis pub/sub so every app instance relays it. Never fails
+   * the calling request.
+   */
+  async publishAdminOrderEvent(
+    event: AdminOrderEvent,
+    order: Record<string, any>,
+  ): Promise<void> {
+    try {
+      const id = (order._id ?? order.id)?.toString?.();
+      const userId = order.userId?._id ?? order.userId;
+      const riderId = order.riderId?._id ?? order.riderId;
+      await this.redisService.publish(
+        ADMIN_ORDER_EVENTS_CHANNEL,
+        JSON.stringify({
+          event,
+          order: {
+            _id: id,
+            orderId: order.orderId,
+            orderStatus: order.orderStatus,
+            paymentStatus: order.paymentStatus,
+            paymentMethod: order.paymentMethod,
+            totalAmount: order.totalAmount,
+            itemCount: Array.isArray(order.items) ? order.items.length : 0,
+            userId: userId ? userId.toString() : null,
+            riderId: riderId ? riderId.toString() : null,
+            requiresManualReview: !!order.requiresManualReview,
+            createdAt: order.createdAt ?? null,
+            updatedAt: order.updatedAt ?? new Date(),
+          },
+        }),
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to publish ${event} for admin dashboards: ${(error as Error).message}`,
+      );
+    }
   }
 
   async findByUser(userId: string, page = 1, limit = 10): Promise<any> {
@@ -679,7 +816,7 @@ export class OrdersService {
     if (
       newStatus === OrderStatus.CANCELLED &&
       goodsLeftStore &&
-      options.actorRole !== UserRole.ADMIN
+      !isStaffRole(options.actorRole)
     ) {
       throw new ForbiddenException(
         'Orders that have been picked up can only be cancelled by an admin',
@@ -785,6 +922,7 @@ export class OrdersService {
     const trackingOrder = await this.buildRealtimeOrderPayload(
       updated._id.toString(),
     );
+    await this.publishAdminOrderEvent('order:updated', updated);
 
     // Broadcast order status update via socket
     this.trackingGateway.broadcastOrderStatusUpdate(
@@ -968,6 +1106,7 @@ export class OrdersService {
 
   private async afterPaymentStatusChange(order: OrderDocument): Promise<void> {
     await this.cacheService.deleteOrder(order._id.toString());
+    await this.publishAdminOrderEvent('order:updated', order);
     await this.redisService.publish(
       'order-updates',
       JSON.stringify({
@@ -1111,6 +1250,7 @@ export class OrdersService {
     const trackingOrder = await this.buildRealtimeOrderPayload(
       updated._id.toString(),
     );
+    await this.publishAdminOrderEvent('order:updated', updated);
 
     // Broadcast current assignment state so customer/admin/rider all receive the real rider details.
     this.trackingGateway.broadcastOrderStatusUpdate(
@@ -1167,15 +1307,23 @@ export class OrdersService {
     // two concurrent assignments can never both take the same rider.
     const rider = await this.riderModel
       .findOneAndUpdate(
-        { _id: riderId, status: RiderStatus.AVAILABLE },
+        // Deactivated riders can never be assigned.
+        { _id: riderId, status: RiderStatus.AVAILABLE, isActive: true },
         { $set: { status: RiderStatus.BUSY } },
         { new: true },
       )
       .exec();
 
     if (!rider) {
-      const exists = await this.riderModel.exists({ _id: riderId });
-      if (!exists) throw new NotFoundException('Rider not found');
+      const existing = await this.riderModel
+        .findById(riderId)
+        .select('isActive')
+        .lean()
+        .exec();
+      if (!existing) throw new NotFoundException('Rider not found');
+      if (existing.isActive === false) {
+        throw new BadRequestException('Rider is deactivated');
+      }
       throw new BadRequestException('Rider is not available');
     }
 
@@ -1239,6 +1387,7 @@ export class OrdersService {
     const trackingOrder = await this.buildRealtimeOrderPayload(
       updatedOrder._id.toString(),
     );
+    await this.publishAdminOrderEvent('order:updated', updatedOrder);
     this.trackingGateway.broadcastOrderStatusUpdate(
       updatedOrder._id.toString(),
       trackingOrder,
@@ -1274,20 +1423,36 @@ export class OrdersService {
   async unassignRider(orderId: string): Promise<OrderDocument> {
     const order = await this.orderModel.findById(orderId);
     if (!order) throw new NotFoundException('Order not found');
+    if (order.orderStatus !== OrderStatus.CONFIRMED) {
+      throw new BadRequestException(
+        `Cannot unassign the rider while order is ${order.orderStatus}`,
+      );
+    }
 
     const previousRiderId = order.riderId?.toString();
-    order.riderId = undefined;
-    await order.save();
+    const updated = await this.orderModel
+      .findOneAndUpdate(
+        { _id: order._id, orderStatus: OrderStatus.CONFIRMED },
+        { $unset: { riderId: 1 } },
+        { new: true },
+      )
+      .exec();
+    if (!updated) {
+      throw new ConflictException(
+        'Order was changed by another request. Please refresh and retry.',
+      );
+    }
 
     if (previousRiderId) {
       await this.releaseRider(previousRiderId, false);
     }
 
     // Invalidate cache
-    await this.cacheService.deleteOrder(order._id.toString());
-    await this.redisService.del(RedisService.Keys.orderStatus(order.orderId));
+    await this.cacheService.deleteOrder(updated._id.toString());
+    await this.redisService.del(RedisService.Keys.orderStatus(updated.orderId));
+    await this.publishAdminOrderEvent('order:updated', updated);
 
-    return order;
+    return updated;
   }
 
   async autoAssignNearestRider(orderId: string): Promise<OrderDocument | null> {
@@ -1443,6 +1608,163 @@ export class OrdersService {
       limit,
       totalPages: Math.ceil(total / limit),
     };
+  }
+
+  /**
+   * Admin order list: server pagination, filters and search. `q` matches the
+   * orderId (prefix when it starts with "ORD") or the customer name / phone.
+   */
+  async adminListOrders(query: AdminOrdersQueryDto): Promise<any> {
+    const page = query.page || 1;
+    const limit = query.limit || 20;
+    const filter: Record<string, any> = {};
+
+    if (query.status?.length) {
+      filter.orderStatus =
+        query.status.length === 1 ? query.status[0] : { $in: query.status };
+    }
+    if (query.paymentStatus) filter.paymentStatus = query.paymentStatus;
+    if (query.paymentMethod) filter.paymentMethod = query.paymentMethod;
+    if (query.riderId) {
+      filter.riderId = new Types.ObjectId(query.riderId);
+    } else if (query.unassigned) {
+      filter.riderId = { $in: [null] };
+    }
+    if (query.requiresManualReview !== undefined) {
+      filter.requiresManualReview = query.requiresManualReview
+        ? true
+        : { $ne: true };
+    }
+
+    const from = query.dateFrom || query.startDate;
+    const to = query.dateTo || query.endDate;
+    if (from || to) {
+      filter.createdAt = {};
+      if (from) filter.createdAt.$gte = new Date(from);
+      if (to) {
+        // A bare date (YYYY-MM-DD) includes that whole day.
+        const end = new Date(to);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+          end.setUTCDate(end.getUTCDate() + 1);
+          filter.createdAt.$lt = end;
+        } else {
+          filter.createdAt.$lte = end;
+        }
+      }
+    }
+
+    const q = query.q?.trim();
+    if (q) {
+      const or: Record<string, any>[] = [];
+      const upper = q.toUpperCase();
+      or.push({
+        orderId: upper.startsWith('ORD')
+          ? { $regex: `^${escapeRegex(upper)}` }
+          : { $regex: escapeRegex(upper) },
+      });
+      const userRegex = new RegExp(escapeRegex(q), 'i');
+      const users = await this.userModel
+        .find({ $or: [{ name: userRegex }, { phone: userRegex }] })
+        .select('_id')
+        .limit(200)
+        .lean()
+        .exec();
+      if (users.length > 0) {
+        or.push({ userId: { $in: users.map((u: any) => u._id) } });
+      }
+      filter.$or = or;
+    }
+
+    const sortKey = query.sort || '-createdAt';
+    const sortField = sortKey.replace(/^-/, '');
+    const direction = sortKey.startsWith('-') ? -1 : 1;
+    const sort: Record<string, 1 | -1> = { [sortField]: direction };
+    if (sortField !== 'createdAt') sort.createdAt = -1;
+
+    const [orders, total] = await Promise.all([
+      this.orderModel
+        .find(filter)
+        .populate('userId', 'name phone')
+        .populate('riderId', 'name phone vehicleType status')
+        .sort(sort)
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean()
+        .exec(),
+      this.orderModel.countDocuments(filter),
+    ]);
+
+    return { orders, ...pageMeta(total, page, limit) };
+  }
+
+  /**
+   * Full order for the admin detail view: tracking payload (customer, rider,
+   * store, route) plus the status timeline from the status logs, with the
+   * name of whoever made each change.
+   */
+  async adminGetOrderDetail(idOrOrderId: string): Promise<any> {
+    const lookup = Types.ObjectId.isValid(idOrOrderId)
+      ? { _id: new Types.ObjectId(idOrOrderId) }
+      : { orderId: idOrOrderId };
+    const found = await this.orderModel
+      .findOne(lookup)
+      .select('_id')
+      .lean()
+      .exec();
+    if (!found) throw new NotFoundException('Order not found');
+
+    const order = await this.buildRealtimeOrderPayload(found._id.toString());
+    const logs = await this.orderStatusLogModel
+      .find({ orderId: found._id })
+      .sort({ createdAt: 1 })
+      .lean()
+      .exec();
+
+    const actorIds = [
+      ...new Set(
+        logs
+          .map((log: any) => log.changedBy?.toString())
+          .filter((id: string | undefined): id is string => !!id),
+      ),
+    ];
+    const [users, riders] = await Promise.all([
+      actorIds.length
+        ? this.userModel
+            .find({ _id: { $in: actorIds } })
+            .select('name role')
+            .lean()
+            .exec()
+        : [],
+      actorIds.length
+        ? this.riderModel
+            .find({ _id: { $in: actorIds } })
+            .select('name')
+            .lean()
+            .exec()
+        : [],
+    ]);
+    const actors = new Map<string, { name: string; role: string }>();
+    for (const u of users as any[]) {
+      actors.set(u._id.toString(), { name: u.name, role: u.role });
+    }
+    for (const r of riders as any[]) {
+      actors.set(r._id.toString(), { name: r.name, role: 'rider' });
+    }
+
+    const statusTimeline = logs.map((log: any) => {
+      const actor = actors.get(log.changedBy?.toString());
+      return {
+        previousStatus: log.previousStatus ?? null,
+        status: log.newStatus,
+        note: log.note ?? null,
+        changedBy: log.changedBy?.toString() ?? null,
+        changedByName: actor?.name ?? null,
+        changedByRole: actor?.role ?? null,
+        at: log.createdAt,
+      };
+    });
+
+    return { ...order, statusTimeline };
   }
 
   private async logStatusChange(

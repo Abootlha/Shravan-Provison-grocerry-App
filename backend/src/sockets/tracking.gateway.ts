@@ -19,6 +19,7 @@ import { WsJwtGuard } from '../modules/auth/guards/ws-jwt.guard';
 import { Order, OrderStatus } from '../modules/orders/schemas/order.schema';
 import { OrdersService } from '../modules/orders/orders.service';
 import { RidersService } from '../modules/riders/riders.service';
+import { isStaffRole } from '../modules/users/schemas/user.schema';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 
@@ -240,7 +241,7 @@ export class TrackingGateway
     const orderOwnerId = this.extractEntityId(order.userId);
     const assignedRiderId = this.extractEntityId(order.riderId);
     const isOwner = orderOwnerId === user.userId;
-    const isAdmin = user.role === 'admin';
+    const isAdmin = isStaffRole(user.role);
     const isAssignedRider = assignedRiderId === user.userId;
 
     if (!isOwner && !isAdmin && !isAssignedRider) {

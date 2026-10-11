@@ -13,6 +13,25 @@ import { ItemGroupsService } from './item-groups.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { CreateItemGroupDto, UpdateItemGroupDto } from './dto/item-group.dto';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../users/schemas/user.schema';
+import { AdminCatalogListQueryDto } from '../../common/dto/admin-catalog-query.dto';
+
+@Controller('admin/item-groups')
+@UseGuards(JwtAuthGuard, AdminGuard)
+@Roles(UserRole.ADMIN, UserRole.MANAGER)
+export class AdminItemGroupsController {
+  constructor(private readonly itemGroupsService: ItemGroupsService) {}
+
+  @Get()
+  async findAll(@Query() query: AdminCatalogListQueryDto) {
+    const itemGroups = await this.itemGroupsService.adminFindAll({
+      includeInactive: query.includeInactive,
+      subcategoryId: query.subcategoryId,
+    });
+    return { itemGroups };
+  }
+}
 
 @Controller('item-groups')
 export class ItemGroupsController {

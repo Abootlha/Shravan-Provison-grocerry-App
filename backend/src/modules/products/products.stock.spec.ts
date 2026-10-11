@@ -9,7 +9,15 @@ describe('ProductsService - stock locking', () => {
 
   beforeEach(() => {
     productModel = createFakeModel();
-    service = new ProductsService(productModel, redis as any, {} as any);
+    service = new ProductsService(
+      productModel,
+      redis as any,
+      {} as any,
+      {
+        bump: jest.fn(),
+        version: jest.fn().mockResolvedValue('0'),
+      } as any,
+    );
   });
 
   const seed = (stock: number) =>

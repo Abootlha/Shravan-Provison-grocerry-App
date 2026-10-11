@@ -326,4 +326,43 @@ describe('HttpExceptionFilter - Property-Based Tests', () => {
       );
     });
   });
+
+  describe('structured errors', () => {
+    it('passes code and extra fields (e.g. STORE_CLOSED nextOpenAt) through', () => {
+      const nextOpenAt = '2026-10-13T02:30:00.000Z';
+      filter.catch(
+        new HttpException(
+          {
+            statusCode: 409,
+            code: 'STORE_CLOSED',
+            message: 'closed',
+            error: 'Conflict',
+            nextOpenAt,
+          },
+          HttpStatus.CONFLICT,
+        ),
+        mockHost,
+      );
+      expect(mockResponse.status).toHaveBeenCalledWith(409);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          statusCode: 409,
+          code: 'STORE_CLOSED',
+          message: 'closed',
+          nextOpenAt,
+        }),
+      );
+    });
+
+    it('does not pass extra fields for uncoded errors', () => {
+      filter.catch(
+        new HttpException(
+          { message: 'x', secret: 'y' },
+          HttpStatus.BAD_REQUEST,
+        ),
+        mockHost,
+      );
+      expect(mockResponse.json.mock.calls[0][0]).not.toHaveProperty('secret');
+    });
+  });
 });

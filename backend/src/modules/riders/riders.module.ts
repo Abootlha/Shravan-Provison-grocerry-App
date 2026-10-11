@@ -2,6 +2,9 @@ import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { RidersService } from './riders.service';
 import { RidersController } from './riders.controller';
+import { AdminRidersController } from './admin-riders.controller';
+import { AdminRidersService } from './admin-riders.service';
+import { SessionRevokerService } from '../auth/session-revoker.service';
 import { Rider, RiderSchema } from './schemas/rider.schema';
 import { Order, OrderSchema } from '../orders/schemas/order.schema';
 import { RedisService } from '../../common/utils/redis.service';
@@ -17,8 +20,13 @@ import { TrackingModule } from '../../sockets/tracking.module';
     forwardRef(() => OrdersModule),
     forwardRef(() => TrackingModule),
   ],
-  controllers: [RidersController],
-  providers: [RidersService, RedisService],
+  controllers: [RidersController, AdminRidersController],
+  providers: [
+    RidersService,
+    RedisService,
+    AdminRidersService,
+    SessionRevokerService,
+  ],
   exports: [
     RidersService,
     MongooseModule.forFeature([{ name: Rider.name, schema: RiderSchema }]),
