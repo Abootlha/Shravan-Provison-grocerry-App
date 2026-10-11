@@ -126,9 +126,9 @@ const ICONS = {
 // switch (screens/home/useTabEnter, ui/AnimatedScreen replayOnFocus; neither replays on a stack pop).
 const useNavOptions = makeThemed((t) => ({
     stack: { headerShown: false, contentStyle: { backgroundColor: t.colors.canvas }, ...transitions.push },
-    // Tab scenes sit on Main's opaque stack contentStyle (same canvas), so they stay transparent
-    // instead of painting a second full-screen fill (overdraw).
-    tab: { headerShown: false, sceneStyle: { backgroundColor: 'transparent' }, animation: 'none' },
+    // Tab scenes must be opaque: inactive tabs can stay mounted (always on web), and a transparent
+    // scene lets the previous tab show through during and after a switch.
+    tab: { headerShown: false, sceneStyle: { backgroundColor: t.colors.canvas }, animation: 'none' },
 }));
 // ProductDetail cross-fades so the card → PDP hero image (components/ui/HeroTransition) is the
 // only thing that travels; a slide would fight it. Short and the same both ways.
