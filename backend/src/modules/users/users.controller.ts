@@ -8,10 +8,12 @@ import {
   Delete,
   UseGuards,
   Request,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { CreateAddressDto, UpdateAddressDto } from './dto/address.dto';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard)
@@ -55,7 +57,7 @@ export class UsersController {
   }
 
   @Post('addresses')
-  async addAddress(@Request() req: any, @Body() address: any) {
+  async addAddress(@Request() req: any, @Body() address: CreateAddressDto) {
     const user = await this.usersService.addAddress(req.user.userId, address);
     return { addresses: user.addresses };
   }
@@ -63,23 +65,23 @@ export class UsersController {
   @Put('addresses/:index')
   async updateAddress(
     @Request() req: any,
-    @Param('index') index: string,
-    @Body() address: any,
+    @Param('index', ParseIntPipe) index: number,
+    @Body() address: UpdateAddressDto,
   ) {
     const user = await this.usersService.updateAddress(
       req.user.userId,
-      parseInt(index),
+      index,
       address,
     );
     return { addresses: user.addresses };
   }
 
   @Delete('addresses/:index')
-  async removeAddress(@Request() req: any, @Param('index') index: string) {
-    const user = await this.usersService.removeAddress(
-      req.user.userId,
-      parseInt(index),
-    );
+  async removeAddress(
+    @Request() req: any,
+    @Param('index', ParseIntPipe) index: number,
+  ) {
+    const user = await this.usersService.removeAddress(req.user.userId, index);
     return { addresses: user.addresses };
   }
 }

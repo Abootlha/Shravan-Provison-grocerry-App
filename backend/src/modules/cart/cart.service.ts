@@ -9,6 +9,7 @@ import { Cart, CartDocument } from './schemas/cart.schema';
 import { ProductsService } from '../products/products.service';
 import { RedisService } from '../../common/utils/redis.service';
 import { ConfigService } from '@nestjs/config';
+import { MAX_CART_ITEM_QUANTITY } from './dto/cart.dto';
 
 @Injectable()
 export class CartService {
@@ -78,7 +79,15 @@ export class CartService {
     );
 
     if (existingItem) {
-      existingItem.quantity += quantity;
+      const newQuantity = existingItem.quantity + quantity;
+      if (newQuantity > MAX_CART_ITEM_QUANTITY) {
+        throw new BadRequestException(
+          `Maximum ${MAX_CART_ITEM_QUANTITY} units per product`,
+        );
+      }
+      if (product.stock < newQuantity)
+        throw new BadRequestException('Insufficient stock');
+      existingItem.quantity = newQuantity;
       existingItem.price = product.price ?? 0; // Update to current price
     } else {
       cart.items.push({
@@ -165,7 +174,7 @@ export class CartService {
       );
       if (!product || !product.isAvailable) {
         throw new BadRequestException(
-          `Product ${item.productId} is no longer available`,
+          `Product ${String(item.productId)} is no longer available`,
         );
       }
       if (product.stock < item.quantity) {

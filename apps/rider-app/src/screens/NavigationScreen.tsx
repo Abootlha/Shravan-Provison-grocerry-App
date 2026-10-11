@@ -56,7 +56,7 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
   route,
 }) => {
   const { order } = route.params;
-  const { updateStatus, currentOrder, error } = useOrders();
+  const { updateStatus, completeDelivery, currentOrder, error } = useOrders();
   const { currentLocation } = useLocation();
   const [loading, setLoading] = useState(false);
   const [otpModalVisible, setOtpModalVisible] = useState(false);
@@ -115,13 +115,19 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
   }, [updateStatus, activeOrderId, currentLocation, error]);
 
   const handleMarkDelivered = useCallback(async () => {
-    if ((activeOrder.deliveryOtp || '').trim() !== deliveryOtpInput.trim()) {
-      Alert.alert('Invalid OTP', 'Please enter the delivery OTP shown in the customer app.');
+    const otp = deliveryOtpInput.trim();
+    if (!/^\d{4}$/.test(otp)) {
+      Alert.alert('Invalid OTP', 'Please enter the 4-digit delivery OTP shown in the customer app.');
       return;
     }
 
     setLoading(true);
-    const result = await updateStatus(activeOrderId, 'delivered', currentLocation ?? undefined);
+    // The server verifies the OTP; the rider never sees the expected value.
+    const { order: result, error: deliveryError } = await completeDelivery(
+      activeOrderId,
+      otp,
+      currentLocation ?? undefined
+    );
     setLoading(false);
     if (result) {
       setOtpModalVisible(false);
@@ -131,9 +137,9 @@ export const NavigationScreen: React.FC<NavigationScreenProps> = ({
         tip: result.tip,
       });
     } else {
-      Alert.alert('Unable to update status', error || 'The delivery could not be completed. Please try again.');
+      Alert.alert('Unable to complete delivery', deliveryError || 'The OTP may be incorrect. Please check with the customer and try again.');
     }
-  }, [updateStatus, activeOrderId, currentLocation, navigation, activeOrder.deliveryOtp, deliveryOtpInput, error]);
+  }, [completeDelivery, activeOrderId, currentLocation, navigation, deliveryOtpInput]);
 
   const mapRegion = {
     latitude: currentLocation?.latitude || pickupCoords.latitude,

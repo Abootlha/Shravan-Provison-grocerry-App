@@ -1,36 +1,42 @@
 import { Controller, Get, Query } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { MapsService } from './maps.service';
+import {
+  GeocodeQueryDto,
+  ReverseGeocodeQueryDto,
+  SearchPlacesQueryDto,
+} from './dto/maps-query.dto';
 
+/**
+ * Maps proxy. These endpoints are intentionally public: the customer app
+ * calls them during location selection without an access token (see
+ * customer-app/services/locationService.js). They are therefore validated,
+ * cached in Redis and rate limited hard per client IP to protect the paid
+ * Google/Mappls quotas.
+ */
 @Controller('maps')
 export class MapsController {
   constructor(private readonly mapsService: MapsService) {}
 
   @Get('search')
-  async search(
-    @Query('query') query: string,
-    @Query('near_lat') nearLat?: string,
-    @Query('near_lng') nearLng?: string,
-  ) {
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  async search(@Query() dto: SearchPlacesQueryDto) {
     const near =
-      nearLat && nearLng
-        ? { latitude: parseFloat(nearLat), longitude: parseFloat(nearLng) }
+      dto.near_lat !== undefined && dto.near_lng !== undefined
+        ? { latitude: dto.near_lat, longitude: dto.near_lng }
         : undefined;
-    return this.mapsService.searchPlaces(query, near);
+    return this.mapsService.searchPlaces(dto.query, near);
   }
 
   @Get('geocode')
-  async geocode(@Query('address') address: string) {
-    return this.mapsService.geocodeAddress(address);
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  async geocode(@Query() dto: GeocodeQueryDto) {
+    return this.mapsService.geocodeAddress(dto.address);
   }
 
   @Get('reverse-geocode')
-  async reverseGeocode(
-    @Query('latitude') latitude: string,
-    @Query('longitude') longitude: string,
-  ) {
-    return this.mapsService.reverseGeocode(
-      parseFloat(latitude),
-      parseFloat(longitude),
-    );
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  async reverseGeocode(@Query() dto: ReverseGeocodeQueryDto) {
+    return this.mapsService.reverseGeocode(dto.latitude, dto.longitude);
   }
 }

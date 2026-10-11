@@ -98,7 +98,8 @@ export default function OrdersManager() {
         }
 
         const socket = io(TRACKING_SOCKET_URL, {
-            auth: { token },
+            // Read the token on every (re)connect so refreshed tokens are picked up.
+            auth: (cb) => cb({ token: localStorage.getItem('adminToken') }),
             transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionDelay: 1000,

@@ -15,6 +15,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useDispatch } from 'react-redux';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { setTokens } from '../services/tokenStorage';
 import { loginSuccess } from '../store/slices/authSlice';
 import { AuthService } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
@@ -153,12 +154,10 @@ const OTPScreen = ({ navigation, route }) => {
             };
 
             await AsyncStorage.setItem('customerUser', JSON.stringify(user));
-            if (tokens.accessToken) {
-                await AsyncStorage.setItem('customerAccessToken', tokens.accessToken);
-            }
-            if (tokens.refreshToken) {
-                await AsyncStorage.setItem('customerRefreshToken', tokens.refreshToken);
-            }
+            await setTokens({
+                accessToken: tokens.accessToken || undefined,
+                refreshToken: tokens.refreshToken || undefined,
+            });
 
             dispatch(loginSuccess({
                 user,

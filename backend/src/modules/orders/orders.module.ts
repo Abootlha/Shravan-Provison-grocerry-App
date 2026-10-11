@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { BullModule } from '@nestjs/bullmq';
+import { JwtModule } from '@nestjs/jwt';
 import { Order, OrderSchema } from './schemas/order.schema';
 import {
   OrderStatusLog,
@@ -26,6 +27,8 @@ import { TrackingModule } from '../../sockets/tracking.module';
       { name: Rider.name, schema: RiderSchema },
     ]),
     BullModule.registerQueue({ name: 'orders' }),
+    // Used by OrdersGateway; the secret is passed explicitly at verify time.
+    JwtModule.register({}),
     CartModule,
     ProductsModule,
     SettingsModule,

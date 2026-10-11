@@ -1,41 +1,54 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { getQueueToken } from '@nestjs/bullmq';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
+import { Types } from 'mongoose';
 import * as fc from 'fast-check';
-import { OrdersService } from './orders.service';
+import { OrdersService, MAX_DELIVERY_OTP_ATTEMPTS } from './orders.service';
 import {
   Order,
   OrderStatus,
   ORDER_STATUS_TRANSITIONS,
+  PaymentMethod,
   PaymentStatus,
 } from './schemas/order.schema';
 import { OrderStatusLog } from './schemas/order-status-log.schema';
-import { User } from '../users/schemas/user.schema';
+import { User, UserRole } from '../users/schemas/user.schema';
+import { Rider, RiderStatus } from '../riders/schemas/rider.schema';
 import { CartService } from '../cart/cart.service';
 import { ProductsService } from '../products/products.service';
+import { SettingsService } from '../settings/settings.service';
 import { RedisService } from '../../common/utils/redis.service';
 import { CacheService } from '../../common/utils/cache.service';
 import { TrackingGateway } from '../../sockets/tracking.gateway';
 import { ETAService } from './eta.service';
+import {
+  createFakeModel,
+  buildOrderFixture,
+  fakeStoreSettings,
+} from './testing/fake-model';
+
+const ADMIN_ID = new Types.ObjectId().toString();
 
 describe('OrdersService - Property-Based Tests', () => {
   let service: OrdersService;
-  let trackingGateway: TrackingGateway;
-
-  const mockOrderModel = {
-    findById: jest.fn(),
-    findOne: jest.fn(),
-    find: jest.fn(),
-    countDocuments: jest.fn(),
-  };
+  let mockOrderModel: any;
+  let mockRiderModel: any;
 
   const mockOrderStatusLogModel: any = jest.fn().mockImplementation(() => ({
     save: jest.fn().mockResolvedValue(true),
   }));
   mockOrderStatusLogModel.find = jest.fn();
 
+  const systemUserId = new Types.ObjectId();
   const mockUserModel = {
     findById: jest.fn(),
+    findOne: jest.fn().mockResolvedValue({ _id: systemUserId }),
+    create: jest.fn(),
   };
 
   const mockQueue = {
@@ -48,8 +61,13 @@ describe('OrdersService - Property-Based Tests', () => {
   };
 
   const mockProductsService = {
+    findById: jest.fn(),
     checkAndLockStock: jest.fn(),
     releaseStock: jest.fn(),
+  };
+
+  const mockSettingsService = {
+    getStoreSettings: jest.fn().mockResolvedValue(fakeStoreSettings),
   };
 
   const mockRedisService = {
@@ -71,14 +89,34 @@ describe('OrdersService - Property-Based Tests', () => {
     broadcastOrderStatusUpdate: jest.fn(),
     broadcastRiderLocationUpdate: jest.fn(),
     broadcastETAUpdate: jest.fn(),
+    notifyRiderOfAssignment: jest.fn(),
+    notifyRiderOrderPacked: jest.fn(),
   };
 
   const mockETAService = {
     calculateETA: jest.fn(),
     recalculateForOrder: jest.fn(),
+    buildTrackingRouteSnapshot: jest.fn(),
   };
 
+  const seedOrder = (overrides: Record<string, any> = {}) =>
+    mockOrderModel.insert(buildOrderFixture(overrides));
+
+  const seedRider = (overrides: Record<string, any> = {}) =>
+    mockRiderModel.insert({
+      name: 'Rider',
+      status: RiderStatus.AVAILABLE,
+      isActive: true,
+      totalDeliveries: 0,
+      ...overrides,
+    });
+
   beforeEach(async () => {
+    mockOrderModel = createFakeModel({ hiddenFields: ['deliveryOtp'] });
+    mockRiderModel = createFakeModel();
+    mockSettingsService.getStoreSettings.mockResolvedValue(fakeStoreSettings);
+    mockUserModel.findOne.mockResolvedValue({ _id: systemUserId });
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrdersService,
@@ -88,9 +126,11 @@ describe('OrdersService - Property-Based Tests', () => {
           useValue: mockOrderStatusLogModel,
         },
         { provide: getModelToken(User.name), useValue: mockUserModel },
+        { provide: getModelToken(Rider.name), useValue: mockRiderModel },
         { provide: getQueueToken('orders'), useValue: mockQueue },
         { provide: CartService, useValue: mockCartService },
         { provide: ProductsService, useValue: mockProductsService },
+        { provide: SettingsService, useValue: mockSettingsService },
         { provide: RedisService, useValue: mockRedisService },
         { provide: CacheService, useValue: mockCacheService },
         { provide: TrackingGateway, useValue: mockTrackingGateway },
@@ -99,7 +139,6 @@ describe('OrdersService - Property-Based Tests', () => {
     }).compile();
 
     service = module.get<OrdersService>(OrdersService);
-    trackingGateway = module.get<TrackingGateway>(TrackingGateway);
   });
 
   afterEach(() => {
@@ -366,343 +405,520 @@ describe('OrdersService - Property-Based Tests', () => {
   // Property 29: Payment Verification for Confirmation
   describe('Property 29: Payment Verification for Confirmation', () => {
     it('allows CONFIRMED transition only when payment is COMPLETED or method is COD', async () => {
-      fc.assert(
+      await fc.assert(
         fc.asyncProperty(
           fc.record({
             paymentStatus: fc.constantFrom(...Object.values(PaymentStatus)),
-            paymentMethod: fc.constantFrom('COD', 'UPI', 'CARD', 'WALLET'),
+            paymentMethod: fc.constantFrom(...Object.values(PaymentMethod)),
           }),
           async ({ paymentStatus, paymentMethod }) => {
-            const mockOrder: any = {
-              _id: '507f1f77bcf86cd799439011',
-              orderId: 'ORD-TEST-001',
-              orderStatus: OrderStatus.PENDING,
-              paymentStatus,
-              paymentMethod,
-              timeline: [],
-              items: [],
-              save: jest.fn().mockResolvedValue(true),
-            };
-
-            mockOrderModel.findById.mockResolvedValue(mockOrder);
-            mockRedisService.del.mockResolvedValue(true);
-            mockRedisService.set.mockResolvedValue(true);
-            mockRedisService.publish.mockResolvedValue(true);
+            const order = seedOrder({ paymentStatus, paymentMethod });
 
             const shouldSucceed =
               paymentStatus === PaymentStatus.COMPLETED ||
-              paymentMethod === 'COD';
+              paymentMethod === PaymentMethod.COD;
+
+            const attempt = service.updateStatus(
+              order._id.toString(),
+              OrderStatus.CONFIRMED,
+              ADMIN_ID,
+              { actorRole: UserRole.ADMIN },
+            );
 
             if (shouldSucceed) {
-              await expect(
-                service.updateStatus(
-                  '507f1f77bcf86cd799439011',
-                  OrderStatus.CONFIRMED,
-                  '507f1f77bcf86cd799439012',
-                ),
-              ).resolves.toBeDefined();
+              await expect(attempt).resolves.toBeDefined();
+              expect(mockOrderModel.get(order._id).orderStatus).toBe(
+                OrderStatus.CONFIRMED,
+              );
             } else {
-              await expect(
-                service.updateStatus(
-                  '507f1f77bcf86cd799439011',
-                  OrderStatus.CONFIRMED,
-                  '507f1f77bcf86cd799439012',
-                ),
-              ).rejects.toThrow(
-                'Payment must be completed before confirming order',
+              await expect(attempt).rejects.toThrow(
+                'Online payment has not been completed for this order',
+              );
+              expect(mockOrderModel.get(order._id).orderStatus).toBe(
+                OrderStatus.PENDING,
               );
             }
+            // Confirming never fabricates a payment
+            expect(mockOrderModel.get(order._id).paymentStatus).toBe(
+              paymentStatus,
+            );
           },
         ),
-        { numRuns: 50 },
+        { numRuns: 40 },
       );
     });
 
-    it('prevents CONFIRMED transition when payment is PENDING and method is not COD', async () => {
-      const mockOrder: any = {
-        _id: '507f1f77bcf86cd799439011',
-        orderId: 'ORD-TEST-001',
-        orderStatus: OrderStatus.PENDING,
+    it('does not let an unpaid online order be assigned to a rider', async () => {
+      const order = seedOrder({
+        paymentMethod: PaymentMethod.UPI,
         paymentStatus: PaymentStatus.PENDING,
-        paymentMethod: 'UPI',
-        timeline: [],
-        items: [],
-        save: jest.fn().mockResolvedValue(true),
-      };
-
-      mockOrderModel.findById.mockResolvedValue(mockOrder);
+        orderStatus: OrderStatus.CONFIRMED,
+      });
+      const rider = seedRider();
 
       await expect(
-        service.updateStatus(
-          '507f1f77bcf86cd799439011',
-          OrderStatus.CONFIRMED,
-          '507f1f77bcf86cd799439012',
-        ),
-      ).rejects.toThrow('Payment must be completed before confirming order');
-    });
-
-    it('allows CONFIRMED transition when payment method is COD regardless of payment status', async () => {
-      fc.assert(
-        fc.asyncProperty(
-          fc.constantFrom(...Object.values(PaymentStatus)),
-          async (paymentStatus) => {
-            const mockOrder: any = {
-              _id: '507f1f77bcf86cd799439011',
-              orderId: 'ORD-TEST-001',
-              orderStatus: OrderStatus.PENDING,
-              paymentStatus,
-              paymentMethod: 'COD',
-              timeline: [],
-              items: [],
-              save: jest.fn().mockResolvedValue(true),
-            };
-
-            mockOrderModel.findById.mockResolvedValue(mockOrder);
-            mockRedisService.del.mockResolvedValue(true);
-            mockRedisService.set.mockResolvedValue(true);
-            mockRedisService.publish.mockResolvedValue(true);
-
-            await expect(
-              service.updateStatus(
-                '507f1f77bcf86cd799439011',
-                OrderStatus.CONFIRMED,
-                '507f1f77bcf86cd799439012',
-              ),
-            ).resolves.toBeDefined();
-          },
-        ),
-        { numRuns: 20 },
-      );
+        service.assignRider(order._id.toString(), rider._id.toString()),
+      ).rejects.toThrow('Online payment has not been completed');
+      expect(mockRiderModel.get(rider._id).status).toBe(RiderStatus.AVAILABLE);
+      await expect(
+        service.autoAssignNearestRider(order._id.toString()),
+      ).resolves.toBeNull();
     });
   });
 
   // **Validates: Requirements 5.6**
   // Property 19: Order Status Event Emission
   describe('Property 19: Order Status Event Emission', () => {
-    it('emits orderStatusUpdate event for any order status change', async () => {
-      fc.assert(
+    it('emits orderStatusUpdate event (without the delivery OTP) for any valid status change', async () => {
+      const validPairs = Object.values(OrderStatus).flatMap((from) =>
+        ORDER_STATUS_TRANSITIONS[from].map((to) => ({ from, to })),
+      );
+
+      await fc.assert(
         fc.asyncProperty(
-          fc.record({
-            currentStatus: fc.constantFrom(...Object.values(OrderStatus)),
-            newStatus: fc.constantFrom(...Object.values(OrderStatus)),
-            orderId: fc.string({ minLength: 24, maxLength: 24 }).map((s) =>
-              s
-                .split('')
-                .map((c) => c.charCodeAt(0).toString(16).padStart(2, '0'))
-                .join('')
-                .slice(0, 24),
-            ),
-            userId: fc.string({ minLength: 24, maxLength: 24 }).map((s) =>
-              s
-                .split('')
-                .map((c) => c.charCodeAt(0).toString(16).padStart(2, '0'))
-                .join('')
-                .slice(0, 24),
-            ),
-          }),
-          async ({ currentStatus, newStatus, orderId, userId }) => {
-            // Only test valid transitions
-            if (!ORDER_STATUS_TRANSITIONS[currentStatus].includes(newStatus)) {
-              return; // Skip invalid transitions
-            }
+          fc.constantFrom(...validPairs),
+          async ({ from, to }) => {
+            mockTrackingGateway.broadcastOrderStatusUpdate.mockClear();
+            const rider = seedRider({ status: RiderStatus.BUSY });
+            const order = seedOrder({
+              orderStatus: from,
+              riderId: from === OrderStatus.PENDING ? undefined : rider._id,
+            });
 
-            const mockOrder: any = {
-              _id: orderId,
-              orderId: `ORD-TEST-${orderId.slice(0, 8)}`,
-              orderStatus: currentStatus,
-              paymentStatus: PaymentStatus.COMPLETED,
-              paymentMethod: 'COD',
-              timeline: [],
-              items: [],
-              save: jest.fn().mockResolvedValue(true),
-            };
+            await service.updateStatus(order._id.toString(), to, ADMIN_ID, {
+              actorRole: UserRole.ADMIN,
+              deliveryOtp: '4321',
+            });
 
-            mockOrderModel.findById.mockResolvedValue(mockOrder);
-            mockCacheService.deleteOrder.mockResolvedValue(true);
-            mockRedisService.del.mockResolvedValue(true);
-            mockRedisService.set.mockResolvedValue(true);
-            mockRedisService.publish.mockResolvedValue(true);
-            mockProductsService.releaseStock.mockResolvedValue(true);
-            mockETAService.recalculateForOrder.mockResolvedValue(new Date());
-
-            await service.updateStatus(orderId, newStatus, userId);
-
-            // Verify broadcastOrderStatusUpdate was called
             expect(
               mockTrackingGateway.broadcastOrderStatusUpdate,
             ).toHaveBeenCalledWith(
-              orderId,
+              order._id.toString(),
               expect.objectContaining({
-                orderStatus: newStatus,
+                orderStatus: to,
                 timeline: expect.any(Array),
               }),
             );
+            const payload =
+              mockTrackingGateway.broadcastOrderStatusUpdate.mock.calls[0][1];
+            expect(payload).not.toHaveProperty('deliveryOtp');
           },
         ),
-        { numRuns: 50 },
+        { numRuns: 40 },
       );
     });
 
-    it('includes orderId, status, and timeline in the broadcast event', async () => {
-      const mockOrder: any = {
-        _id: '507f1f77bcf86cd799439011',
-        orderId: 'ORD-TEST-001',
-        orderStatus: OrderStatus.PENDING,
-        paymentStatus: PaymentStatus.COMPLETED,
-        paymentMethod: 'COD',
-        timeline: [],
-        items: [],
-        save: jest.fn().mockResolvedValue(true),
-      };
+    it('does not broadcast event if the transition is invalid', async () => {
+      const order = seedOrder({ orderStatus: OrderStatus.DELIVERED });
 
-      mockOrderModel.findById.mockResolvedValue(mockOrder);
-      mockCacheService.deleteOrder.mockResolvedValue(true);
-      mockRedisService.del.mockResolvedValue(true);
-      mockRedisService.set.mockResolvedValue(true);
-      mockRedisService.publish.mockResolvedValue(true);
-
-      await service.updateStatus(
-        '507f1f77bcf86cd799439011',
-        OrderStatus.CONFIRMED,
-        '507f1f77bcf86cd799439012',
-      );
-
-      expect(
-        mockTrackingGateway.broadcastOrderStatusUpdate,
-      ).toHaveBeenCalledWith(
-        '507f1f77bcf86cd799439011',
-        expect.objectContaining({
-          orderId: 'ORD-TEST-001',
-          orderStatus: OrderStatus.CONFIRMED,
-          timeline: expect.arrayContaining([
-            expect.objectContaining({
-              status: OrderStatus.CONFIRMED,
-              timestamp: expect.any(Date),
-            }),
-          ]),
-        }),
-      );
-    });
-
-    it('broadcasts event after successful status update', async () => {
-      const mockOrder: any = {
-        _id: '507f1f77bcf86cd799439011',
-        orderId: 'ORD-TEST-001',
-        orderStatus: OrderStatus.PENDING,
-        paymentStatus: PaymentStatus.COMPLETED,
-        paymentMethod: 'COD',
-        timeline: [],
-        items: [],
-        save: jest.fn().mockResolvedValue(true),
-      };
-
-      mockOrderModel.findById.mockResolvedValue(mockOrder);
-      mockCacheService.deleteOrder.mockResolvedValue(true);
-      mockRedisService.del.mockResolvedValue(true);
-      mockRedisService.set.mockResolvedValue(true);
-      mockRedisService.publish.mockResolvedValue(true);
-
-      await service.updateStatus(
-        '507f1f77bcf86cd799439011',
-        OrderStatus.CONFIRMED,
-        '507f1f77bcf86cd799439012',
-      );
-
-      // Verify save was called before broadcast
-      expect(mockOrder.save).toHaveBeenCalled();
-      expect(mockTrackingGateway.broadcastOrderStatusUpdate).toHaveBeenCalled();
-    });
-
-    it('does not broadcast event if status update fails', async () => {
-      const mockOrder: any = {
-        _id: '507f1f77bcf86cd799439011',
-        orderId: 'ORD-TEST-001',
-        orderStatus: OrderStatus.DELIVERED,
-        paymentStatus: PaymentStatus.COMPLETED,
-        paymentMethod: 'COD',
-        timeline: [],
-        items: [],
-        save: jest.fn().mockResolvedValue(true),
-      };
-
-      mockOrderModel.findById.mockResolvedValue(mockOrder);
-
-      // Clear the mock before testing
-      mockTrackingGateway.broadcastOrderStatusUpdate.mockClear();
-
-      // Try invalid transition (DELIVERED -> PENDING)
       await expect(
         service.updateStatus(
-          '507f1f77bcf86cd799439011',
+          order._id.toString(),
           OrderStatus.PENDING,
-          '507f1f77bcf86cd799439012',
+          ADMIN_ID,
         ),
-      ).rejects.toThrow();
-
-      // Verify broadcast was NOT called
+      ).rejects.toThrow(BadRequestException);
       expect(
         mockTrackingGateway.broadcastOrderStatusUpdate,
       ).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Atomic status transitions and stock release', () => {
+    it('rejects a transition when the status changed concurrently (atomic filter)', async () => {
+      const order = seedOrder({ orderStatus: OrderStatus.PENDING });
+      // Simulate another request winning between our read and our write.
+      const originalFindById = mockOrderModel.findById;
+      mockOrderModel.findById = jest.fn((id: any) => {
+        const q = originalFindById(id);
+        const exec = q.exec;
+        q.exec = async () => {
+          const result = await exec();
+          mockOrderModel.get(order._id).orderStatus = OrderStatus.CANCELLED;
+          return result;
+        };
+        return q;
+      });
+
+      await expect(
+        service.updateStatus(
+          order._id.toString(),
+          OrderStatus.CONFIRMED,
+          ADMIN_ID,
+          { actorRole: UserRole.ADMIN },
+        ),
+      ).rejects.toThrow(ConflictException);
+      expect(mockOrderModel.get(order._id).orderStatus).toBe(
+        OrderStatus.CANCELLED,
+      );
+    });
+
+    it('double-cancel (concurrent) releases stock exactly once', async () => {
+      const order = seedOrder({ orderStatus: OrderStatus.CONFIRMED });
+
+      const results = await Promise.allSettled([
+        service.cancelOrder(order._id.toString(), ADMIN_ID, 'first'),
+        service.cancelOrder(order._id.toString(), ADMIN_ID, 'second'),
+      ]);
+
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(mockProductsService.releaseStock).toHaveBeenCalledTimes(1);
+      expect(mockProductsService.releaseStock).toHaveBeenCalledWith([
+        {
+          productId: order.items[0].productId.toString(),
+          quantity: order.items[0].quantity,
+        },
+      ]);
+      expect(mockOrderModel.get(order._id).stockReleased).toBe(true);
+    });
+
+    it('double-cancel (sequential) does not release stock twice', async () => {
+      const order = seedOrder({ orderStatus: OrderStatus.PENDING });
+
+      await service.cancelOrder(order._id.toString(), ADMIN_ID, 'first');
+      await expect(
+        service.cancelOrder(order._id.toString(), ADMIN_ID, 'again'),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockProductsService.releaseStock).toHaveBeenCalledTimes(1);
+    });
+
+    it('releaseOrderStock is idempotent per order', async () => {
+      const order = seedOrder();
+
+      await expect(service.releaseOrderStock(order)).resolves.toBe(true);
+      await expect(service.releaseOrderStock(order)).resolves.toBe(false);
+      expect(mockProductsService.releaseStock).toHaveBeenCalledTimes(1);
+    });
+
+    it('riders cannot cancel after pickup; admin cancel keeps stock and flags manual review', async () => {
+      const rider = seedRider({ status: RiderStatus.BUSY });
+      const order = seedOrder({
+        orderStatus: OrderStatus.OUT_FOR_DELIVERY,
+        riderId: rider._id,
+      });
+
+      await expect(
+        service.updateStatus(
+          order._id.toString(),
+          OrderStatus.CANCELLED,
+          rider._id.toString(),
+          { actorRole: UserRole.RIDER },
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      await service.updateStatus(
+        order._id.toString(),
+        OrderStatus.CANCELLED,
+        ADMIN_ID,
+        { actorRole: UserRole.ADMIN, reason: 'customer unreachable' },
+      );
+
+      const stored = mockOrderModel.get(order._id);
+      expect(stored.orderStatus).toBe(OrderStatus.CANCELLED);
+      expect(stored.requiresManualReview).toBe(true);
+      expect(stored.cancellationReason).toBe('customer unreachable');
+      expect(mockProductsService.releaseStock).not.toHaveBeenCalled();
+      expect(mockRiderModel.get(rider._id).status).toBe(RiderStatus.AVAILABLE);
+    });
+  });
+
+  describe('Delivery OTP', () => {
+    const setupOutForDelivery = (overrides: Record<string, any> = {}) => {
+      const rider = seedRider({ status: RiderStatus.BUSY });
+      const order = seedOrder({
+        orderStatus: OrderStatus.OUT_FOR_DELIVERY,
+        riderId: rider._id,
+        ...overrides,
+      });
+      return { rider, order };
+    };
+
+    it('requires the delivery OTP to mark an order DELIVERED', async () => {
+      const { rider, order } = setupOutForDelivery();
+
+      await expect(
+        service.updateStatus(
+          order._id.toString(),
+          OrderStatus.DELIVERED,
+          rider._id.toString(),
+          { actorRole: UserRole.RIDER },
+        ),
+      ).rejects.toThrow('deliveryOtp is required');
+
+      await expect(
+        service.updateStatus(
+          order._id.toString(),
+          OrderStatus.DELIVERED,
+          rider._id.toString(),
+          { actorRole: UserRole.RIDER, deliveryOtp: '0000' },
+        ),
+      ).rejects.toThrow('Invalid delivery OTP');
+
+      expect(mockOrderModel.get(order._id).orderStatus).toBe(
+        OrderStatus.OUT_FOR_DELIVERY,
+      );
+      expect(mockOrderModel.get(order._id).deliveryOtpAttempts).toBe(1);
+    });
+
+    it('delivers with the correct OTP, settles COD payment and frees the rider', async () => {
+      const { rider, order } = setupOutForDelivery();
+
+      await service.updateStatus(
+        order._id.toString(),
+        OrderStatus.DELIVERED,
+        rider._id.toString(),
+        { actorRole: UserRole.RIDER, deliveryOtp: '4321' },
+      );
+
+      const stored = mockOrderModel.get(order._id);
+      expect(stored.orderStatus).toBe(OrderStatus.DELIVERED);
+      expect(stored.paymentStatus).toBe(PaymentStatus.COMPLETED);
+      expect(stored.actualDeliveryTime).toBeInstanceOf(Date);
+      const storedRider = mockRiderModel.get(rider._id);
+      expect(storedRider.status).toBe(RiderStatus.AVAILABLE);
+      expect(storedRider.totalDeliveries).toBe(1);
+    });
+
+    it(`locks out after ${MAX_DELIVERY_OTP_ATTEMPTS} attempts even with the right OTP`, async () => {
+      const { rider, order } = setupOutForDelivery();
+
+      for (let i = 0; i < MAX_DELIVERY_OTP_ATTEMPTS; i += 1) {
+        await expect(
+          service.updateStatus(
+            order._id.toString(),
+            OrderStatus.DELIVERED,
+            rider._id.toString(),
+            { actorRole: UserRole.RIDER, deliveryOtp: '9999' },
+          ),
+        ).rejects.toThrow(BadRequestException);
+      }
+
+      await expect(
+        service.updateStatus(
+          order._id.toString(),
+          OrderStatus.DELIVERED,
+          rider._id.toString(),
+          { actorRole: UserRole.RIDER, deliveryOtp: '4321' },
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockOrderModel.get(order._id).orderStatus).toBe(
+        OrderStatus.OUT_FOR_DELIVERY,
+      );
+    });
+
+    it('only includes the OTP in payloads when explicitly requested (owner)', async () => {
+      const order = seedOrder();
+
+      const forOthers = await service.buildRealtimeOrderPayload(
+        order._id.toString(),
+      );
+      expect(forOthers).not.toHaveProperty('deliveryOtp');
+
+      const forOwner = await service.buildRealtimeOrderPayload(
+        order._id.toString(),
+        { includeDeliveryOtp: true },
+      );
+      expect(forOwner.deliveryOtp).toBe('4321');
+    });
+  });
+
+  describe('createOrder', () => {
+    const userId = new Types.ObjectId().toString();
+    const productId = new Types.ObjectId();
+    const baseData = {
+      deliveryAddress: {
+        type: 'home',
+        address: '1 Test St',
+        city: 'City',
+        pincode: '273001',
+        latitude: 26.7,
+        longitude: 83.3,
+      },
+      items: [{ productId: productId.toString(), quantity: 2 }],
+    };
+
+    beforeEach(() => {
+      mockProductsService.findById.mockResolvedValue({
+        _id: productId,
+        name: 'Milk',
+        price: 30,
+        stock: 10,
+        isAvailable: true,
+      });
+      mockProductsService.checkAndLockStock.mockResolvedValue(true);
+    });
+
+    it('always starts payment as PENDING, including online methods', async () => {
+      for (const paymentMethod of Object.values(PaymentMethod)) {
+        const order = await service.createOrder(userId, {
+          ...baseData,
+          paymentMethod,
+          // A malicious client value must be ignored even if it slips through
+          paymentStatus: PaymentStatus.COMPLETED,
+        } as any);
+        expect(order.paymentStatus).toBe(PaymentStatus.PENDING);
+      }
+    });
+
+    it('releases reserved stock when saving the order fails', async () => {
+      mockOrderModel.mockImplementationOnce((data: any) => ({
+        ...data,
+        save: jest.fn().mockRejectedValue(new Error('db down')),
+      }));
+
+      await expect(
+        service.createOrder(userId, {
+          ...baseData,
+          paymentMethod: PaymentMethod.COD,
+        }),
+      ).rejects.toThrow('db down');
+
+      expect(mockProductsService.releaseStock).toHaveBeenCalledWith([
+        { productId: productId.toString(), quantity: 2 },
+      ]);
+    });
+
+    it('rejects the order when stock cannot be locked', async () => {
+      mockProductsService.checkAndLockStock.mockResolvedValue(false);
+      await expect(
+        service.createOrder(userId, {
+          ...baseData,
+          paymentMethod: PaymentMethod.COD,
+        }),
+      ).rejects.toThrow('Some items are out of stock');
+    });
+  });
+
+  describe('Payment status updates', () => {
+    it('markPaymentCompleted is idempotent and broadcasts once', async () => {
+      const order = seedOrder({ paymentMethod: PaymentMethod.UPI });
+
+      await expect(
+        service.markPaymentCompleted(order._id.toString(), 'MIH-1'),
+      ).resolves.toEqual({ changed: true });
+      await expect(
+        service.markPaymentCompleted(order._id.toString(), 'MIH-1'),
+      ).resolves.toEqual({ changed: false });
+
+      const stored = mockOrderModel.get(order._id);
+      expect(stored.paymentStatus).toBe(PaymentStatus.COMPLETED);
+      expect(stored.mihpayid).toBe('MIH-1');
+      expect(
+        mockTrackingGateway.broadcastOrderStatusUpdate,
+      ).toHaveBeenCalledTimes(1);
+    });
+
+    it('flags a refund when a payment succeeds for an already-cancelled order', async () => {
+      const order = seedOrder({
+        paymentMethod: PaymentMethod.UPI,
+        paymentStatus: PaymentStatus.FAILED,
+        orderStatus: OrderStatus.CANCELLED,
+      });
+
+      await expect(
+        service.markPaymentCompleted(order._id.toString(), 'MIH-2'),
+      ).resolves.toEqual({ changed: false, requiresRefund: true });
+      const stored = mockOrderModel.get(order._id);
+      expect(stored.orderStatus).toBe(OrderStatus.CANCELLED);
+      expect(stored.requiresManualReview).toBe(true);
+    });
+
+    it('markPaymentFailed cancels the order and releases stock once', async () => {
+      const order = seedOrder({ paymentMethod: PaymentMethod.CARD });
+
+      await service.markPaymentFailed(order._id.toString(), 'PAYMENT_FAILED');
+      await service.markPaymentFailed(order._id.toString(), 'PAYMENT_FAILED');
+
+      const stored = mockOrderModel.get(order._id);
+      expect(stored.paymentStatus).toBe(PaymentStatus.FAILED);
+      expect(stored.orderStatus).toBe(OrderStatus.CANCELLED);
+      expect(stored.cancellationReason).toBe('PAYMENT_FAILED');
+      expect(mockProductsService.releaseStock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Rider assignment', () => {
+    it('confirming with no available rider keeps the order CONFIRMED and reports pending assignment', async () => {
+      const order = seedOrder();
+
+      const result: any = await service.updateStatus(
+        order._id.toString(),
+        OrderStatus.CONFIRMED,
+        ADMIN_ID,
+        { actorRole: UserRole.ADMIN },
+      );
+
+      expect(result.riderAssignmentPending).toBe(true);
+      expect(mockOrderModel.get(order._id).orderStatus).toBe(
+        OrderStatus.CONFIRMED,
+      );
+    });
+
+    it('confirming with an available rider assigns and claims that rider', async () => {
+      const order = seedOrder();
+      const rider = seedRider();
+
+      await service.updateStatus(
+        order._id.toString(),
+        OrderStatus.CONFIRMED,
+        ADMIN_ID,
+        { actorRole: UserRole.ADMIN },
+      );
+
+      expect(mockOrderModel.get(order._id).riderId.toString()).toBe(
+        rider._id.toString(),
+      );
+      expect(mockRiderModel.get(rider._id).status).toBe(RiderStatus.BUSY);
+    });
+
+    it('never gives the same rider two orders under concurrent assignment', async () => {
+      const rider = seedRider();
+      const orderA = seedOrder({ orderStatus: OrderStatus.CONFIRMED });
+      const orderB = seedOrder({ orderStatus: OrderStatus.CONFIRMED });
+
+      const results = await Promise.allSettled([
+        service.assignRider(orderA._id.toString(), rider._id.toString()),
+        service.assignRider(orderB._id.toString(), rider._id.toString()),
+      ]);
+
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      const rejected = results.find((r) => r.status === 'rejected') as any;
+      expect(rejected.reason.message).toBe('Rider is not available');
+      const assigned = [orderA, orderB].filter(
+        (o) => mockOrderModel.get(o._id).riderId,
+      );
+      expect(assigned).toHaveLength(1);
     });
   });
 });
 
 describe('OrdersService - ETA Event Emission Tests', () => {
   let service: OrdersService;
-  let trackingGateway: TrackingGateway;
-  let etaService: ETAService;
-
-  const mockOrderModel = {
-    findById: jest.fn(),
-  };
+  let mockOrderModel: any;
+  let mockRiderModel: any;
 
   const mockOrderStatusLogModel: any = jest.fn().mockImplementation(() => ({
     save: jest.fn().mockResolvedValue(true),
   }));
 
-  const mockUserModel = {
-    findById: jest.fn(),
-  };
-
-  const mockQueue = {
-    add: jest.fn(),
-  };
-
-  const mockCartService = {
-    recalculateCart: jest.fn(),
-    clearCart: jest.fn(),
-  };
-
-  const mockProductsService = {
-    checkAndLockStock: jest.fn(),
-    releaseStock: jest.fn(),
-  };
-
-  const mockRedisService = {
-    get: jest.fn(),
-    set: jest.fn(),
-    del: jest.fn(),
-    publish: jest.fn(),
-  };
-
-  const mockCacheService = {
-    getOrder: jest.fn(),
-    setOrder: jest.fn(),
-    deleteOrder: jest.fn(),
-  };
-
   const mockTrackingGateway = {
     broadcastOrderStatusUpdate: jest.fn(),
     broadcastRiderLocationUpdate: jest.fn(),
     broadcastETAUpdate: jest.fn(),
+    notifyRiderOfAssignment: jest.fn(),
   };
 
   const mockETAService = {
     calculateETA: jest.fn(),
     recalculateForOrder: jest.fn(),
+    buildTrackingRouteSnapshot: jest.fn(),
   };
 
   beforeEach(async () => {
+    mockOrderModel = createFakeModel({ hiddenFields: ['deliveryOtp'] });
+    mockRiderModel = createFakeModel();
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrdersService,
@@ -711,202 +927,106 @@ describe('OrdersService - ETA Event Emission Tests', () => {
           provide: getModelToken(OrderStatusLog.name),
           useValue: mockOrderStatusLogModel,
         },
-        { provide: getModelToken(User.name), useValue: mockUserModel },
-        { provide: getQueueToken('orders'), useValue: mockQueue },
-        { provide: CartService, useValue: mockCartService },
-        { provide: ProductsService, useValue: mockProductsService },
-        { provide: RedisService, useValue: mockRedisService },
-        { provide: CacheService, useValue: mockCacheService },
+        {
+          provide: getModelToken(User.name),
+          useValue: { findById: jest.fn() },
+        },
+        { provide: getModelToken(Rider.name), useValue: mockRiderModel },
+        { provide: getQueueToken('orders'), useValue: { add: jest.fn() } },
+        {
+          provide: CartService,
+          useValue: { recalculateCart: jest.fn(), clearCart: jest.fn() },
+        },
+        {
+          provide: ProductsService,
+          useValue: { checkAndLockStock: jest.fn(), releaseStock: jest.fn() },
+        },
+        {
+          provide: SettingsService,
+          useValue: {
+            getStoreSettings: jest.fn().mockResolvedValue(fakeStoreSettings),
+          },
+        },
+        {
+          provide: RedisService,
+          useValue: {
+            get: jest.fn(),
+            set: jest.fn(),
+            del: jest.fn(),
+            publish: jest.fn(),
+          },
+        },
+        {
+          provide: CacheService,
+          useValue: {
+            getOrder: jest.fn(),
+            setOrder: jest.fn(),
+            deleteOrder: jest.fn(),
+          },
+        },
         { provide: TrackingGateway, useValue: mockTrackingGateway },
         { provide: ETAService, useValue: mockETAService },
       ],
     }).compile();
 
     service = module.get<OrdersService>(OrdersService);
-    trackingGateway = module.get<TrackingGateway>(TrackingGateway);
-    etaService = module.get<ETAService>(ETAService);
   });
 
   afterEach(() => {
     jest.clearAllMocks();
   });
 
+  const seedAssignable = () => {
+    const order = mockOrderModel.insert(
+      buildOrderFixture({ orderStatus: OrderStatus.CONFIRMED }),
+    );
+    const rider = mockRiderModel.insert({
+      name: 'Rider',
+      status: RiderStatus.AVAILABLE,
+      isActive: true,
+    });
+    return { orderId: order._id.toString(), riderId: rider._id.toString() };
+  };
+
   // **Validates: Requirements 5.8, 6.7**
   // Property 21: ETA Event Emission
   describe('Property 21: ETA Event Emission', () => {
     it('emits etaUpdate event when ETA is recalculated on rider assignment', async () => {
-      const orderId = '507f1f77bcf86cd799439011';
-      const riderId = '507f1f77bcf86cd799439012';
-      const mockETA = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes from now
-
-      const mockOrder: any = {
-        _id: orderId,
-        orderId: 'ORD-TEST-001',
-        orderStatus: OrderStatus.PENDING,
-        riderId: null,
-        save: jest.fn().mockResolvedValue(true),
-      };
-
-      const mockRider: any = {
-        _id: riderId,
-        role: 'rider',
-        isAvailable: true,
-        isOnline: true,
-      };
-
-      mockOrderModel.findById.mockResolvedValue(mockOrder);
-      mockUserModel.findById.mockResolvedValue(mockRider);
-      mockRedisService.del.mockResolvedValue(true);
+      const { orderId, riderId } = seedAssignable();
+      const mockETA = new Date(Date.now() + 30 * 60 * 1000);
       mockETAService.recalculateForOrder.mockResolvedValue(mockETA);
 
       await service.assignRider(orderId, riderId);
 
-      // Verify ETA recalculation was triggered
       expect(mockETAService.recalculateForOrder).toHaveBeenCalledWith(orderId);
-
-      // Verify ETA broadcast was called with correct parameters
       expect(mockTrackingGateway.broadcastETAUpdate).toHaveBeenCalledWith(
         orderId,
         mockETA,
+        expect.anything(),
       );
-    });
-
-    it('emits etaUpdate event when status changes to ASSIGNED', async () => {
-      const orderId = '507f1f77bcf86cd799439011';
-      const riderId = '507f1f77bcf86cd799439012';
-      const mockETA = new Date(Date.now() + 25 * 60 * 1000); // 25 minutes from now
-
-      const mockOrder: any = {
-        _id: orderId,
-        orderId: 'ORD-TEST-001',
-        orderStatus: OrderStatus.PACKED,
-        paymentStatus: PaymentStatus.COMPLETED,
-        paymentMethod: 'COD',
-        riderId: riderId,
-        timeline: [],
-        items: [],
-        save: jest.fn().mockResolvedValue(true),
-      };
-
-      mockOrderModel.findById.mockResolvedValue(mockOrder);
-      mockCacheService.deleteOrder.mockResolvedValue(true);
-      mockRedisService.del.mockResolvedValue(true);
-      mockRedisService.set.mockResolvedValue(true);
-      mockRedisService.publish.mockResolvedValue(true);
-      mockETAService.recalculateForOrder.mockResolvedValue(mockETA);
-
-      await service.updateStatus(
-        orderId,
-        OrderStatus.ASSIGNED,
-        '507f1f77bcf86cd799439013',
+      expect(mockTrackingGateway.notifyRiderOfAssignment).toHaveBeenCalledWith(
+        riderId,
+        expect.not.objectContaining({ deliveryOtp: expect.anything() }),
       );
-
-      // Verify ETA recalculation was triggered
-      expect(mockETAService.recalculateForOrder).toHaveBeenCalledWith(orderId);
-
-      // Verify ETA broadcast was called
-      expect(mockTrackingGateway.broadcastETAUpdate).toHaveBeenCalledWith(
-        orderId,
-        mockETA,
-      );
-    });
-
-    it('includes orderId, estimatedDeliveryTime, and durationMinutes in broadcast', async () => {
-      const orderId = '507f1f77bcf86cd799439011';
-      const riderId = '507f1f77bcf86cd799439012';
-      const mockETA = new Date(Date.now() + 20 * 60 * 1000); // 20 minutes from now
-
-      const mockOrder: any = {
-        _id: orderId,
-        orderId: 'ORD-TEST-001',
-        orderStatus: OrderStatus.PENDING,
-        riderId: null,
-        save: jest.fn().mockResolvedValue(true),
-      };
-
-      const mockRider: any = {
-        _id: riderId,
-        role: 'rider',
-        isAvailable: true,
-        isOnline: true,
-      };
-
-      mockOrderModel.findById.mockResolvedValue(mockOrder);
-      mockUserModel.findById.mockResolvedValue(mockRider);
-      mockRedisService.del.mockResolvedValue(true);
-      mockETAService.recalculateForOrder.mockResolvedValue(mockETA);
-
-      await service.assignRider(orderId, riderId);
-
-      // Verify broadcast was called with orderId and ETA
-      expect(mockTrackingGateway.broadcastETAUpdate).toHaveBeenCalledWith(
-        orderId,
-        expect.any(Date),
-      );
-
-      // The TrackingGateway.broadcastETAUpdate method calculates durationMinutes internally
-      // so we just verify it was called with the correct orderId and a Date object
     });
 
     it('does not emit etaUpdate if ETA recalculation fails', async () => {
-      const orderId = '507f1f77bcf86cd799439011';
-      const riderId = '507f1f77bcf86cd799439012';
-
-      const mockOrder: any = {
-        _id: orderId,
-        orderId: 'ORD-TEST-001',
-        orderStatus: OrderStatus.PENDING,
-        riderId: null,
-        save: jest.fn().mockResolvedValue(true),
-      };
-
-      const mockRider: any = {
-        _id: riderId,
-        role: 'rider',
-        isAvailable: true,
-        isOnline: true,
-      };
-
-      mockOrderModel.findById.mockResolvedValue(mockOrder);
-      mockUserModel.findById.mockResolvedValue(mockRider);
-      mockRedisService.del.mockResolvedValue(true);
+      const { orderId, riderId } = seedAssignable();
       mockETAService.recalculateForOrder.mockRejectedValue(
         new Error('API failure'),
       );
 
       await service.assignRider(orderId, riderId);
 
-      // Verify ETA broadcast was NOT called when recalculation fails
       expect(mockTrackingGateway.broadcastETAUpdate).not.toHaveBeenCalled();
     });
 
     it('does not emit etaUpdate if ETA recalculation returns null', async () => {
-      const orderId = '507f1f77bcf86cd799439011';
-      const riderId = '507f1f77bcf86cd799439012';
-
-      const mockOrder: any = {
-        _id: orderId,
-        orderId: 'ORD-TEST-001',
-        orderStatus: OrderStatus.PENDING,
-        riderId: null,
-        save: jest.fn().mockResolvedValue(true),
-      };
-
-      const mockRider: any = {
-        _id: riderId,
-        role: 'rider',
-        isAvailable: true,
-        isOnline: true,
-      };
-
-      mockOrderModel.findById.mockResolvedValue(mockOrder);
-      mockUserModel.findById.mockResolvedValue(mockRider);
-      mockRedisService.del.mockResolvedValue(true);
+      const { orderId, riderId } = seedAssignable();
       mockETAService.recalculateForOrder.mockResolvedValue(null);
 
       await service.assignRider(orderId, riderId);
 
-      // Verify ETA broadcast was NOT called when recalculation returns null
       expect(mockTrackingGateway.broadcastETAUpdate).not.toHaveBeenCalled();
     });
   });

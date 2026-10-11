@@ -19,8 +19,8 @@ import { RedisModule } from '../../common/utils/redis.module';
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
-        secret: configService.get<string>('jwt.secret') || 'default-secret',
-        signOptions: { expiresIn: '15m' },
+        secret: configService.getOrThrow<string>('jwt.secret'),
+        signOptions: { expiresIn: '2h' },
       }),
       inject: [ConfigService],
     }),

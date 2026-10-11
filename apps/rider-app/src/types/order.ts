@@ -46,7 +46,6 @@ export interface Order {
   tip?: number;
   estimatedDistance?: number;
   estimatedTime?: number;
-  deliveryOtp?: string;
   createdAt: string;
   acceptedAt?: string;
   pickedUpAt?: string;

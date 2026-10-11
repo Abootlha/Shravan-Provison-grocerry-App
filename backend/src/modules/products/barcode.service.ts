@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 
 interface OpenFoodFactsProduct {
   code: string;
@@ -38,12 +38,23 @@ export interface BarcodeProductData {
 
 @Injectable()
 export class BarcodeService {
+  private readonly logger = new Logger(BarcodeService.name);
   private readonly openFoodFactsUrl =
     'https://world.openfoodfacts.org/api/v2/product';
+  private readonly timeoutMs = 5000;
 
   async lookupBarcode(barcode: string): Promise<BarcodeProductData> {
+    if (!/^[0-9]{8,14}$/.test(barcode)) {
+      throw new BadRequestException('Barcode must be 8-14 digits');
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const response = await fetch(`${this.openFoodFactsUrl}/${barcode}.json`);
+      const response = await fetch(
+        `${this.openFoodFactsUrl}/${encodeURIComponent(barcode)}.json`,
+        { signal: controller.signal },
+      );
 
       if (!response.ok) {
         return { found: false, barcode };
@@ -75,9 +86,13 @@ export class BarcodeService {
             }
           : undefined,
       };
-    } catch (error) {
-      console.error('Barcode lookup error:', error);
+    } catch (error: any) {
+      this.logger.warn(
+        `Barcode lookup failed for ${barcode}: ${error?.name === 'AbortError' ? 'timeout' : error?.message}`,
+      );
       return { found: false, barcode };
+    } finally {
+      clearTimeout(timer);
     }
   }
 }

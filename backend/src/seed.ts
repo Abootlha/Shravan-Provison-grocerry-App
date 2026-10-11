@@ -1,7 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { getModelToken } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
 
 async function seed() {
   const app = await NestFactory.createApplicationContext(AppModule);

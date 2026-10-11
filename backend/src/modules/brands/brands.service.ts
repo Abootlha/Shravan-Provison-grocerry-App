@@ -21,8 +21,10 @@ export class BrandsService {
   }
 
   async findByName(name: string): Promise<Brand | null> {
+    // Escape user input so it is matched literally (no regex injection / ReDoS).
+    const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return this.brandModel
-      .findOne({ name: new RegExp(`^${name}$`, 'i') })
+      .findOne({ name: new RegExp(`^${escaped}$`, 'i') })
       .exec();
   }
 

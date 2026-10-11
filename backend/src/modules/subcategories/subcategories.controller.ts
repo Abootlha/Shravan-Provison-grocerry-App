@@ -12,6 +12,10 @@ import {
 import { SubcategoriesService } from './subcategories.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
+import {
+  CreateSubcategoryDto,
+  UpdateSubcategoryDto,
+} from './dto/subcategory.dto';
 
 @Controller('subcategories')
 export class SubcategoriesController {
@@ -31,15 +35,15 @@ export class SubcategoriesController {
 
   @Post()
   @UseGuards(JwtAuthGuard, AdminGuard)
-  async create(@Body() data: any) {
-    const subcategory = await this.subcategoriesService.create(data);
+  async create(@Body() data: CreateSubcategoryDto) {
+    const subcategory = await this.subcategoriesService.create(data as any);
     return { subcategory };
   }
 
   @Put(':id')
   @UseGuards(JwtAuthGuard, AdminGuard)
-  async update(@Param('id') id: string, @Body() data: any) {
-    const subcategory = await this.subcategoriesService.update(id, data);
+  async update(@Param('id') id: string, @Body() data: UpdateSubcategoryDto) {
+    const subcategory = await this.subcategoriesService.update(id, data as any);
     return { subcategory };
   }
 

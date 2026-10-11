@@ -12,6 +12,7 @@ import {
 import { ItemGroupsService } from './item-groups.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
+import { CreateItemGroupDto, UpdateItemGroupDto } from './dto/item-group.dto';
 
 @Controller('item-groups')
 export class ItemGroupsController {
@@ -34,16 +35,16 @@ export class ItemGroupsController {
   // Create item group (admin only)
   @Post()
   @UseGuards(JwtAuthGuard, AdminGuard)
-  async create(@Body() data: any) {
-    const itemGroup = await this.itemGroupsService.create(data);
+  async create(@Body() data: CreateItemGroupDto) {
+    const itemGroup = await this.itemGroupsService.create(data as any);
     return { itemGroup };
   }
 
   // Update item group (admin only)
   @Put(':id')
   @UseGuards(JwtAuthGuard, AdminGuard)
-  async update(@Param('id') id: string, @Body() data: any) {
-    const itemGroup = await this.itemGroupsService.update(id, data);
+  async update(@Param('id') id: string, @Body() data: UpdateItemGroupDto) {
+    const itemGroup = await this.itemGroupsService.update(id, data as any);
     return { itemGroup };
   }
 

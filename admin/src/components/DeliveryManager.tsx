@@ -3,9 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Store, MapPin, Clock, Truck, Phone, Save, Check, Navigation, Edit3, Loader2, Search } from 'lucide-react';
-import { getApiBaseUrl } from '../lib/config';
+import { authRequest } from '../lib/api';
 
-const API_BASE = getApiBaseUrl();
 
 export default function DeliveryManager() {
     const [saving, setSaving] = useState(false);
@@ -39,13 +38,7 @@ export default function DeliveryManager() {
 
     const fetchSettings = async () => {
         try {
-            const token = localStorage.getItem('adminToken');
-            const res = await fetch(`${API_BASE}/settings/store`, {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                }
-            });
-            const data = await res.json();
+            const data = await authRequest('/settings/store');
             if (data) {
                 setSettings({
                     storeName: data.storeName || '',
@@ -74,13 +67,7 @@ export default function DeliveryManager() {
         navigator.geolocation.getCurrentPosition(async (position) => {
             const { latitude, longitude } = position.coords;
             try {
-                const token = localStorage.getItem('adminToken');
-                const res = await fetch(`${API_BASE}/maps/reverse-geocode?latitude=${latitude}&longitude=${longitude}`, {
-                    headers: {
-                        Authorization: `Bearer ${token}`
-                    }
-                });
-                const data = await res.json();
+                const data = await authRequest(`/maps/reverse-geocode?latitude=${latitude}&longitude=${longitude}`);
 
                 let address = '';
                 if (data?.results && data.results.length > 0) {
@@ -122,13 +109,7 @@ export default function DeliveryManager() {
         if (!searchQuery || searchQuery.trim().length < 3) return;
         setSearching(true);
         try {
-            const token = localStorage.getItem('adminToken');
-            const res = await fetch(`${API_BASE}/maps/geocode?address=${encodeURIComponent(searchQuery)}`, {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                }
-            });
-            const data = await res.json();
+            const data = await authRequest(`/maps/geocode?address=${encodeURIComponent(searchQuery)}`);
             if (data.results && data.results.length > 0) {
                 const result = data.results[0];
                 setSettings(prev => ({
@@ -154,19 +135,12 @@ export default function DeliveryManager() {
     const handleSave = async () => {
         setSaving(true);
         try {
-            const token = localStorage.getItem('adminToken');
-            const res = await fetch(`${API_BASE}/settings/store`, {
+            await authRequest('/settings/store', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${token}`
-                },
                 body: JSON.stringify(settings)
             });
-            if (res.ok) {
-                setSaved(true);
-                setTimeout(() => setSaved(false), 3000);
-            }
+            setSaved(true);
+            setTimeout(() => setSaved(false), 3000);
         } catch (error) {
             console.error('Failed to save store settings:', error);
         } finally {

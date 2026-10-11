@@ -70,7 +70,7 @@ export class TrackingGateway
     private configService: ConfigService,
   ) {}
 
-  async afterInit(server: Server): Promise<void> {
+  afterInit(server: Server): void {
     const redisHost =
       this.configService.get<string>('redis.host') || 'localhost';
     const redisPort = this.configService.get<number>('redis.port') || 6379;
@@ -79,6 +79,7 @@ export class TrackingGateway
       const pubClient = new Redis({
         host: redisHost,
         port: redisPort,
+        password: this.configService.get<string>('redis.password'),
         maxRetriesPerRequest: 3,
       });
       const subClient = pubClient.duplicate();
@@ -106,7 +107,7 @@ export class TrackingGateway
    */
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('joinRiderRoom')
-  async handleJoinRiderRoom(@ConnectedSocket() client: Socket): Promise<void> {
+  handleJoinRiderRoom(@ConnectedSocket() client: Socket): void {
     const user = this.getUserFromSocket(client);
     if (!user) {
       throw new WsException('Unauthorized');
@@ -161,6 +162,48 @@ export class TrackingGateway
         : value.id?.toString?.() || null;
     }
     return value?.toString?.() || null;
+  }
+
+  /**
+   * Socket payloads go to everyone in the order room (customer, rider, admin),
+   * so never include the delivery OTP in them.
+   */
+  private stripSensitive(order: any): any {
+    if (!order || typeof order !== 'object') return order;
+    const rest = { ...order };
+    delete rest.deliveryOtp;
+    delete rest.deliveryOtpAttempts;
+    return rest;
+  }
+
+  /**
+   * Removes riders from an order room when they are no longer the assigned
+   * rider (e.g. after reassignment), so they stop receiving its updates.
+   */
+  async evictUnassignedRiders(
+    orderId: string,
+    currentRiderId: string | null,
+  ): Promise<void> {
+    try {
+      const roomName = this.getOrderRoomName(orderId);
+      const room = this.server?.in?.(roomName);
+      if (!room || typeof room.fetchSockets !== 'function') return;
+
+      const sockets = await room.fetchSockets();
+      for (const socket of sockets) {
+        const user = socket.data?.user;
+        if (user?.role === 'rider' && user.userId !== currentRiderId) {
+          socket.leave(roomName);
+          this.logger.log(
+            `Removed rider ${user.userId} from ${roomName} (no longer assigned)`,
+          );
+        }
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to evict stale riders from order ${orderId}: ${(error as Error).message}`,
+      );
+    }
   }
 
   /**
@@ -238,10 +281,10 @@ export class TrackingGateway
    */
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('leaveOrderRoom')
-  async handleLeaveOrderRoom(
+  handleLeaveOrderRoom(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: JoinOrderRoomPayload,
-  ): Promise<void> {
+  ): void {
     const { orderId } = payload;
     const roomName = this.getOrderRoomName(orderId);
 
@@ -267,6 +310,10 @@ export class TrackingGateway
 
     if (!user) {
       throw new WsException('Unauthorized: User not authenticated');
+    }
+
+    if (user.role !== 'rider') {
+      throw new WsException('Only riders can send location updates');
     }
 
     // Validate coordinates
@@ -344,15 +391,20 @@ export class TrackingGateway
    */
   broadcastOrderStatusUpdate(orderId: string, order: any): void {
     const roomName = `order_${orderId}`;
+    const safeOrder = this.stripSensitive(order);
     const payload = {
       orderId,
       status: order.orderStatus,
+      paymentStatus: order.paymentStatus,
       timeline: order.timeline,
       estimatedDeliveryTime: order.estimatedDeliveryTime,
-      order,
+      order: safeOrder,
       rider: order.rider || null,
       tracking: order.tracking || null,
     };
+    const currentRiderId =
+      order.rider?.id || this.extractEntityId(order.riderId) || null;
+    void this.evictUnassignedRiders(orderId, currentRiderId);
     this.server.to(roomName).emit('orderStatusUpdate', payload);
     this.server.to(roomName).emit('order.status', payload);
     this.logger.log(
@@ -363,8 +415,9 @@ export class TrackingGateway
   /**
    * Notify a specific rider about a new order assignment
    */
-  notifyRiderOfAssignment(riderId: string, order: any): void {
+  notifyRiderOfAssignment(riderId: string, rawOrder: any): void {
     const roomName = `rider_${riderId}`;
+    const order = this.stripSensitive(rawOrder);
     const payload = {
       order: {
         id: order._id?.toString?.() || order.id?.toString?.(),
@@ -420,8 +473,9 @@ export class TrackingGateway
     );
   }
 
-  notifyRiderOrderPacked(riderId: string, order: any): void {
+  notifyRiderOrderPacked(riderId: string, rawOrder: any): void {
     const roomName = `rider_${riderId}`;
+    const order = this.stripSensitive(rawOrder);
     const payload = {
       orderId: order._id?.toString?.() || order.id,
       status: order.orderStatus,
@@ -497,7 +551,7 @@ export class TrackingGateway
       location,
       timestamp: new Date(),
       tracking: order?.tracking || null,
-      order: order || null,
+      order: this.stripSensitive(order) || null,
     };
     this.server.to(roomName).emit('riderLocationUpdate', payload);
     this.server.to(roomName).emit('rider.location', payload);
@@ -520,7 +574,7 @@ export class TrackingGateway
       durationMinutes,
       distanceRemaining: order?.tracking?.distanceRemaining ?? null,
       tracking: order?.tracking || null,
-      order: order || null,
+      order: this.stripSensitive(order) || null,
     };
     this.server.to(roomName).emit('etaUpdate', payload);
     this.server.to(roomName).emit('eta.updated', payload);

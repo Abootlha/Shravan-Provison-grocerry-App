@@ -13,6 +13,7 @@ import { CategoriesService } from './categories.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { CategoryType } from './schemas/category.schema';
+import { CreateCategoryDto, UpdateCategoryDto } from './dto/category.dto';
 
 @Controller('categories')
 export class CategoriesController {
@@ -47,15 +48,15 @@ export class CategoriesController {
 
   @Post()
   @UseGuards(JwtAuthGuard, AdminGuard)
-  async create(@Body() data: any) {
-    const category = await this.categoriesService.create(data);
+  async create(@Body() data: CreateCategoryDto) {
+    const category = await this.categoriesService.create(data as any);
     return { category };
   }
 
   @Put(':id')
   @UseGuards(JwtAuthGuard, AdminGuard)
-  async update(@Param('id') id: string, @Body() data: any) {
-    const category = await this.categoriesService.update(id, data);
+  async update(@Param('id') id: string, @Body() data: UpdateCategoryDto) {
+    const category = await this.categoriesService.update(id, data as any);
     return { category };
   }
 

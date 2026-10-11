@@ -7,9 +7,11 @@ import {
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { Logger, Inject, forwardRef } from '@nestjs/common';
 import Redis from 'ioredis';
 import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
+import { OrdersService } from '../modules/orders/orders.service';
 
 @WebSocketGateway({
   cors: {
@@ -26,11 +28,17 @@ export class OrdersGateway
   private logger = new Logger('OrdersGateway');
   private subscriber: Redis;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private jwtService: JwtService,
+    @Inject(forwardRef(() => OrdersService))
+    private ordersService: OrdersService,
+  ) {
     // Create a separate Redis connection for subscribing
     this.subscriber = new Redis({
       host: this.configService.get<string>('redis.host'),
       port: this.configService.get<number>('redis.port'),
+      password: this.configService.get<string>('redis.password'),
     });
 
     // Subscribe to order updates channel
@@ -59,12 +67,52 @@ export class OrdersGateway
     });
   }
 
-  afterInit(server: Server) {
+  afterInit() {
     this.logger.log('Orders WebSocket Gateway initialized');
   }
 
-  handleConnection(client: Socket) {
-    this.logger.log(`Client connected: ${client.id}`);
+  private extractToken(client: Socket): string | null {
+    const authToken = client.handshake?.auth?.token;
+    if (authToken && typeof authToken === 'string') return authToken;
+
+    const queryToken = client.handshake?.query?.token;
+    if (queryToken && typeof queryToken === 'string') return queryToken;
+
+    const authHeader = client.handshake?.headers?.authorization;
+    if (
+      authHeader &&
+      typeof authHeader === 'string' &&
+      authHeader.startsWith('Bearer ')
+    ) {
+      return authHeader.substring(7);
+    }
+    return null;
+  }
+
+  /**
+   * Authenticate the socket with the same JWT used for the REST API; reject
+   * unauthenticated connections outright.
+   */
+  async handleConnection(client: Socket) {
+    const token = this.extractToken(client);
+    if (!token) {
+      this.logger.warn(`Rejected unauthenticated client ${client.id}`);
+      client.disconnect(true);
+      return;
+    }
+
+    try {
+      const payload = await this.jwtService.verifyAsync(token, {
+        secret: this.configService.get<string>('jwt.secret'),
+      });
+      client.data.user = { userId: payload.sub, role: payload.role };
+      this.logger.log(`Client connected: ${client.id}`);
+    } catch (error) {
+      this.logger.warn(
+        `Rejected client ${client.id} with invalid token: ${(error as Error).message}`,
+      );
+      client.disconnect(true);
+    }
   }
 
   handleDisconnect(client: Socket) {
@@ -72,7 +120,30 @@ export class OrdersGateway
   }
 
   @SubscribeMessage('joinOrder')
-  handleJoinOrder(client: Socket, orderId: string) {
+  async handleJoinOrder(client: Socket, orderId: string) {
+    const user = client.data?.user as
+      | { userId: string; role: string }
+      | undefined;
+    if (!user) {
+      return { event: 'error', data: { message: 'Unauthorized' } };
+    }
+    if (typeof orderId !== 'string' || !orderId) {
+      return { event: 'error', data: { message: 'orderId is required' } };
+    }
+
+    const order = await this.ordersService.findAccessInfoByOrderId(orderId);
+    const isOwner = order?.userId?.toString() === user.userId;
+    const isAssignedRider =
+      user.role === 'rider' && order?.riderId?.toString() === user.userId;
+    const isAdmin = user.role === 'admin';
+
+    if (!order || (!isOwner && !isAssignedRider && !isAdmin)) {
+      this.logger.warn(
+        `Unauthorized joinOrder attempt by ${user.userId} for ${orderId}`,
+      );
+      return { event: 'error', data: { message: 'Order not found' } };
+    }
+
     client.join(`order:${orderId}`);
     this.logger.log(`Client ${client.id} joined room order:${orderId}`);
     return { event: 'joined', data: { orderId } };

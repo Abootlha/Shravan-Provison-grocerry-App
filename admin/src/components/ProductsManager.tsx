@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
 import Papa from 'papaparse';
+import {
+    validateProductRows, runWithConcurrency, MAX_IMPORT_ROWS, MAX_IMPORT_FILE_BYTES, IMPORT_CONCURRENCY,
+    type ValidProductRow, type RowError,
+} from '../lib/productCsv';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -110,6 +114,10 @@ export default function ProductsManager() {
     const [isBulkImporting, setIsBulkImporting] = useState(false);
     const [bulkImportProgress, setBulkImportProgress] = useState({ current: 0, total: 0, success: 0, failed: 0 });
     const bulkFileInputRef = useRef<HTMLInputElement>(null);
+    // Validated-but-not-yet-imported CSV, shown as a summary before anything is sent.
+    const [bulkPreview, setBulkPreview] = useState<{ fileName: string; valid: ValidProductRow[]; invalid: RowError[] } | null>(null);
+    const [bulkImportErrors, setBulkImportErrors] = useState<RowError[]>([]);
+    const [bulkFileError, setBulkFileError] = useState('');
 
     const [availableSubcategories, setAvailableSubcategories] = useState<Category[]>([]);
     const [availableItemGroups, setAvailableItemGroups] = useState<any[]>([]);
@@ -161,7 +169,7 @@ export default function ProductsManager() {
     async function fetchData() {
         try {
             const [productsData, categoriesData] = await Promise.all([
-                api.getProducts({ categoryId: categoryFilter || undefined, limit: 100 }),
+                api.getAllProducts({ categoryId: categoryFilter || undefined }),
                 api.getCategories(),
             ]);
             setProducts(productsData.products || []);
@@ -324,7 +332,7 @@ export default function ProductsManager() {
     }
 
     function downloadCsvTemplate() {
-        const csvContent = "Barcode,Name,Brand,Price,OriginalPrice,Stock,Unit,Category,Subcategory,ItemGroup,Description,Highlights,Images,ImageURL1,ImageURL2\n1234567890123,Sample Product,Brand A,100,120,50,1pc,Category_ID,Subcategory_ID,ItemGroup_ID,Product Details here,High quality,https://example.com/img1.jpg|https://example.com/img2.jpg,,";
+        const csvContent = "Barcode,Name,Brand,Price,OriginalPrice,Stock,Unit,Category,Subcategory,ItemGroup,Description,Highlights,Images,ImageURL1,ImageURL2\n1234567890123,Sample Product,Brand A,100,120,50,1pc,Category Name,Subcategory_ID,ItemGroup_ID,Product Details here,High quality,https://example.com/img1.jpg|https://example.com/img2.jpg,,";
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement("a");
         const url = URL.createObjectURL(blob);
@@ -336,86 +344,84 @@ export default function ProductsManager() {
         document.body.removeChild(link);
     }
 
+    function resetBulkImport() {
+        setBulkPreview(null);
+        setBulkImportErrors([]);
+        setBulkFileError('');
+        setBulkImportProgress({ current: 0, total: 0, success: 0, failed: 0 });
+        if (bulkFileInputRef.current) bulkFileInputRef.current.value = '';
+    }
+
+    // Step 1: parse + validate the file and show a per-row summary. Nothing is imported yet.
     function handleBulkImport(e: React.ChangeEvent<HTMLInputElement>) {
         const file = e.target.files?.[0];
         if (!file) return;
 
-        setIsBulkImporting(true);
-        setBulkImportProgress({ current: 0, total: 0, success: 0, failed: 0 });
+        resetBulkImport();
+
+        if (file.size > MAX_IMPORT_FILE_BYTES) {
+            setBulkFileError(`File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is ${MAX_IMPORT_FILE_BYTES / 1024 / 1024} MB.`);
+            return;
+        }
 
         Papa.parse(file, {
             header: true,
             skipEmptyLines: true,
-            complete: async (results) => {
-                const rows = results.data as any[];
-                setBulkImportProgress(prev => ({ ...prev, total: rows.length }));
-
-                let successCount = 0;
-                let failedCount = 0;
-
-                for (let i = 0; i < rows.length; i++) {
-                    const row = rows[i];
-                    try {
-                        let imagesArray = [];
-                        if (row.Images && row.Images.trim() !== '') {
-                            imagesArray = row.Images.split('|').map((img: string) => img.trim()).filter(Boolean);
-                        } else {
-                            imagesArray = [row.ImageURL1, row.ImageURL2, row.ImageURL3, row.ImageURL4].filter(Boolean);
-                        }
-
-                        const data: any = {
-                            name: row.Name,
-                            brand: row.Brand || '',
-                            price: Number(row.Price) || 0,
-                            originalPrice: Number(row.OriginalPrice) || Number(row.Price) || 0,
-                            stock: Number(row.Stock) || 0,
-                            unit: row.Unit || '1pc',
-                            categoryId: row.Category || (categories.length > 0 ? categories[0]._id : null),
-                            subcategoryId: row.Subcategory || null,
-                            itemGroupId: row.ItemGroup || null,
-                            description: row.Description || '',
-                            highlights: row.Highlights || '',
-                            images: imagesArray,
-                            image: imagesArray.length > 0 ? imagesArray[0] : '',
-                            isAvailable: true,
-                        };
-
-                        if (row.Barcode && row.Barcode.trim() !== '') {
-                            data.barcode = row.Barcode.trim();
-                        }
-                        
-                        if (!data.name || data.price === undefined || data.price === null || isNaN(data.price)) {
-                            throw new Error("Missing required fields (Name, Price)");
-                        }
-                        if (!data.categoryId) {
-                            throw new Error("Category is missing! Please create at least one category in the Admin Panel before importing products.");
-                        }
-
-                        await api.createProduct(data);
-                        successCount++;
-                    } catch (error: any) {
-                        console.error(`Error importing row ${i + 1}:`, error);
-                        alert(`Row ${i + 1} Failed: ${error.message}`);
-                        failedCount++;
-                    }
-                    
-                    setBulkImportProgress(prev => ({ 
-                        ...prev, 
-                        current: i + 1, 
-                        success: successCount, 
-                        failed: failedCount 
-                    }));
+            complete: (results) => {
+                const rows = results.data as Record<string, unknown>[];
+                if (rows.length === 0) {
+                    setBulkFileError('The CSV file has no data rows.');
+                    return;
                 }
-
-                setIsBulkImporting(false);
-                fetchData(); // Refresh list after import
+                if (rows.length > MAX_IMPORT_ROWS) {
+                    setBulkFileError(`The CSV has ${rows.length} rows. Split it into files of at most ${MAX_IMPORT_ROWS} rows.`);
+                    return;
+                }
+                if (categories.length === 0) {
+                    setBulkFileError('No categories exist yet. Create categories before importing products.');
+                    return;
+                }
+                const { valid, invalid } = validateProductRows(rows, categories);
+                setBulkPreview({ fileName: file.name, valid, invalid });
             },
             error: (error) => {
                 console.error("CSV Parse Error:", error);
-                alert("Failed to read CSV file.");
-                setIsBulkImporting(false);
+                setBulkFileError('Failed to read CSV file.');
             }
         });
+    }
+
+    // Step 2: import the valid rows, a few requests at a time.
+    async function confirmBulkImport() {
+        if (!bulkPreview || bulkPreview.valid.length === 0) return;
+        const rows = bulkPreview.valid;
+
+        setIsBulkImporting(true);
+        setBulkImportErrors([]);
+        setBulkImportProgress({ current: 0, total: rows.length, success: 0, failed: 0 });
+
+        const failures: RowError[] = [];
+        await runWithConcurrency(rows, IMPORT_CONCURRENCY, async ({ row, data }) => {
+            let ok = false;
+            try {
+                await api.createProduct(data);
+                ok = true;
+            } catch (error: any) {
+                console.error(`Error importing row ${row}:`, error);
+                failures.push({ row, name: String(data.name), errors: [error?.message || 'Request failed'] });
+            }
+            setBulkImportProgress(prev => ({
+                ...prev,
+                current: prev.current + 1,
+                success: prev.success + (ok ? 1 : 0),
+                failed: prev.failed + (ok ? 0 : 1),
+            }));
+        });
+
+        setBulkImportErrors(failures.sort((a, b) => a.row - b.row));
+        setBulkPreview(null);
+        setIsBulkImporting(false);
+        fetchData(); // Refresh list after import
     }
 
     async function startScanner() {
@@ -1290,21 +1296,22 @@ export default function ProductsManager() {
                                 {!isBulkImporting && (
                                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
                                         setShowBulkImportModal(false);
-                                        setBulkImportProgress({ current: 0, total: 0, success: 0, failed: 0 });
+                                        resetBulkImport();
                                     }}>
                                         <X className="w-4 h-4" />
                                     </Button>
                                 )}
                             </CardHeader>
                             <CardContent className="p-6 space-y-6">
-                                {!isBulkImporting && bulkImportProgress.total === 0 && (
+                                {!isBulkImporting && !bulkPreview && bulkImportProgress.total === 0 && (
                                     <>
                                         <div className="p-4 rounded-xl" style={{ background: 'var(--bg-tertiary)' }}>
                                             <div className="flex items-start gap-3">
                                                 <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: 'var(--accent)' }} />
                                                 <div className="text-sm space-y-2" style={{ color: 'var(--text-secondary)' }}>
                                                     <p>Upload a CSV file to add multiple products at once.</p>
-                                                    <p>Make sure your CSV matches the template format. Invalid rows or duplicates will be skipped to prevent errors.</p>
+                                                    <p>Make sure your CSV matches the template format. Category must be the name of an existing category. Rows are validated first so you can review errors before importing.</p>
+                                                    <p>Limits: {MAX_IMPORT_ROWS} rows, {MAX_IMPORT_FILE_BYTES / 1024 / 1024} MB per file.</p>
                                                     <Button variant="link" className="h-auto p-0" onClick={downloadCsvTemplate}>
                                                         Download CSV Template
                                                     </Button>
@@ -1330,8 +1337,32 @@ export default function ProductsManager() {
                                                 <span className="text-base font-medium" style={{ color: 'var(--text-primary)' }}>Click to upload CSV</span>
                                                 <span className="text-sm" style={{ color: 'var(--text-muted)' }}>Only .csv files are supported</span>
                                             </label>
+                                            {bulkFileError && (
+                                                <p className="mt-3 text-sm" style={{ color: 'var(--danger)' }}>{bulkFileError}</p>
+                                            )}
                                         </div>
                                     </>
+                                )}
+
+                                {!isBulkImporting && bulkPreview && (
+                                    <div className="space-y-4">
+                                        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                                            <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{bulkPreview.fileName}</span>
+                                            {': '}{bulkPreview.valid.length} valid, {bulkPreview.invalid.length} with errors.
+                                            {bulkPreview.invalid.length > 0 && ' Rows with errors will be skipped.'}
+                                        </p>
+                                        {bulkPreview.invalid.length > 0 && (
+                                            <ImportErrorList errors={bulkPreview.invalid} />
+                                        )}
+                                        <div className="flex gap-3">
+                                            <Button variant="outline" className="flex-1" onClick={resetBulkImport}>
+                                                Choose another file
+                                            </Button>
+                                            <Button className="flex-1" onClick={confirmBulkImport} disabled={bulkPreview.valid.length === 0}>
+                                                Import {bulkPreview.valid.length} row{bulkPreview.valid.length === 1 ? '' : 's'}
+                                            </Button>
+                                        </div>
+                                    </div>
                                 )}
 
                                 {(isBulkImporting || bulkImportProgress.total > 0) && (
@@ -1366,12 +1397,16 @@ export default function ProductsManager() {
                                             </div>
                                         </div>
 
+                                        {!isBulkImporting && bulkImportErrors.length > 0 && (
+                                            <ImportErrorList errors={bulkImportErrors} />
+                                        )}
+
                                         {!isBulkImporting && (
                                             <Button 
                                                 className="w-full mt-4" 
                                                 onClick={() => {
                                                     setShowBulkImportModal(false);
-                                                    setBulkImportProgress({ current: 0, total: 0, success: 0, failed: 0 });
+                                                    resetBulkImport();
                                                 }}
                                             >
                                                 Close
@@ -1575,6 +1610,26 @@ export default function ProductsManager() {
                     </Card>
                 </div>
             )}
+        </div>
+    );
+}
+
+function ImportErrorList({ errors }: { errors: RowError[] }) {
+    return (
+        <div
+            className="max-h-60 overflow-y-auto rounded-lg p-3 text-sm space-y-2"
+            style={{ background: 'var(--danger-light)', border: '1px solid var(--danger)' }}
+        >
+            {errors.map((err) => (
+                <div key={err.row}>
+                    <p className="font-medium" style={{ color: 'var(--danger)' }}>
+                        Row {err.row}: {err.name}
+                    </p>
+                    <ul className="list-disc pl-5" style={{ color: 'var(--text-secondary)' }}>
+                        {err.errors.map((msg, i) => <li key={i}>{msg}</li>)}
+                    </ul>
+                </div>
+            ))}
         </div>
     );
 }

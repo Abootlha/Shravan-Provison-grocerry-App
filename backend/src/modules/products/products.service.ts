@@ -179,7 +179,7 @@ export class ProductsService {
     // Invalidate category cache
     if (data.categoryId) {
       await this.redisService.delPattern(
-        `products:category:${data.categoryId}:*`,
+        `products:category:${String(data.categoryId)}:*`,
       );
     }
     await this.redisService.delPattern(`products:all:*`);
@@ -207,7 +207,7 @@ export class ProductsService {
     // Invalidate caches
     await this.redisService.del(RedisService.Keys.product(id));
     await this.redisService.delPattern(
-      `products:category:${product.categoryId}:*`,
+      `products:category:${String(product.categoryId)}:*`,
     );
     await this.redisService.delPattern(`products:all:*`);
 
@@ -221,35 +221,51 @@ export class ProductsService {
     await this.redisService.del(RedisService.Keys.product(id));
   }
 
+  /**
+   * Atomically reserves stock for every item. Each decrement only succeeds if
+   * enough stock remains (conditional update), and if any item fails the
+   * items already decremented are rolled back.
+   */
   async checkAndLockStock(
     items: { productId: string; quantity: number }[],
   ): Promise<boolean> {
-    // Check if all items have sufficient stock
+    const locked: { productId: string; quantity: number }[] = [];
+
     for (const item of items) {
-      const product = await this.productModel.findById(item.productId);
-      if (!product || product.stock < item.quantity) {
+      if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
+        await this.releaseStock(locked);
         return false;
       }
-    }
 
-    // Decrement stock atomically
-    for (const item of items) {
-      await this.productModel.findByIdAndUpdate(item.productId, {
-        $inc: { stock: -item.quantity, soldCount: item.quantity },
-      });
+      const result = await this.productModel.updateOne(
+        { _id: item.productId, stock: { $gte: item.quantity } },
+        { $inc: { stock: -item.quantity, soldCount: item.quantity } },
+      );
+
+      if (!result || result.modifiedCount !== 1) {
+        await this.releaseStock(locked);
+        return false;
+      }
+
+      locked.push(item);
       await this.redisService.del(RedisService.Keys.product(item.productId));
     }
 
     return true;
   }
 
+  /**
+   * Returns stock for the given items. Callers are responsible for making sure
+   * this runs at most once per order (see Order.stockReleased).
+   */
   async releaseStock(
     items: { productId: string; quantity: number }[],
   ): Promise<void> {
     for (const item of items) {
-      await this.productModel.findByIdAndUpdate(item.productId, {
-        $inc: { stock: item.quantity, soldCount: -item.quantity },
-      });
+      await this.productModel.updateOne(
+        { _id: item.productId },
+        { $inc: { stock: item.quantity, soldCount: -item.quantity } },
+      );
       await this.redisService.del(RedisService.Keys.product(item.productId));
     }
   }

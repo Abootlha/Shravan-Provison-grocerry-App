@@ -1,0 +1,35 @@
+{
+  "cli": {
+    "version": ">= 24.12.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "distribution": "internal",
+      "env": {
+        "PUBLIC_NODE_ENV": "development"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "NODE_ENV": "production",
+        "PUBLIC_NODE_ENV": "production",
+        "API_BASE_URL": "https://api.example.com/api/v1",
+        "TRACKING_URL": "https://api.example.com/tracking"
+      }
+    },
+    "production": {
+      "env": {
+        "NODE_ENV": "production",
+        "PUBLIC_NODE_ENV": "production",
+        "API_BASE_URL": "https://api.example.com/api/v1",
+        "TRACKING_URL": "https://api.example.com/tracking"
+      },
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

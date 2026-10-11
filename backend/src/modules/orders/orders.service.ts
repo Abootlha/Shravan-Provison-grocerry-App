@@ -2,14 +2,17 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
+  Logger,
   forwardRef,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import dayjs from 'dayjs';
+import { randomInt, timingSafeEqual } from 'crypto';
 import {
   Order,
   OrderDocument,
@@ -22,8 +25,12 @@ import {
   OrderStatusLog,
   OrderStatusLogDocument,
 } from './schemas/order-status-log.schema';
-import { User, UserDocument } from '../users/schemas/user.schema';
-import { Rider, RiderDocument } from '../riders/schemas/rider.schema';
+import { User, UserDocument, UserRole } from '../users/schemas/user.schema';
+import {
+  Rider,
+  RiderDocument,
+  RiderStatus,
+} from '../riders/schemas/rider.schema';
 import { CartService } from '../cart/cart.service';
 import { ProductsService } from '../products/products.service';
 import { SettingsService } from '../settings/settings.service';
@@ -32,8 +39,24 @@ import { CacheService } from '../../common/utils/cache.service';
 import { TrackingGateway } from '../../sockets/tracking.gateway';
 import { ETAService } from './eta.service';
 
+export const MAX_DELIVERY_OTP_ATTEMPTS = 5;
+
+// Statuses after which the goods have physically left the store.
+const GOODS_LEFT_STORE_STATUSES: OrderStatus[] = [
+  OrderStatus.PICKED_UP,
+  OrderStatus.OUT_FOR_DELIVERY,
+];
+
+export interface UpdateStatusOptions {
+  actorRole?: string;
+  deliveryOtp?: string;
+  reason?: string;
+}
+
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   private getActiveTrackingLeg(
     status: OrderStatus,
   ): 'to_store' | 'to_customer' | null {
@@ -51,7 +74,30 @@ export class OrdersService {
   }
 
   private generateDeliveryOtp(): string {
-    return `${Math.floor(1000 + Math.random() * 9000)}`;
+    return `${randomInt(1000, 10000)}`;
+  }
+
+  private safeEqual(a: string, b: string): boolean {
+    const left = Buffer.from(String(a ?? ''));
+    const right = Buffer.from(String(b ?? ''));
+    if (left.length !== right.length || left.length === 0) {
+      return false;
+    }
+    return timingSafeEqual(left, right);
+  }
+
+  isOnlinePayment(order: { paymentMethod?: PaymentMethod }): boolean {
+    return order.paymentMethod !== PaymentMethod.COD;
+  }
+
+  isPaymentSettledForFulfilment(order: {
+    paymentMethod?: PaymentMethod;
+    paymentStatus?: PaymentStatus;
+  }): boolean {
+    return (
+      !this.isOnlinePayment(order) ||
+      order.paymentStatus === PaymentStatus.COMPLETED
+    );
   }
 
   private async ensureDeliveryOtpById(orderId: string): Promise<any> {
@@ -95,7 +141,6 @@ export class OrdersService {
     data: {
       deliveryAddress: any;
       paymentMethod: PaymentMethod;
-      paymentStatus?: PaymentStatus;
       deliveryInstructions?: string;
       items?: any[];
     },
@@ -191,18 +236,22 @@ export class OrdersService {
       totalAmount,
       deliveryAddress: deliveryAddress,
       paymentMethod: data.paymentMethod,
-      paymentStatus:
-        data.paymentStatus ??
-        (data.paymentMethod === PaymentMethod.COD
-          ? PaymentStatus.PENDING
-          : PaymentStatus.COMPLETED),
+      // Payment status is never client-controlled: COD settles on delivery,
+      // online methods settle only when PayU confirms via a verified callback.
+      paymentStatus: PaymentStatus.PENDING,
       orderStatus: OrderStatus.PENDING,
       estimatedDeliveryTime: dayjs().add(15, 'minutes').toDate(),
       deliveryInstructions: data.deliveryInstructions,
       deliveryOtp,
     });
 
-    await order.save();
+    try {
+      await order.save();
+    } catch (error) {
+      // Stock was already reserved above; give it back if the order never existed.
+      await this.productsService.releaseStock(stockItems);
+      throw error;
+    }
 
     // Log status
     await this.logStatusChange(
@@ -230,6 +279,7 @@ export class OrdersService {
     const [orders, total] = await Promise.all([
       this.orderModel
         .find({ userId: new Types.ObjectId(userId) })
+        .select('+deliveryOtp')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -253,8 +303,6 @@ export class OrdersService {
       return cached;
     }
 
-    await this.ensureDeliveryOtpById(orderId);
-
     // Fallback to database query with rider population
     const order = await this.orderModel
       .findById(orderId)
@@ -277,7 +325,7 @@ export class OrdersService {
   async findByOrderId(orderId: string): Promise<OrderDocument | null> {
     const existingOrder = await this.orderModel
       .findOne({ orderId })
-      .select('_id deliveryOtp')
+      .select('_id +deliveryOtp')
       .lean()
       .exec();
     if (existingOrder?._id && !existingOrder.deliveryOtp) {
@@ -330,7 +378,7 @@ export class OrdersService {
       .exec();
   }
 
-  async findCurrentForRider(riderId: string): Promise<any | null> {
+  async findCurrentForRider(riderId: string): Promise<any> {
     const currentOrder = await this.orderModel
       .findOne({
         riderId: new Types.ObjectId(riderId),
@@ -355,12 +403,26 @@ export class OrdersService {
     return this.buildRealtimeOrderPayload(currentOrder._id.toString());
   }
 
-  async buildRealtimeOrderPayload(orderId: string): Promise<any> {
-    await this.ensureDeliveryOtpById(orderId);
+  /**
+   * Builds the order payload used by REST responses and socket broadcasts.
+   * The delivery OTP is only included when includeDeliveryOtp is set, which
+   * callers must only do for the owning customer.
+   */
+  async buildRealtimeOrderPayload(
+    orderId: string,
+    options: { includeDeliveryOtp?: boolean } = {},
+  ): Promise<any> {
+    if (options.includeDeliveryOtp) {
+      await this.ensureDeliveryOtpById(orderId);
+    }
+
+    const orderQuery = this.orderModel.findById(orderId);
+    if (options.includeDeliveryOtp) {
+      orderQuery.select('+deliveryOtp');
+    }
 
     const [order, storeSettings] = await Promise.all([
-      this.orderModel
-        .findById(orderId)
+      orderQuery
         .populate('userId', 'name phone')
         .populate(
           'riderId',
@@ -448,12 +510,17 @@ export class OrdersService {
           )
         : null;
 
+    // Strip the OTP (and its attempt counter) unless explicitly requested.
+    const orderWithoutOtp = { ...(order as any) };
+    delete orderWithoutOtp.deliveryOtp;
+    delete orderWithoutOtp.deliveryOtpAttempts;
+
     return {
-      ...order,
+      ...orderWithoutOtp,
+      ...(options.includeDeliveryOtp ? { deliveryOtp: order.deliveryOtp } : {}),
       rider,
       customerName: user?.name || 'Customer',
       customerPhone: user?.phone || '',
-      deliveryOtp: order.deliveryOtp,
       storeName: storeSettings.storeName,
       storePhone: storeSettings.contactPhone || '',
       storeAddress: storeSettings.location.address,
@@ -477,8 +544,11 @@ export class OrdersService {
     };
   }
 
-  async getTrackingOrderById(orderId: string): Promise<any> {
-    return this.buildRealtimeOrderPayload(orderId);
+  async getTrackingOrderById(
+    orderId: string,
+    options: { includeDeliveryOtp?: boolean } = {},
+  ): Promise<any> {
+    return this.buildRealtimeOrderPayload(orderId, options);
   }
 
   validateStatusTransition(
@@ -504,128 +574,466 @@ export class OrdersService {
     });
   }
 
+  /**
+   * Verifies the delivery OTP supplied by the rider. Every attempt (right or
+   * wrong) is counted atomically so parallel guesses cannot bypass the limit.
+   */
+  private async verifyDeliveryOtp(
+    orderObjectId: Types.ObjectId | string,
+    suppliedOtp?: string,
+  ): Promise<void> {
+    if (!suppliedOtp || typeof suppliedOtp !== 'string') {
+      throw new BadRequestException('deliveryOtp is required to deliver');
+    }
+
+    const attempt = await this.orderModel
+      .findOneAndUpdate(
+        {
+          _id: orderObjectId,
+          $or: [
+            { deliveryOtpAttempts: { $exists: false } },
+            { deliveryOtpAttempts: { $lt: MAX_DELIVERY_OTP_ATTEMPTS } },
+          ],
+        },
+        { $inc: { deliveryOtpAttempts: 1 } },
+        { new: true },
+      )
+      .select('+deliveryOtp deliveryOtpAttempts')
+      .lean()
+      .exec();
+
+    if (!attempt) {
+      throw new ForbiddenException(
+        'Too many incorrect delivery OTP attempts. Contact support to complete this delivery.',
+      );
+    }
+
+    if (!this.safeEqual(suppliedOtp.trim(), attempt.deliveryOtp)) {
+      const remaining = Math.max(
+        MAX_DELIVERY_OTP_ATTEMPTS - (attempt.deliveryOtpAttempts || 0),
+        0,
+      );
+      throw new BadRequestException(
+        `Invalid delivery OTP. ${remaining} attempt(s) remaining.`,
+      );
+    }
+  }
+
+  /**
+   * Returns reserved stock for an order exactly once. The stockReleased flag is
+   * flipped atomically, so only the request that wins the flip releases stock.
+   */
+  async releaseOrderStock(order: {
+    _id: any;
+    items: { productId: any; quantity: number }[];
+  }): Promise<boolean> {
+    const claimed = await this.orderModel
+      .findOneAndUpdate(
+        { _id: order._id, stockReleased: { $ne: true } },
+        { $set: { stockReleased: true } },
+        { new: true },
+      )
+      .exec();
+
+    if (!claimed) {
+      return false;
+    }
+
+    const stockItems = (claimed.items || order.items).map((item) => ({
+      productId: item.productId.toString(),
+      quantity: item.quantity,
+    }));
+    await this.productsService.releaseStock(stockItems);
+    return true;
+  }
+
   async updateStatus(
     orderId: string,
     newStatus: OrderStatus,
     userId: string,
+    options: UpdateStatusOptions = {},
   ): Promise<OrderDocument> {
     const order = await this.orderModel.findById(orderId);
     if (!order) throw new NotFoundException('Order not found');
 
+    const previousStatus = order.orderStatus;
+
     // Validate transition
-    if (!this.validateStatusTransition(order.orderStatus, newStatus)) {
+    if (!this.validateStatusTransition(previousStatus, newStatus)) {
       throw new BadRequestException(
-        `Cannot transition from ${order.orderStatus} to ${newStatus}`,
+        `Cannot transition from ${previousStatus} to ${newStatus}`,
       );
     }
 
-    // Verify payment status before confirming
-    if (newStatus === OrderStatus.CONFIRMED) {
+    // Online orders cannot move forward until PayU has confirmed payment.
+    if (
+      newStatus !== OrderStatus.CANCELLED &&
+      !this.isPaymentSettledForFulfilment(order)
+    ) {
+      throw new BadRequestException(
+        'Online payment has not been completed for this order',
+      );
+    }
+
+    const goodsLeftStore = GOODS_LEFT_STORE_STATUSES.includes(previousStatus);
+    if (
+      newStatus === OrderStatus.CANCELLED &&
+      goodsLeftStore &&
+      options.actorRole !== UserRole.ADMIN
+    ) {
+      throw new ForbiddenException(
+        'Orders that have been picked up can only be cancelled by an admin',
+      );
+    }
+
+    if (newStatus === OrderStatus.DELIVERED) {
+      await this.verifyDeliveryOtp(order._id, options.deliveryOtp);
+    }
+
+    const now = new Date();
+    const $set: Record<string, any> = { orderStatus: newStatus };
+    if (newStatus === OrderStatus.DELIVERED) {
+      $set.actualDeliveryTime = now;
+      if (order.paymentMethod === PaymentMethod.COD) {
+        $set.paymentStatus = PaymentStatus.COMPLETED;
+        $set.paymentConfirmedAt = now;
+      }
+    }
+    if (newStatus === OrderStatus.CANCELLED) {
+      if (options.reason) {
+        $set.cancellationReason = options.reason;
+      }
+      const reviewReasons: string[] = [];
+      if (goodsLeftStore) {
+        // Goods already left the store: do not auto-restock, a human must
+        // reconcile the inventory once the items are back.
+        reviewReasons.push('CANCELLED_AFTER_PICKUP_STOCK_NOT_RELEASED');
+      }
       if (
-        order.paymentStatus !== PaymentStatus.COMPLETED &&
-        order.paymentMethod !== PaymentMethod.COD
+        this.isOnlinePayment(order) &&
+        order.paymentStatus === PaymentStatus.COMPLETED
       ) {
-        // Online payments are currently simulated in-app, so admin confirmation should not dead-end.
-        order.paymentStatus = PaymentStatus.COMPLETED;
+        reviewReasons.push('REFUND_REQUIRED');
+      }
+      if (reviewReasons.length > 0) {
+        $set.requiresManualReview = true;
+        $set.manualReviewReason = reviewReasons.join(',');
       }
     }
 
-    // Update status
-    const previousStatus = order.orderStatus;
-    order.orderStatus = newStatus;
+    // Atomic transition: only succeeds if nobody changed the status meanwhile.
+    const updated = await this.orderModel
+      .findOneAndUpdate(
+        { _id: order._id, orderStatus: previousStatus },
+        {
+          $set,
+          $push: {
+            timeline: {
+              status: newStatus,
+              timestamp: now,
+              changedBy: new Types.ObjectId(userId),
+            },
+          },
+        },
+        { new: true },
+      )
+      .exec();
 
-    // Add timeline entry
-    this.addTimelineEntry(order, newStatus, userId);
-
-    await order.save();
+    if (!updated) {
+      throw new ConflictException(
+        'Order status was changed by another request. Please refresh and retry.',
+      );
+    }
 
     // Invalidate full order cache (for tracking system)
-    await this.cacheService.deleteOrder(order._id.toString());
+    await this.cacheService.deleteOrder(updated._id.toString());
 
     // Invalidate Redis cache
-    await this.redisService.del(RedisService.Keys.orderStatus(order.orderId));
+    await this.redisService.del(RedisService.Keys.orderStatus(updated.orderId));
+
+    // Only the request that won the transition gets here, so stock is
+    // released at most once per order (and releaseOrderStock is idempotent).
+    if (newStatus === OrderStatus.CANCELLED && !goodsLeftStore) {
+      await this.releaseOrderStock(updated);
+    }
 
     // Log status change
     await this.logStatusChange(
-      order._id,
+      updated._id,
       previousStatus,
       newStatus,
       new Types.ObjectId(userId),
+      options.reason,
     );
 
     // Update Redis cache with new status
     await this.redisService.set(
-      RedisService.Keys.orderStatus(order.orderId),
+      RedisService.Keys.orderStatus(updated.orderId),
       newStatus,
     );
 
     // Publish to Redis for real-time updates
     await this.redisService.publish(
       'order-updates',
-      JSON.stringify({ orderId: order.orderId, status: newStatus }),
+      JSON.stringify({
+        orderId: updated.orderId,
+        status: newStatus,
+        paymentStatus: updated.paymentStatus,
+      }),
     );
 
     const trackingOrder = await this.buildRealtimeOrderPayload(
-      order._id.toString(),
+      updated._id.toString(),
     );
 
     // Broadcast order status update via socket
     this.trackingGateway.broadcastOrderStatusUpdate(
-      order._id.toString(),
+      updated._id.toString(),
       trackingOrder,
     );
 
-    if (newStatus === OrderStatus.CONFIRMED && !order.riderId) {
-      const assignedOrder = await this.autoAssignNearestRider(
-        order._id.toString(),
+    if (
+      updated.riderId &&
+      (newStatus === OrderStatus.DELIVERED ||
+        newStatus === OrderStatus.CANCELLED)
+    ) {
+      await this.releaseRider(
+        updated.riderId.toString(),
+        newStatus === OrderStatus.DELIVERED,
       );
-      if (!assignedOrder) {
-        throw new BadRequestException(
-          'No available rider could be assigned to this confirmed order',
-        );
-      }
-      return assignedOrder as OrderDocument;
     }
 
-    if (newStatus === OrderStatus.PACKED && order.riderId) {
+    if (newStatus === OrderStatus.CONFIRMED && !updated.riderId) {
+      let assignedOrder: OrderDocument | null = null;
+      try {
+        assignedOrder = await this.autoAssignNearestRider(
+          updated._id.toString(),
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Auto-assignment failed for order ${updated.orderId}: ${(error as Error).message}`,
+        );
+      }
+
+      if (assignedOrder) {
+        return assignedOrder;
+      }
+
+      // Order stays CONFIRMED and unassigned; the stale-order job retries
+      // assignment and admins can assign manually.
+      return {
+        ...trackingOrder,
+        riderAssignmentPending: true,
+      } as OrderDocument;
+    }
+
+    if (newStatus === OrderStatus.PACKED && updated.riderId) {
       this.trackingGateway.notifyRiderOrderPacked(
-        order.riderId.toString(),
+        updated.riderId.toString(),
         trackingOrder,
       );
     }
 
-    // If cancelled, release stock
-    if (newStatus === OrderStatus.CANCELLED) {
-      const stockItems = order.items.map((item) => ({
-        productId: item.productId.toString(),
-        quantity: item.quantity,
-      }));
-      await this.productsService.releaseStock(stockItems);
+    return trackingOrder as OrderDocument;
+  }
+
+  /**
+   * Cancels an order through the normal status path (status log, stock
+   * release, cache invalidation, socket broadcast).
+   */
+  async cancelOrder(
+    orderId: string,
+    actorId: string,
+    reason: string,
+    actorRole: string = UserRole.ADMIN,
+  ): Promise<OrderDocument> {
+    return this.updateStatus(orderId, OrderStatus.CANCELLED, actorId, {
+      actorRole,
+      reason,
+    });
+  }
+
+  /**
+   * Called after a verified PayU success callback. Idempotent: only the first
+   * call moves PENDING -> COMPLETED.
+   */
+  async markPaymentCompleted(
+    orderObjectId: string,
+    mihpayid?: string,
+  ): Promise<{ changed: boolean; requiresRefund?: boolean }> {
+    const now = new Date();
+    const updated = await this.orderModel
+      .findOneAndUpdate(
+        {
+          _id: orderObjectId,
+          paymentStatus: PaymentStatus.PENDING,
+          orderStatus: { $ne: OrderStatus.CANCELLED },
+        },
+        {
+          $set: {
+            paymentStatus: PaymentStatus.COMPLETED,
+            paymentConfirmedAt: now,
+            ...(mihpayid ? { mihpayid } : {}),
+          },
+        },
+        { new: true },
+      )
+      .exec();
+
+    if (!updated) {
+      const current = await this.orderModel
+        .findById(orderObjectId)
+        .select('orderId orderStatus paymentStatus')
+        .lean()
+        .exec();
+
+      if (
+        current &&
+        current.orderStatus === OrderStatus.CANCELLED &&
+        current.paymentStatus !== PaymentStatus.COMPLETED
+      ) {
+        // Money was captured for an order we already cancelled (e.g. payment
+        // timeout). Flag it for a refund instead of reviving the order.
+        await this.orderModel
+          .updateOne(
+            { _id: orderObjectId },
+            {
+              $set: {
+                requiresManualReview: true,
+                manualReviewReason:
+                  'PAYMENT_CAPTURED_AFTER_CANCEL_REFUND_REQUIRED',
+                ...(mihpayid ? { mihpayid } : {}),
+              },
+            },
+          )
+          .exec();
+        this.logger.error(
+          `Payment captured for cancelled order ${current.orderId} (mihpayid ${mihpayid}); refund required`,
+        );
+        return { changed: false, requiresRefund: true };
+      }
+
+      return { changed: false };
+    }
+
+    await this.afterPaymentStatusChange(updated);
+    return { changed: true };
+  }
+
+  /**
+   * Called after a verified PayU failure callback (or a payment timeout).
+   * Idempotent: marks payment FAILED once and cancels the order, which
+   * releases stock exactly once.
+   */
+  async markPaymentFailed(
+    orderObjectId: string,
+    reason: string,
+    mihpayid?: string,
+  ): Promise<{ changed: boolean }> {
+    const updated = await this.orderModel
+      .findOneAndUpdate(
+        { _id: orderObjectId, paymentStatus: PaymentStatus.PENDING },
+        {
+          $set: {
+            paymentStatus: PaymentStatus.FAILED,
+            ...(mihpayid ? { mihpayid } : {}),
+          },
+        },
+        { new: true },
+      )
+      .exec();
+
+    if (!updated) {
+      return { changed: false };
     }
 
     if (
-      order.riderId &&
-      (newStatus === OrderStatus.DELIVERED ||
-        newStatus === OrderStatus.CANCELLED)
+      updated.orderStatus !== OrderStatus.CANCELLED &&
+      updated.orderStatus !== OrderStatus.DELIVERED
     ) {
       try {
-        const rider = await this.riderModel.findById(order.riderId);
-        if (rider) {
-          rider.status = 'available' as any;
-          if (newStatus === OrderStatus.DELIVERED) {
-            rider.totalDeliveries = (rider.totalDeliveries || 0) + 1;
-          }
-          await rider.save();
-        }
+        const systemUserId = await this.getSystemUserId();
+        await this.cancelOrder(updated._id.toString(), systemUserId, reason);
+        return { changed: true };
       } catch (error) {
-        console.error(
-          `Failed to update rider availability for order ${order._id}:`,
-          error,
+        this.logger.error(
+          `Failed to cancel order ${updated.orderId} after payment failure: ${(error as Error).message}`,
         );
       }
     }
 
-    return trackingOrder as OrderDocument;
+    await this.afterPaymentStatusChange(updated);
+    return { changed: true };
+  }
+
+  private async afterPaymentStatusChange(order: OrderDocument): Promise<void> {
+    await this.cacheService.deleteOrder(order._id.toString());
+    await this.redisService.publish(
+      'order-updates',
+      JSON.stringify({
+        orderId: order.orderId,
+        status: order.orderStatus,
+        paymentStatus: order.paymentStatus,
+      }),
+    );
+
+    try {
+      const trackingOrder = await this.buildRealtimeOrderPayload(
+        order._id.toString(),
+      );
+      this.trackingGateway.broadcastOrderStatusUpdate(
+        order._id.toString(),
+        trackingOrder,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to broadcast payment update for ${order.orderId}: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * System actor used for automated status changes (jobs, payment callbacks).
+   */
+  async getSystemUserId(): Promise<string> {
+    let systemUser = await this.userModel.findOne({ phone: 'SYSTEM' });
+
+    if (!systemUser) {
+      systemUser = await this.userModel.create({
+        phone: 'SYSTEM',
+        name: 'System',
+        role: UserRole.ADMIN,
+      });
+    }
+
+    return systemUser._id.toString();
+  }
+
+  /**
+   * Marks a rider available again after delivery/cancellation. Only flips a
+   * BUSY rider so an offline rider is not brought back online.
+   */
+  private async releaseRider(
+    riderId: string,
+    delivered: boolean,
+  ): Promise<void> {
+    try {
+      if (delivered) {
+        await this.riderModel
+          .updateOne({ _id: riderId }, { $inc: { totalDeliveries: 1 } })
+          .exec();
+      }
+      await this.riderModel
+        .updateOne(
+          { _id: riderId, status: RiderStatus.BUSY },
+          { $set: { status: RiderStatus.AVAILABLE } },
+        )
+        .exec();
+    } catch (error) {
+      this.logger.error(
+        `Failed to update rider availability for rider ${riderId}: ${(error as Error).message}`,
+      );
+    }
   }
 
   async riderAcceptOrder(
@@ -646,35 +1054,67 @@ export class OrdersService {
       throw new ForbiddenException('This order is not assigned to you');
     }
 
-    const previousStatus = order.orderStatus;
-    order.orderStatus = OrderStatus.ASSIGNED;
-    this.addTimelineEntry(order, OrderStatus.ASSIGNED, riderId);
-    await order.save();
+    if (!this.isPaymentSettledForFulfilment(order)) {
+      throw new BadRequestException(
+        'Online payment has not been completed for this order',
+      );
+    }
 
-    await this.cacheService.deleteOrder(order._id.toString());
-    await this.redisService.del(RedisService.Keys.orderStatus(order.orderId));
+    const previousStatus = order.orderStatus;
+    const updated = await this.orderModel
+      .findOneAndUpdate(
+        {
+          _id: order._id,
+          orderStatus: OrderStatus.CONFIRMED,
+          riderId: new Types.ObjectId(riderId),
+        },
+        {
+          $set: { orderStatus: OrderStatus.ASSIGNED },
+          $push: {
+            timeline: {
+              status: OrderStatus.ASSIGNED,
+              timestamp: new Date(),
+              changedBy: new Types.ObjectId(riderId),
+            },
+          },
+        },
+        { new: true },
+      )
+      .exec();
+
+    if (!updated) {
+      throw new ConflictException(
+        'Order was changed by another request. Please refresh and retry.',
+      );
+    }
+
+    await this.cacheService.deleteOrder(updated._id.toString());
+    await this.redisService.del(RedisService.Keys.orderStatus(updated.orderId));
     await this.redisService.set(
-      RedisService.Keys.orderStatus(order.orderId),
+      RedisService.Keys.orderStatus(updated.orderId),
       OrderStatus.ASSIGNED,
     );
     await this.logStatusChange(
-      order._id,
+      updated._id,
       previousStatus,
       OrderStatus.ASSIGNED,
       new Types.ObjectId(riderId),
     );
     await this.redisService.publish(
       'order-updates',
-      JSON.stringify({ orderId: order.orderId, status: OrderStatus.ASSIGNED }),
+      JSON.stringify({
+        orderId: updated.orderId,
+        status: OrderStatus.ASSIGNED,
+      }),
     );
 
     const trackingOrder = await this.buildRealtimeOrderPayload(
-      order._id.toString(),
+      updated._id.toString(),
     );
 
     // Broadcast current assignment state so customer/admin/rider all receive the real rider details.
     this.trackingGateway.broadcastOrderStatusUpdate(
-      order._id.toString(),
+      updated._id.toString(),
       trackingOrder,
     );
 
@@ -683,7 +1123,7 @@ export class OrdersService {
       const rider = await this.riderModel.findById(riderId);
       if (rider?.currentLocation) {
         this.trackingGateway.broadcastRiderLocationUpdate(
-          order._id.toString(),
+          updated._id.toString(),
           {
             latitude: rider.currentLocation.coordinates[1],
             longitude: rider.currentLocation.coordinates[0],
@@ -693,7 +1133,7 @@ export class OrdersService {
       }
     } catch (error) {
       console.error(
-        `Failed to broadcast initial rider location for order ${order._id}:`,
+        `Failed to broadcast initial rider location for order ${String(updated._id)}:`,
         error,
       );
     }
@@ -711,17 +1151,31 @@ export class OrdersService {
       );
     }
 
+    if (!this.isPaymentSettledForFulfilment(order)) {
+      throw new BadRequestException(
+        'Online payment has not been completed for this order',
+      );
+    }
+
     if (order.riderId && order.riderId.toString() !== riderId) {
       throw new BadRequestException(
         'This order is already assigned to another rider',
       );
     }
 
-    // Validate rider exists and is available
-    const rider = await this.riderModel.findById(riderId);
-    if (!rider) throw new NotFoundException('Rider not found');
+    // Atomically claim the rider: only an AVAILABLE rider can become BUSY, so
+    // two concurrent assignments can never both take the same rider.
+    const rider = await this.riderModel
+      .findOneAndUpdate(
+        { _id: riderId, status: RiderStatus.AVAILABLE },
+        { $set: { status: RiderStatus.BUSY } },
+        { new: true },
+      )
+      .exec();
 
-    if (rider.status !== 'available') {
+    if (!rider) {
+      const exists = await this.riderModel.exists({ _id: riderId });
+      if (!exists) throw new NotFoundException('Rider not found');
       throw new BadRequestException('Rider is not available');
     }
 
@@ -752,13 +1206,17 @@ export class OrdersService {
     );
 
     if (!updatedOrder) {
+      // Give the rider back; the order was taken or changed meanwhile.
+      await this.riderModel
+        .updateOne(
+          { _id: riderId, status: RiderStatus.BUSY },
+          { $set: { status: RiderStatus.AVAILABLE } },
+        )
+        .exec();
       throw new BadRequestException(
         'This order was already assigned while processing the request',
       );
     }
-
-    rider.status = 'busy' as any;
-    await rider.save();
 
     // Invalidate cache
     await this.cacheService.deleteOrder(updatedOrder._id.toString());
@@ -805,7 +1263,7 @@ export class OrdersService {
     } catch (error) {
       // Log error but don't fail the assignment
       console.error(
-        `Failed to calculate initial ETA for order ${updatedOrder._id}:`,
+        `Failed to calculate initial ETA for order ${String(updatedOrder._id)}:`,
         error,
       );
     }
@@ -817,10 +1275,16 @@ export class OrdersService {
     const order = await this.orderModel.findById(orderId);
     if (!order) throw new NotFoundException('Order not found');
 
+    const previousRiderId = order.riderId?.toString();
     order.riderId = undefined;
     await order.save();
 
+    if (previousRiderId) {
+      await this.releaseRider(previousRiderId, false);
+    }
+
     // Invalidate cache
+    await this.cacheService.deleteOrder(order._id.toString());
     await this.redisService.del(RedisService.Keys.orderStatus(order.orderId));
 
     return order;
@@ -831,48 +1295,85 @@ export class OrdersService {
     if (
       !order ||
       order.riderId ||
-      order.orderStatus !== OrderStatus.CONFIRMED
+      order.orderStatus !== OrderStatus.CONFIRMED ||
+      !this.isPaymentSettledForFulfilment(order)
     ) {
       return null;
     }
 
     const storeSettings = await this.settingsService.getStoreSettings();
-    let nearestRider = await this.riderModel
-      .findOne({
-        status: 'available',
-        isActive: true,
-        currentLocation: {
-          $near: {
-            $geometry: {
-              type: 'Point',
-              coordinates: [
-                storeSettings.location.longitude,
-                storeSettings.location.latitude,
-              ],
-            },
-            $maxDistance: Math.max(storeSettings.serviceRadiusKm, 2) * 1000,
-          },
-        },
-      })
-      .lean()
-      .exec();
+    const triedRiderIds: Types.ObjectId[] = [];
 
-    if (!nearestRider) {
-      nearestRider = await this.riderModel
+    // A candidate can be claimed by a concurrent assignment between the read
+    // and the atomic claim in assignRider, so try a few candidates.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const baseFilter: Record<string, any> = {
+        status: RiderStatus.AVAILABLE,
+        isActive: true,
+        ...(triedRiderIds.length > 0 ? { _id: { $nin: triedRiderIds } } : {}),
+      };
+
+      let nearestRider = await this.riderModel
         .findOne({
-          status: 'available',
-          isActive: true,
+          ...baseFilter,
+          currentLocation: {
+            $near: {
+              $geometry: {
+                type: 'Point',
+                coordinates: [
+                  storeSettings.location.longitude,
+                  storeSettings.location.latitude,
+                ],
+              },
+              $maxDistance: Math.max(storeSettings.serviceRadiusKm, 2) * 1000,
+            },
+          },
         })
-        .sort({ lastActiveAt: -1, updatedAt: -1, createdAt: 1 })
         .lean()
         .exec();
+
+      if (!nearestRider) {
+        nearestRider = await this.riderModel
+          .findOne(baseFilter)
+          .sort({ lastActiveAt: -1, updatedAt: -1, createdAt: 1 })
+          .lean()
+          .exec();
+      }
+
+      if (!nearestRider) {
+        return null;
+      }
+
+      try {
+        return await this.assignRider(orderId, nearestRider._id.toString());
+      } catch (error) {
+        if (error instanceof BadRequestException) {
+          triedRiderIds.push(nearestRider._id);
+          continue;
+        }
+        throw error;
+      }
     }
 
-    if (!nearestRider) {
-      return null;
-    }
+    return null;
+  }
 
-    return this.assignRider(orderId, nearestRider._id.toString());
+  /**
+   * Minimal ownership info for authorization checks, looked up by the
+   * human-readable orderId.
+   */
+  async findAccessInfoByOrderId(orderId: string): Promise<{
+    _id: Types.ObjectId;
+    orderId: string;
+    userId: Types.ObjectId;
+    riderId?: Types.ObjectId;
+    orderStatus: OrderStatus;
+  } | null> {
+    return (await this.orderModel
+      .findOne({ orderId })
+      .select('_id orderId userId riderId orderStatus')
+      .lean()
+      .exec()) as any;
   }
 
   async getOrderStatus(orderId: string): Promise<string | null> {

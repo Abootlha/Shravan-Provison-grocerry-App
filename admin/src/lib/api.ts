@@ -19,67 +19,148 @@ const IS_MICROSERVICES_MODE = [
 ].some((serviceUrl) => serviceUrl !== API_BASE
 );
 
-function isTokenExpired(): boolean {
-    const token = localStorage.getItem('adminToken');
-    const loginTime = localStorage.getItem('adminLoginTime');
-    if (!token) return true;
-    if (!loginTime) return false;
+// Session tokens live in localStorage. Accepted risk: the admin is a static Astro build with
+// no server of its own, so httpOnly cookies are not an option; an XSS bug would expose tokens.
+// Keep third-party scripts out of the admin and keep access tokens short-lived.
+const TOKEN_KEY = 'adminToken';
+const REFRESH_TOKEN_KEY = 'adminRefreshToken';
+const USER_KEY = 'adminUser';
+const LOGIN_TIME_KEY = 'adminLoginTime';
+const LEGACY_SESSION_MS = 2 * 60 * 60 * 1000;
+const EXPIRY_SKEW_MS = 5_000;
 
-    const twoHoursInMs = 2 * 60 * 60 * 1000;
-    const elapsed = Date.now() - parseInt(loginTime, 10);
-    return elapsed > twoHoursInMs;
+/** Returns the JWT `exp` claim in milliseconds, or null if the token can't be decoded. */
+export function getTokenExpiry(token: string): number | null {
+    try {
+        const payload = token.split('.')[1];
+        if (!payload) return null;
+        const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+        const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+        const claims = JSON.parse(atob(padded));
+        return typeof claims.exp === 'number' ? claims.exp * 1000 : null;
+    } catch {
+        return null;
+    }
+}
+
+export function isTokenExpired(token: string | null = localStorage.getItem(TOKEN_KEY)): boolean {
+    if (!token) return true;
+
+    const exp = getTokenExpiry(token);
+    if (exp !== null) return Date.now() >= exp - EXPIRY_SKEW_MS;
+
+    // Opaque token: fall back to login time; no login time means we can't vouch for it.
+    const loginTime = parseInt(localStorage.getItem(LOGIN_TIME_KEY) || '', 10);
+    if (!Number.isFinite(loginTime)) return true;
+    return Date.now() - loginTime > LEGACY_SESSION_MS;
 }
 
 function clearAdminSession() {
     if (typeof window === 'undefined') return;
-    localStorage.removeItem('adminToken');
-    localStorage.removeItem('adminUser');
-    localStorage.removeItem('adminRefreshToken');
-    localStorage.removeItem('adminLoginTime');
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    localStorage.removeItem(LOGIN_TIME_KEY);
 }
 
-function checkTokenExpiry() {
+function redirectToLogin() {
     if (typeof window === 'undefined') return;
-
-    if (isTokenExpired()) {
-        clearAdminSession();
+    clearAdminSession();
+    if (window.location.pathname !== '/login') {
         window.location.href = '/login';
     }
+}
+
+let refreshInFlight: Promise<string | null> | null = null;
+
+/**
+ * Exchanges the refresh token for a new token pair. Concurrent callers share one request
+ * so a burst of 401s triggers a single refresh.
+ */
+function refreshAccessToken(): Promise<string | null> {
+    if (refreshInFlight) return refreshInFlight;
+
+    const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+    if (!refreshToken) return Promise.resolve(null);
+
+    refreshInFlight = (async () => {
+        try {
+            const response = await fetch(`${AUTH_SERVICE}/auth/refresh`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refreshToken }),
+            });
+            if (!response.ok) return null;
+
+            const data = await response.json();
+            if (!data?.accessToken) return null;
+
+            localStorage.setItem(TOKEN_KEY, data.accessToken);
+            if (data.refreshToken) localStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
+            localStorage.setItem(LOGIN_TIME_KEY, Date.now().toString());
+            return data.accessToken as string;
+        } catch {
+            return null;
+        } finally {
+            refreshInFlight = null;
+        }
+    })();
+
+    return refreshInFlight;
+}
+
+/** Returns a usable access token, refreshing it first if it has expired. */
+async function getValidAccessToken(): Promise<string | null> {
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (token && !isTokenExpired(token)) return token;
+    return refreshAccessToken();
+}
+
+interface RequestOptions extends RequestInit {
+    /** Skip attaching/refreshing the access token (login, refresh). */
+    skipAuth?: boolean;
 }
 
 async function apiRequest(
     baseUrl: string,
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestOptions = {}
 ): Promise<any> {
-    if (typeof window !== 'undefined') {
-        checkTokenExpiry();
+    const { skipAuth = false, ...init } = options;
+    const inBrowser = typeof window !== 'undefined';
+
+    let token: string | null = null;
+    if (inBrowser && !skipAuth) {
+        token = await getValidAccessToken();
+        if (!token) {
+            redirectToLogin();
+            throw new Error('Session expired');
+        }
     }
 
-    const token = typeof window !== 'undefined'
-        ? localStorage.getItem('adminToken')
-        : null;
-
-    const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        ...(options.headers as Record<string, string>),
+    const send = (accessToken: string | null) => {
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            ...(init.headers as Record<string, string>),
+        };
+        if (accessToken) {
+            headers.Authorization = `Bearer ${accessToken}`;
+        }
+        return fetch(`${baseUrl}${endpoint}`, { ...init, headers });
     };
 
-    if (token) {
-        headers.Authorization = `Bearer ${token}`;
+    let response = await send(token);
+
+    if (response.status === 401 && inBrowser && !skipAuth) {
+        const refreshed = await refreshAccessToken();
+        if (refreshed) {
+            response = await send(refreshed);
+        }
     }
 
-    const response = await fetch(`${baseUrl}${endpoint}`, {
-        ...options,
-        headers,
-    });
-
     if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-            if (typeof window !== 'undefined') {
-                clearAdminSession();
-                window.location.href = '/login';
-            }
+        if ((response.status === 401 || response.status === 403) && inBrowser && !skipAuth) {
+            redirectToLogin();
         }
 
         let detail = '';
@@ -92,6 +173,11 @@ async function apiRequest(
     }
 
     return response.json();
+}
+
+/** Authenticated request against the main API (attaches token, refreshes on 401). */
+export function authRequest(endpoint: string, options: RequestOptions = {}): Promise<any> {
+    return apiRequest(API_BASE, endpoint, options);
 }
 
 function normalizeOrder(order: any) {
@@ -122,16 +208,35 @@ function normalizeRider(rider: any) {
     };
 }
 
+// Backend caps GET /products `limit` at 100.
+const PRODUCTS_PAGE_LIMIT = 100;
+// Safety stop for getAllProducts (50 x 100 = 5000 products).
+const MAX_PRODUCT_PAGES = 50;
+
 export const api = {
     login: (username: string, password: string) =>
         apiRequest(AUTH_SERVICE, '/auth/admin/login', {
             method: 'POST',
             body: JSON.stringify({ username, password }),
+            skipAuth: true,
         }),
 
     logout: async () => {
+        // Best effort: revoke the refresh token server-side, but never let a failure
+        // (or an expired session) keep the user logged in locally.
+        const token = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null;
+        const refreshToken = typeof window !== 'undefined' ? localStorage.getItem(REFRESH_TOKEN_KEY) : null;
         try {
-            await apiRequest(AUTH_SERVICE, '/auth/logout', { method: 'POST' });
+            if (token) {
+                await fetch(`${AUTH_SERVICE}/auth/logout`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify(refreshToken ? { refreshToken } : {}),
+                });
+            }
         } catch (error) {
             console.error('Logout error:', error);
         } finally {
@@ -181,6 +286,21 @@ export const api = {
         if (params?.limit) query.append('limit', String(params.limit));
         if (params?.search) query.append('search', params.search);
         return apiRequest(PRODUCT_SERVICE, `/products?${query.toString()}`);
+    },
+    /**
+     * Fetches every product by walking the paginated endpoint (the backend caps
+     * `limit` at PRODUCTS_PAGE_LIMIT). Returns the same shape as getProducts.
+     */
+    getAllProducts: async (params?: { categoryId?: string; subcategoryId?: string; search?: string }) => {
+        const products: any[] = [];
+        for (let page = 1; page <= MAX_PRODUCT_PAGES; page++) {
+            const data = await api.getProducts({ ...params, page, limit: PRODUCTS_PAGE_LIMIT });
+            const batch = data.products || [];
+            products.push(...batch);
+            const totalPages = data.totalPages ?? (batch.length < PRODUCTS_PAGE_LIMIT ? page : page + 1);
+            if (page >= totalPages || batch.length === 0) break;
+        }
+        return { products, total: products.length };
     },
     getProduct: (id: string) => apiRequest(PRODUCT_SERVICE, `/products/${id}`),
     lookupBarcode: (barcode: string) => apiRequest(PRODUCT_SERVICE, `/products/barcode/${barcode}`),

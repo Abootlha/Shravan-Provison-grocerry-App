@@ -1,136 +1,161 @@
-name: CI/CD Pipeline
+name: CI
 
 on:
   push:
-    branches:
-      - main
-      - develop
+    branches: [main, develop]
   pull_request:
-    branches:
-      - main
-      - develop
+    branches: [main, develop]
 
-env:
-  REGISTRY: ghcr.io
-  SERVICES: auth-svc user-svc rider-svc order-svc product-svc cart-svc payment-svc notification-svc analytics-svc location-svc tracking-gw
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  lint:
-    name: Lint
+  backend:
+    name: Backend (NestJS)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
 
-      - name: Install dependencies
-        run: |
-          for svc in ${{ env.SERVICES }}; do
-            npm ci --prefix services/$svc
-          done
+      - run: npm ci
 
-      - name: Run lint
-        run: |
-          for svc in ${{ env.SERVICES }}; do
-            npm run lint --prefix services/$svc || true
-          done
+      # Same as `npm run lint` but without --fix, so CI fails instead of rewriting.
+      - name: Lint
+        run: npx eslint "{src,apps,libs,test}/**/*.ts"
 
-  test:
-    name: Test
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npx jest --ci
+
+      - name: Build
+        run: npx nest build
+
+  admin:
+    name: Admin (Astro)
     runs-on: ubuntu-latest
-    needs: lint
+    defaults:
+      run:
+        working-directory: admin
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
 
-      - name: Install dependencies
-        run: |
-          for svc in ${{ env.SERVICES }}; do
-            npm ci --prefix services/$svc
-          done
+      - run: npm ci
 
-      - name: Run tests
-        run: |
-          for svc in ${{ env.SERVICES }}; do
-            npm test --prefix services/$svc || true
-          done
+      - name: Tests
+        run: npx vitest run
 
-  build:
-    name: Build Docker Images
+      # Production builds require the API URLs; CI only checks that the site builds.
+      - name: Build
+        run: npm run build
+        env:
+          PUBLIC_API_URL: https://api.example.invalid/api/v1
+          PUBLIC_TRACKING_URL: https://api.example.invalid/tracking
+
+  rider-app:
+    name: Rider app (Expo)
     runs-on: ubuntu-latest
-    needs: test
-    strategy:
-      matrix:
-        service: ${{ fromJson(env.SERVICES) }}
+    defaults:
+      run:
+        working-directory: apps/rider-app
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Container Registry
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+      - uses: actions/setup-node@v4
         with:
-          registry: ${{ env.REGISTRY }}
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: apps/rider-app/package-lock.json
+
+      - run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+  customer-app:
+    name: Customer app (Expo)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: customer-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: customer-app/package-lock.json
+
+      - run: npm ci
+
+      # No ESLint config in customer-app yet; resolving the Expo config at least
+      # catches broken app.config.js / app.json and missing plugins.
+      - name: Expo config sanity check
+        run: npx expo config --type public > /dev/null
+
+  backend-image:
+    name: Backend image (ghcr.io)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [backend, admin, rider-app, customer-app]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
+      - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.service }}
+          images: ghcr.io/${{ github.repository }}/backend
           tags: |
-            type=ref,event=branch
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+            type=raw,value=latest
 
-      - name: Build and export to Docker
-        uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@v6
         with:
-          context: ./services/${{ matrix.service }}
-          push: false
+          context: backend
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build and push
-        if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@v5
-        with:
-          context: ./services/${{ matrix.service }}
-          push: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
-
-  deploy:
-    name: Deploy
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Deploy to production
-        run: |
-          echo "Deploying to production..."
-          # Add deployment commands here
-          # This could involve kubectl, helm, docker compose, etc.
+  # deploy:
+  #   name: Deploy
+  #   needs: backend-image
+  #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  #   runs-on: ubuntu-latest
+  #   environment: production
+  #   steps:
+  #     # e.g. SSH to the host and run:
+  #     #   cd infrastructure/docker && docker compose pull backend && docker compose up -d --no-build
+  #     - run: echo "Not configured"

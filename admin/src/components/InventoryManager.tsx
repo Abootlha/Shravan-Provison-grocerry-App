@@ -44,7 +44,7 @@ export default function InventoryManager() {
 
     async function fetchData() {
         try {
-            const data = await api.getProducts({ limit: 200 });
+            const data = await api.getAllProducts();
             setProducts(data.products || []);
         } catch (error) {
             console.error('Error:', error);

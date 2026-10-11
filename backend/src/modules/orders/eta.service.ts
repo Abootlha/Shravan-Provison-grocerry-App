@@ -61,7 +61,7 @@ export class ETAService {
 
   /**
    * Calculate ETA from rider location to delivery address.
-   * Uses Mappls directions with 2-minute caching.
+   * Uses Mappls directions with 30-second caching.
    */
   async calculateETA(
     riderLocation: LocationDto,
@@ -228,7 +228,7 @@ export class ETAService {
   }
 
   /**
-   * Cache ETA duration in seconds with 2-minute TTL
+   * Cache ETA duration in seconds with 30-second TTL
    */
   private async setCachedETA(
     cacheKey: string,

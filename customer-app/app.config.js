@@ -1,93 +1,111 @@
 const fs = require('fs');
 const path = require('path');
 
-const ENV_DEFAULTS = {
-  production: {
-    API_BASE_URL: 'https://api.lumioui.com/api/v1',
-    TRACKING_URL: 'https://api.lumioui.com/tracking',
-  },
-  development: {
-    API_BASE_URL: 'http://localhost:3000/api/v1',
-    TRACKING_URL: 'http://localhost:3000/tracking',
-  },
+// Static settings (ios/android/plugins/permissions) live in app.json and arrive
+// here as `config`. This file only layers env-dependent values on top of it.
+
+const DEV_DEFAULTS = {
+  API_BASE_URL: 'http://localhost:3000/api/v1',
+  TRACKING_URL: 'http://localhost:3000/tracking',
 };
 
+// Reads process.env first (EAS build profile `env`, shell), then this app's
+// .env / .env.local. Never reads other packages' env files (e.g. backend/.env).
 const loadEnvValue = (key, fallback = '') => {
   if (process.env[key]) {
     return process.env[key];
   }
 
   const candidateFiles = [
-    path.join(__dirname, '.env'),
     path.join(__dirname, '.env.local'),
-    path.join(__dirname, '..', 'backend', '.env'),
+    path.join(__dirname, '.env'),
   ];
 
   for (const file of candidateFiles) {
     if (!fs.existsSync(file)) continue;
-    const lines = fs.readFileSync(file, 'utf8').split('\n');
+    const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#') || !trimmed.startsWith(`${key}=`)) continue;
-      return trimmed.slice(key.length + 1);
+      const value = trimmed.slice(key.length + 1).trim();
+      if (value) return value;
     }
   }
 
   return fallback;
 };
 
-const getNodeEnv = () => (loadEnvValue('PUBLIC_NODE_ENV', 'development').trim().toLowerCase() === 'production'
-  ? 'production'
-  : 'development');
+const isProductionBuild = () => {
+  if (loadEnvValue('PUBLIC_NODE_ENV').trim().toLowerCase() === 'production') return true;
+  return ['production', 'preview'].includes(process.env.EAS_BUILD_PROFILE || '');
+};
 
-const getEnvDefault = (key) => ENV_DEFAULTS[getNodeEnv()][key] || '';
+const isLocalUrl = (url) => !url || /localhost|127\.0\.0\.1|10\.0\.2\.2/.test(url);
 
-module.exports = () => ({
-  expo: {
-    name: 'ShravanKirana Customer',
-    slug: 'shravankirana-customer',
-    version: '1.0.0',
-    orientation: 'portrait',
-    icon: './assets/icon.png',
-    userInterfaceStyle: 'light',
-    newArchEnabled: true,
-    splash: {
-      image: './assets/splash-icon.png',
-      resizeMode: 'contain',
-      backgroundColor: '#F8CB46',
-    },
+module.exports = ({ config }) => {
+  const production = isProductionBuild();
+
+  // Production URLs must come from the environment (EAS profile env); there is
+  // deliberately no localhost fallback for production builds.
+  const apiBaseUrl = loadEnvValue('API_BASE_URL', production ? '' : DEV_DEFAULTS.API_BASE_URL);
+  const trackingUrl = loadEnvValue('TRACKING_URL', production ? '' : DEV_DEFAULTS.TRACKING_URL);
+  const serviceUrl = (key) => loadEnvValue(key, apiBaseUrl);
+
+  if (production && (isLocalUrl(apiBaseUrl) || isLocalUrl(trackingUrl))) {
+    console.warn(
+      '[app.config] Production build without a public API_BASE_URL/TRACKING_URL. ' +
+        'Set them in eas.json build profile env (or EAS environment variables). The app will refuse to start.',
+    );
+  }
+
+  const googleMapsApiKey = loadEnvValue('GOOGLE_MAPS_API_KEY');
+  const plugins = [...(config.plugins || [])];
+  const hasMapsPlugin = plugins.some((plugin) => (Array.isArray(plugin) ? plugin[0] : plugin) === 'react-native-maps');
+  if (googleMapsApiKey && !hasMapsPlugin) {
+    plugins.push([
+      'react-native-maps',
+      {
+        iosGoogleMapsApiKey: googleMapsApiKey,
+        androidGoogleMapsApiKey: googleMapsApiKey,
+      },
+    ]);
+  }
+
+  return {
+    ...config,
     ios: {
-      supportsTablet: true,
-      bundleIdentifier: 'com.shravankirana.customer',
+      ...config.ios,
+      config: {
+        ...(config.ios && config.ios.config),
+        googleMapsApiKey,
+      },
     },
     android: {
-      adaptiveIcon: {
-        foregroundImage: './assets/adaptive-icon.png',
-        backgroundColor: '#F8CB46',
+      ...config.android,
+      config: {
+        ...(config.android && config.android.config),
+        googleMaps: {
+          ...(config.android && config.android.config && config.android.config.googleMaps),
+          apiKey: googleMapsApiKey,
+        },
       },
-      package: 'com.shravankirana.customer',
     },
-    web: {
-      favicon: './assets/favicon.png',
-    },
-    scheme: 'shravankirana',
+    plugins,
     extra: {
-      PUBLIC_NODE_ENV: getNodeEnv(),
-      API_BASE_URL: getNodeEnv() === 'production' ? getEnvDefault('API_BASE_URL') : loadEnvValue('API_BASE_URL', getEnvDefault('API_BASE_URL')),
-      AUTH_SERVICE_URL: getNodeEnv() === 'production' ? getEnvDefault('API_BASE_URL') : loadEnvValue('AUTH_SERVICE_URL', loadEnvValue('API_BASE_URL', getEnvDefault('API_BASE_URL'))),
-      USER_SERVICE_URL: getNodeEnv() === 'production' ? getEnvDefault('API_BASE_URL') : loadEnvValue('USER_SERVICE_URL', loadEnvValue('API_BASE_URL', getEnvDefault('API_BASE_URL'))),
-      RIDER_SERVICE_URL: getNodeEnv() === 'production' ? getEnvDefault('API_BASE_URL') : loadEnvValue('RIDER_SERVICE_URL', loadEnvValue('API_BASE_URL', getEnvDefault('API_BASE_URL'))),
-      ORDER_SERVICE_URL: getNodeEnv() === 'production' ? getEnvDefault('API_BASE_URL') : loadEnvValue('ORDER_SERVICE_URL', loadEnvValue('API_BASE_URL', getEnvDefault('API_BASE_URL'))),
-      PRODUCT_SERVICE_URL: getNodeEnv() === 'production' ? getEnvDefault('API_BASE_URL') : loadEnvValue('PRODUCT_SERVICE_URL', loadEnvValue('API_BASE_URL', getEnvDefault('API_BASE_URL'))),
-      CART_SERVICE_URL: getNodeEnv() === 'production' ? getEnvDefault('API_BASE_URL') : loadEnvValue('CART_SERVICE_URL', loadEnvValue('API_BASE_URL', getEnvDefault('API_BASE_URL'))),
-      LOCATION_SERVICE_URL: getNodeEnv() === 'production' ? getEnvDefault('API_BASE_URL') : loadEnvValue('LOCATION_SERVICE_URL', loadEnvValue('API_BASE_URL', getEnvDefault('API_BASE_URL'))),
-      TRACKING_URL: getNodeEnv() === 'production' ? getEnvDefault('TRACKING_URL') : loadEnvValue('TRACKING_URL', getEnvDefault('TRACKING_URL')),
+      ...config.extra,
+      PUBLIC_NODE_ENV: production ? 'production' : 'development',
+      API_BASE_URL: apiBaseUrl,
+      AUTH_SERVICE_URL: serviceUrl('AUTH_SERVICE_URL'),
+      USER_SERVICE_URL: serviceUrl('USER_SERVICE_URL'),
+      RIDER_SERVICE_URL: serviceUrl('RIDER_SERVICE_URL'),
+      ORDER_SERVICE_URL: serviceUrl('ORDER_SERVICE_URL'),
+      PRODUCT_SERVICE_URL: serviceUrl('PRODUCT_SERVICE_URL'),
+      CART_SERVICE_URL: serviceUrl('CART_SERVICE_URL'),
+      LOCATION_SERVICE_URL: serviceUrl('LOCATION_SERVICE_URL'),
+      TRACKING_URL: trackingUrl,
+      // Public (client) key only. Secrets such as MAPMYINDIA_CLIENT_SECRET must
+      // never be embedded in the app bundle.
       MAPMYINDIA_API_KEY: loadEnvValue('MAPMYINDIA_API_KEY', loadEnvValue('MAPPLS_API_KEY')),
-      MAPMYINDIA_CLIENT_ID: loadEnvValue('MAPMYINDIA_CLIENT_ID'),
-      MAPMYINDIA_CLIENT_SECRET: loadEnvValue('MAPMYINDIA_CLIENT_SECRET'),
-      eas: {
-        projectId: '81680cdd-a244-4757-943a-2b8b95cb6285',
-      },
     },
-  },
-});
+  };
+};

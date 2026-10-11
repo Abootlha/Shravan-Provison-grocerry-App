@@ -14,9 +14,10 @@ import { RidersModule } from '../modules/riders/riders.module';
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
-      useFactory: async (configService: ConfigService) => ({
-        secret: configService.get<string>('JWT_SECRET'),
-        signOptions: { expiresIn: '7d' },
+      useFactory: (configService: ConfigService) => ({
+        // Must match the REST JwtStrategy secret so access tokens verify on both.
+        secret: configService.getOrThrow<string>('jwt.secret'),
+        signOptions: { expiresIn: '2h' },
       }),
       inject: [ConfigService],
     }),

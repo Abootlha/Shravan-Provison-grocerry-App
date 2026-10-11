@@ -6,20 +6,30 @@ import {
   IsBoolean,
   Min,
   IsArray,
+  ArrayMaxSize,
+  MaxLength,
+  Max,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsImageSource } from './image-source.validator';
+import { NutritionDto } from './nutrition.dto';
 import { ValidateHierarchy } from '../validators/hierarchy.validator';
 
 export class UpdateProductDto {
   @IsOptional()
   @IsString()
+  @MaxLength(200)
   name?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(100)
   brand?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(32)
   barcode?: string;
 
   @IsOptional()
@@ -47,6 +57,7 @@ export class UpdateProductDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   unit?: string;
 
   @IsOptional()
@@ -56,24 +67,30 @@ export class UpdateProductDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(5000)
   description?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(5000)
   highlights?: string;
 
   @IsOptional()
   @IsString()
+  @IsImageSource()
   image?: string;
 
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(8)
   @IsString({ each: true })
+  @IsImageSource({}, { each: true })
   images?: string[];
 
   @IsOptional()
   @IsNumber()
   @Min(0)
+  @Max(100)
   gst?: number;
 
   @IsOptional()
@@ -83,16 +100,13 @@ export class UpdateProductDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   storageType?: string;
 
   @IsOptional()
-  nutrition?: {
-    protein?: number;
-    carbs?: number;
-    sugar?: number;
-    fat?: number;
-    transFat?: number;
-  };
+  @ValidateNested()
+  @Type(() => NutritionDto)
+  nutrition?: NutritionDto;
 
   @IsOptional()
   @IsBoolean()

@@ -193,7 +193,7 @@ const LocationScreen = ({ navigation }) => {
                 dispatch(setSelectedAddress(null));
             }
         } catch (error) {
-            console.log('Failed to fetch addresses:', error?.response?.status === 401 ? 'Unauthorized (User not logged in)' : error);
+            if (__DEV__) console.log('Failed to fetch addresses:', error?.response?.status === 401 ? 'Unauthorized (User not logged in)' : error);
             dispatch(setSavedAddresses([]));
         } finally {
             setIsFetchingAddresses(false);
@@ -380,7 +380,7 @@ const LocationScreen = ({ navigation }) => {
                         longitude: current.longitude,
                     });
                 } catch (err) {
-                    console.log('Failed to save confirmed location:', err);
+                    if (__DEV__) console.log('Failed to save confirmed location:', err);
                 }
             }
         }

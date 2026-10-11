@@ -1,6 +1,7 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { AUTH_SERVICE_URL, ORDER_SERVICE_URL, RIDER_SERVICE_URL } from '../utils/constants';
 import { storage } from './storage';
+import { refreshAccessToken } from './authSession';
 import type { Rider } from '../types/rider';
 import type { Order, OrderStatus } from '../types/order';
 
@@ -29,9 +30,18 @@ class ApiClient {
 
     this.client.interceptors.response.use(
       (response) => response,
-      (error: AxiosError) => {
-        if (error.response?.status === 401) {
-          storage.clearToken();
+      async (error: AxiosError) => {
+        const original = error.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined;
+        const url = original?.url || '';
+        const isAuthRoute = /\/auth\/(refresh|rider\/login|verify-otp|send-otp|logout)/.test(url);
+
+        if (error.response?.status === 401 && original && !original._retry && !isAuthRoute) {
+          original._retry = true;
+          const token = await refreshAccessToken();
+          if (token) {
+            original.headers.Authorization = `Bearer ${token}`;
+            return this.client(original);
+          }
         }
         return Promise.reject(error);
       }
@@ -147,7 +157,6 @@ export const normalizeOrder = (order: any): Order => {
     })),
     totalAmount: order.totalAmount || 0,
     deliveryFee: order.deliveryFee || 0,
-    deliveryOtp: order.deliveryOtp,
     createdAt: order.createdAt || new Date().toISOString(),
     estimatedTime: order.estimatedDeliveryTime ? Date.parse(order.estimatedDeliveryTime) : undefined,
     acceptedAt: assignedEntry?.timestamp,
@@ -163,9 +172,12 @@ export const authApi = {
       password,
     });
     const token = response.accessToken || response.tokens?.accessToken;
+    const refreshToken = response.refreshToken || response.tokens?.refreshToken;
     const rider = normalizeRider(response.user || {});
-    return { token, user: rider };
+    return { token, refreshToken, user: rider };
   },
+
+  logout: async () => authClient.post<any>('/auth/logout'),
 
   sendOtp: async (phone: string) => {
     return authClient.post<any>('/auth/send-otp', { phone });
@@ -179,8 +191,9 @@ export const authApi = {
       role: 'rider',
     });
     const token = response.accessToken || response.tokens?.accessToken;
+    const refreshToken = response.refreshToken || response.tokens?.refreshToken;
     const rider = normalizeRider(response.user || { name, phone });
-    return { token, user: rider };
+    return { token, refreshToken, user: rider };
   },
 };
 
@@ -245,7 +258,12 @@ export const orderApi = {
   reject: async (_orderId: string) =>
     ({ success: true }),
 
-  updateStatus: async (orderId: string, status: string, _location?: { latitude: number; longitude: number }) => {
+  updateStatus: async (
+    orderId: string,
+    status: string,
+    _location?: { latitude: number; longitude: number },
+    deliveryOtp?: string
+  ) => {
     const statusMap: Record<string, string> = {
       confirmed: 'CONFIRMED',
       assigned: 'ASSIGNED',
@@ -256,9 +274,14 @@ export const orderApi = {
       cancelled: 'CANCELLED',
     };
 
-    const response = await orderClient.patch<any>(`/orders/${orderId}/status`, {
+    const body: Record<string, string> = {
       status: statusMap[status] || status.toUpperCase(),
-    });
+    };
+    if (deliveryOtp) {
+      // The customer reads this OTP to the rider; the server verifies it.
+      body.deliveryOtp = deliveryOtp;
+    }
+    const response = await orderClient.patch<any>(`/orders/${orderId}/status`, body);
     return { order: normalizeOrder(response.order || response) };
   },
 };

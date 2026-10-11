@@ -1,54 +1,130 @@
-export default () => ({
-  port: parseInt(process.env.PORT || '3000', 10),
+import { randomBytes } from 'crypto';
 
-  database: {
-    uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/shravankirana',
-    name: process.env.MONGODB_DB || undefined,
-  },
+const isProduction = () => process.env.NODE_ENV === 'production';
 
-  redis: {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT || '6379', 10),
-  },
+const MIN_SECRET_LENGTH = 32;
 
-  jwt: {
-    secret:
-      process.env.JWT_SECRET || 'your-super-secret-key-change-in-production',
-    expiresIn: process.env.JWT_EXPIRES_IN || '15m',
-    refreshSecret:
-      process.env.JWT_REFRESH_SECRET ||
-      'your-refresh-secret-key-change-in-production',
-    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
-  },
+// Dev-only secrets are generated once per process so every module sees the same value.
+const devSecrets: Record<string, string> = {};
 
-  cache: {
-    ttl: {
-      products: 300, // 5 minutes
-      productDetail: 600, // 10 minutes
-      cart: 3600, // 1 hour
-      analytics: 600, // 10 minutes
+/**
+ * Resolve a required secret from the environment.
+ * - production: fail fast at boot if it is missing or too short.
+ * - otherwise: fall back to a random per-boot secret and warn loudly
+ *   (tokens will not survive a restart until the env var is set).
+ */
+function requireSecret(name: string): string {
+  const value = process.env[name];
+  if (value && value.length >= MIN_SECRET_LENGTH) {
+    return value;
+  }
+
+  if (isProduction()) {
+    throw new Error(
+      `[config] ${name} must be set to at least ${MIN_SECRET_LENGTH} characters in production`,
+    );
+  }
+
+  if (value) {
+    // Short but explicitly set in dev: honour it, but warn.
+    console.warn(
+      `[config] WARNING: ${name} is shorter than ${MIN_SECRET_LENGTH} characters. Do not use this value in production.`,
+    );
+    return value;
+  }
+
+  if (!devSecrets[name]) {
+    devSecrets[name] = randomBytes(48).toString('hex');
+    console.warn(
+      `[config] WARNING: ${name} is not set. Using a random DEV-ONLY secret for this process; all tokens become invalid on restart. Set ${name} in .env.`,
+    );
+  }
+  return devSecrets[name];
+}
+
+function parseList(value?: string): string[] {
+  return (value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+export default () => {
+  const jwtSecret = requireSecret('JWT_SECRET');
+  const jwtRefreshSecret = requireSecret('JWT_REFRESH_SECRET');
+
+  if (isProduction() && jwtSecret === jwtRefreshSecret) {
+    throw new Error(
+      '[config] JWT_SECRET and JWT_REFRESH_SECRET must be different in production',
+    );
+  }
+
+  const otpLength = parseInt(process.env.OTP_LENGTH || '4', 10);
+
+  return {
+    port: parseInt(process.env.PORT || '3000', 10),
+    nodeEnv: process.env.NODE_ENV || 'development',
+
+    database: {
+      uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/shravankirana',
+      name: process.env.MONGODB_DB || undefined,
     },
-  },
 
-  twofactor: {
-    apiKey: process.env.TWOFACTOR_API_KEY || '',
-    otpExpiry: 300, // 5 minutes in seconds
-  },
+    redis: {
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379', 10),
+      password: process.env.REDIS_PASSWORD || undefined,
+    },
 
-  store: {
-    latitude: parseFloat(process.env.STORE_LATITUDE || '26.7588'),
-    longitude: parseFloat(process.env.STORE_LONGITUDE || '83.3700'),
-    maxDeliveryKm: parseFloat(process.env.STORE_MAX_DELIVERY_KM || '15'),
-  },
+    jwt: {
+      secret: jwtSecret,
+      expiresIn: process.env.JWT_EXPIRES_IN || '15m',
+      refreshSecret: jwtRefreshSecret,
+      refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
+    },
 
-  payu: {
-    clientId:
-      process.env.PAYU_CLIENT_ID ||
-      '8cf73f4d61894b252fa55459c6ec592aa8da7850e019f4e35b2177bc8df6cfaa',
-    clientSecret:
-      process.env.PAYU_CLIENT_SECRET ||
-      'bc4ef4e4a5bb72c75bb6a1c61fc7cf5cd1039a79e521bd0d77d3fd0e2516dbc2',
-    key: process.env.PAYU_KEY || 'mt6Mcu',
-    salt: process.env.PAYU_SALT || '0tXhVBGALxkGeh6Pu6eZ5zU0jMAiAQ7J',
-  },
-});
+    cors: {
+      // Comma separated list of allowed browser origins (admin panel, website).
+      origins: parseList(process.env.CORS_ORIGINS),
+    },
+
+    http: {
+      // Value for express "trust proxy" (number of hops, or "true"/"false").
+      trustProxy: process.env.TRUST_PROXY || '1',
+    },
+
+    cache: {
+      ttl: {
+        products: 300, // 5 minutes
+        productDetail: 600, // 10 minutes
+        cart: 3600, // 1 hour
+        analytics: 600, // 10 minutes
+      },
+    },
+
+    twofactor: {
+      apiKey: process.env.TWOFACTOR_API_KEY || '',
+      templateName: process.env.TWOFACTOR_TEMPLATE_NAME || 'OTP1',
+      otpExpiry: 300, // 5 minutes in seconds
+      // Mobile apps currently render a 4-digit OTP input; raise to 6 once they support it.
+      otpLength:
+        Number.isFinite(otpLength) && otpLength >= 4 && otpLength <= 6
+          ? otpLength
+          : 4,
+    },
+
+    store: {
+      latitude: parseFloat(process.env.STORE_LATITUDE || '26.7588'),
+      longitude: parseFloat(process.env.STORE_LONGITUDE || '83.3700'),
+      maxDeliveryKm: parseFloat(process.env.STORE_MAX_DELIVERY_KM || '15'),
+    },
+
+    // PayU credentials: no defaults. They must come from the environment.
+    payu: {
+      clientId: process.env.PAYU_CLIENT_ID,
+      clientSecret: process.env.PAYU_CLIENT_SECRET,
+      key: process.env.PAYU_KEY,
+      salt: process.env.PAYU_SALT,
+    },
+  };
+};

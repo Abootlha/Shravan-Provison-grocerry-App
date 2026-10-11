@@ -1,11 +1,10 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken, MongooseModule } from '@nestjs/mongoose';
 import { Model, Connection } from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import * as mongoose from 'mongoose';
 import * as fc from 'fast-check';
-import { Order, OrderStatus, OrderDocument, OrderSchema } from './order.schema';
-import { User, UserRole, UserSchema } from '../../users/schemas/user.schema';
+import { Order, OrderStatus, OrderSchema } from './order.schema';
+import { UserRole, UserSchema } from '../../users/schemas/user.schema';
+import { RiderSchema } from '../../riders/schemas/rider.schema';
 
 // Custom generator for MongoDB ObjectId (24 hex characters)
 const objectIdArb = fc.string({ minLength: 24, maxLength: 24 }).map((s) =>
@@ -20,6 +19,7 @@ describe('Order Schema Property Tests', () => {
   let mongod: MongoMemoryServer;
   let mongoConnection: Connection;
   let userModel: Model<any>;
+  let riderModel: Model<any>;
 
   beforeAll(async () => {
     mongod = await MongoMemoryServer.create();
@@ -27,8 +27,10 @@ describe('Order Schema Property Tests', () => {
     mongoConnection = (await mongoose.connect(uri)).connection;
 
     userModel = mongoConnection.model('User', UserSchema);
+    riderModel = mongoConnection.model('Rider', RiderSchema);
     orderModel = mongoConnection.model('Order', OrderSchema);
-  });
+    // First run downloads the mongod binary, which exceeds jest's 5s default.
+  }, 180000);
 
   afterAll(async () => {
     await mongoConnection.dropDatabase();
@@ -39,12 +41,14 @@ describe('Order Schema Property Tests', () => {
   afterEach(async () => {
     await orderModel.deleteMany({});
     await userModel.deleteMany({});
+    await riderModel.deleteMany({});
   });
 
   beforeEach(async () => {
     // Clear collections before each test
     await orderModel.deleteMany({});
     await userModel.deleteMany({});
+    await riderModel.deleteMany({});
   });
 
   describe('Property 4: Initial Order Status', () => {
@@ -107,6 +111,7 @@ describe('Order Schema Property Tests', () => {
           async (orderData) => {
             // Create order document without explicitly setting status
             const order = new orderModel({
+              deliveryOtp: '1234',
               orderId: `ORD-${Date.now()}-${Math.random()}`,
               userId: validUser._id,
               items: orderData.items.map((item) => ({
@@ -172,7 +177,7 @@ describe('Order Schema Property Tests', () => {
         // Note: orderStatus is NOT provided, should default to PENDING
       };
 
-      const order = new orderModel(orderData);
+      const order = new orderModel({ deliveryOtp: '1234', ...orderData });
       const savedOrder = await order.save();
 
       // The schema should apply the default value
@@ -313,7 +318,7 @@ describe('Order Schema Property Tests', () => {
             paymentStatus: 'PENDING',
           };
 
-          const order = new orderModel(orderData);
+          const order = new orderModel({ deliveryOtp: '1234', ...orderData });
 
           // Should throw error due to invalid userId
           await expect(order.save()).rejects.toThrow(/Invalid userId/);
@@ -366,7 +371,7 @@ describe('Order Schema Property Tests', () => {
             paymentStatus: 'PENDING',
           };
 
-          const order = new orderModel(orderData);
+          const order = new orderModel({ deliveryOtp: '1234', ...orderData });
 
           // Should throw error due to invalid riderId
           await expect(order.save()).rejects.toThrow(/Invalid riderId/);
@@ -375,7 +380,7 @@ describe('Order Schema Property Tests', () => {
       );
     });
 
-    it('should reject orders when riderId references non-rider user', async () => {
+    it('should reject orders when riderId references a user instead of a rider', async () => {
       // Create a valid customer user
       const validCustomer = await userModel.create({
         name: 'Test Customer',
@@ -419,10 +424,10 @@ describe('Order Schema Property Tests', () => {
         paymentStatus: 'PENDING',
       };
 
-      const order = new orderModel(orderData);
+      const order = new orderModel({ deliveryOtp: '1234', ...orderData });
 
-      // Should throw error because admin is not a rider
-      await expect(order.save()).rejects.toThrow(/is not a rider/);
+      // Riders live in their own collection, so a User id is not a valid riderId
+      await expect(order.save()).rejects.toThrow(/Invalid riderId/);
     });
 
     it('should accept orders with valid userId and riderId', async () => {
@@ -433,10 +438,11 @@ describe('Order Schema Property Tests', () => {
         role: UserRole.CUSTOMER,
       });
 
-      const validRider = await userModel.create({
+      const validRider = await riderModel.create({
         name: 'Test Rider',
+        username: 'rider1',
+        password: 'hashedpassword',
         phone: '0987654321',
-        role: UserRole.RIDER,
       });
 
       const orderData = {
@@ -467,7 +473,7 @@ describe('Order Schema Property Tests', () => {
         paymentStatus: 'PENDING',
       };
 
-      const order = new orderModel(orderData);
+      const order = new orderModel({ deliveryOtp: '1234', ...orderData });
 
       // Should save successfully
       const savedOrder = await order.save();
@@ -512,7 +518,7 @@ describe('Order Schema Property Tests', () => {
         paymentStatus: 'PENDING',
       };
 
-      const order = new orderModel(orderData);
+      const order = new orderModel({ deliveryOtp: '1234', ...orderData });
 
       // Should save successfully
       const savedOrder = await order.save();

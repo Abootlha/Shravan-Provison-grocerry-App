@@ -1,208 +1,100 @@
 # ShravanKirana
 
-A modern monorepo architecture for building scalable web applications using microservices, shared libraries, and containerized deployment.
+Grocery ordering and delivery platform: a customer app, a rider app, an admin dashboard,
+and one NestJS backend that all three talk to.
 
-## Project Overview
+## Components
 
-ShravanKirana is a comprehensive project template that demonstrates best practices for building and deploying full-stack applications. It provides a well-structured foundation with separate services, web applications, and shared utilities organized in a monorepo using npm workspaces.
+| Path              | What it is                                                     | Stack                                                    |
+|-------------------|----------------------------------------------------------------|----------------------------------------------------------|
+| `backend/`        | The only API server. REST under `/api/v1`, Socket.io namespaces `/tracking` and `/orders` | NestJS 11, MongoDB (Mongoose), Redis (cache, BullMQ, socket.io adapter), JWT, PayU |
+| `customer-app/`   | Customer mobile app (Android/iOS/web)                          | Expo / React Native, Redux Toolkit                       |
+| `apps/rider-app/` | Delivery rider app                                             | Expo / React Native, TypeScript                          |
+| `admin/`          | Admin dashboard (products, orders, riders, inventory)          | Astro (static) + React, Tailwind                         |
+| `tools/scraper/`  | Ad-hoc product data scraper (dev tool, not deployed)           | Node, Playwright, Cheerio                                |
+| `infrastructure/` | Production Docker Compose + nginx for the backend              | Docker, nginx                                            |
+| `services/`, `shared/` | **Archived** microservices prototype. Not deployed, not maintained. See `services/README.md` | |
 
-## Architecture
+More docs: `App_Flow_And_Architecture.md`, `docs/`. Older status notes are in `docs/archive/` and may be out of date.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        ShravanKirana                            │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐   │
-│  │   Services   │  │    Apps     │  │       Shared         │   │
-│  ├──────────────┤  ├──────────────┤  ├──────────────────────┤   │
-│  │ auth-service │  │ web-app     │  │ shared (utils, types,│   │
-│  │ (3001)       │  │ (3000)       │  │       constants)     │   │
-│  │              │  │             │  │                     │   │
-│  │ api-gateway  │  │ admin-app   │  │                      │   │
-│  │ (3002)       │  │ (3003)       │  │                      │   │
-│  └──────────────┘  └──────────────┘  └──────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-```
+## Local setup
 
-## Service Inventory
+Prerequisites: Node.js 20, npm, Docker (for MongoDB/Redis).
 
-| Service       | Port  | Description                    |
-|---------------|-------|--------------------------------|
-| web-app       | 3000  | Main frontend application      |
-| auth-service  | 3001  | Authentication & authorization |
-| api-gateway   | 3002  | API routing & middleware       |
-| admin-app     | 3003  | Admin dashboard                |
-
-## Quick Start
-
-### Prerequisites
-
-- Node.js 18+
-- Docker & Docker Compose
-- npm 9+
-
-### Running with Docker Compose
+### 1. Backend + MongoDB + Redis
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-org/shravankirana.git
-cd shravankirana
-
-# Start all services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
+cp .env.example .env                  # MongoDB/Redis credentials for docker compose
+cp backend/.env.example backend/.env  # backend settings (maps, OTP, PayU, JWT...)
+docker compose up -d --build          # backend on :3000, MongoDB/Redis on 127.0.0.1 only
 ```
 
-### Running Locally
+To run the backend on the host with hot reload instead, start only the databases
+(`docker compose up -d mongodb redis`), point `backend/.env` at them
+(`MONGODB_URI=mongodb://<user>:<pass>@localhost:27017/shravankirana?authSource=admin`,
+`REDIS_HOST=localhost`, `REDIS_PASSWORD=...`), then:
 
 ```bash
-# Install dependencies
-npm install
-
-# Build all packages
-npm run build
-
-# Start all services in development mode
-npm run dev
-
-# Or start specific service
-cd apps/web-app && npm run dev
+cd backend && npm ci && npm run start:dev
 ```
 
-## Development Setup
+### 2. Admin dashboard
 
-### Project Structure
-
-```
-shravankirana/
-├── apps/
-│   ├── web-app/        # Main web application
-│   └── admin-app/      # Admin dashboard
-├── services/
-│   ├── auth-service/    # Authentication service
-│   └── api-gateway/    # API Gateway
-├── shared/             # Shared utilities and types
-├── docker-compose.yml  # Docker orchestration
-├── package.json        # Root workspace config
-└── tsconfig.json       # TypeScript configuration
+```bash
+cd admin
+cp .env.example .env
+npm ci
+npm run dev        # http://localhost:4321, talks to http://localhost:3000/api/v1
 ```
 
-### Environment Variables
+`npm run build` requires `PUBLIC_API_URL` and `PUBLIC_TRACKING_URL` and fails without them.
 
-Create `.env` files in each service directory:
+### 3. Mobile apps
 
-```env
-# .env.example for auth-service
-NODE_ENV=development
-PORT=3001
-JWT_SECRET=your-secret-key
-JWT_EXPIRES_IN=7d
-DATABASE_URL=postgresql://user:pass@localhost:5432/auth
-
-# .env.example for api-gateway
-NODE_ENV=development
-PORT=3002
-AUTH_SERVICE_URL=http://localhost:3001
-
-# .env.example for web-app
-NODE_ENV=development
-API_GATEWAY_URL=http://localhost:3002
+```bash
+cd customer-app   # or apps/rider-app
+cp .env.example .env
+npm ci
+npm start         # Expo
 ```
 
-### Available Scripts
+On a physical device, set `API_BASE_URL` / `TRACKING_URL` to your machine's LAN IP.
 
-| Command       | Description                    |
-|---------------|--------------------------------|
-| `npm run dev` | Start all services in dev mode |
-| `npm run build` | Build all packages           |
-| `npm run test` | Run tests across workspace   |
-| `npm run lint` | Lint all packages            |
+## Environment variables
 
-## API Documentation
+Each package documents its own variables. Never commit a real `.env`.
 
-### Authentication Endpoints
+| File                              | Used by                                        |
+|-----------------------------------|------------------------------------------------|
+| `.env.example`                    | root `docker-compose.yml` (DB/Redis passwords) |
+| `backend/.env.example`            | backend                                        |
+| `admin/.env.example`              | admin (`PUBLIC_*`, baked into the static build) |
+| `customer-app/.env.example`       | customer app                                   |
+| `apps/rider-app/.env.example`     | rider app                                      |
+| `infrastructure/docker/.env.example` | production compose stack                    |
 
-| Method | Endpoint            | Description          |
-|--------|---------------------|----------------------|
-| POST   | /api/auth/register  | Register new user    |
-| POST   | /api/auth/login     | User login           |
-| POST   | /api/auth/logout    | User logout          |
-| GET    | /api/auth/me        | Get current user     |
-| PUT    | /api/auth/profile   | Update user profile  |
+Anything in the admin or mobile app env files ends up in the shipped bundle, so it must not hold secrets.
 
-### API Gateway Routes
+## Testing
 
-| Method | Endpoint       | Service        | Description        |
-|--------|----------------|----------------|---------------------|
-| *      | /api/auth/*    | auth-service   | Auth routes         |
-| *      | /api/users/*   | user-service   | User routes         |
-| *      | /api/*         | api-gateway    | Catch-all routes    |
+```bash
+cd backend && npm test        # Jest
+cd admin && npm test          # Vitest (npm run test:watch for watch mode)
+cd apps/rider-app && npx tsc --noEmit
+```
+
+## CI
+
+`.github/workflows/ci-cd.yml` runs on pushes and PRs to `main`/`develop`:
+
+- **backend**: `npm ci`, ESLint, `tsc --noEmit`, Jest, `nest build`
+- **admin**: `npm ci`, Vitest, `astro build`
+- **rider-app**: `npm ci`, `tsc --noEmit`
+- **customer-app**: `npm ci`, `expo config` check
+
+On pushes to `main`, the backend Docker image is built and pushed to
+`ghcr.io/<owner>/<repo>/backend`. No deploy step is configured yet.
 
 ## Deployment
 
-### Docker Deployment
-
-```bash
-# Build production images
-docker-compose -f docker-compose.prod.yml build
-
-# Deploy to production
-docker-compose -f docker-compose.prod.yml up -d
-```
-
-### Cloud Deployment
-
-Recommended platforms:
-- **AWS**: ECS, EKS, App Runner
-- **GCP**: Cloud Run, GKE
-- **Azure**: Container Instances, AKS
-
-### Kubernetes
-
-```bash
-# Apply kubernetes manifests
-kubectl apply -f k8s/
-
-# Check deployment status
-kubectl get pods -n shravankirana
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-### Code Style
-
-- Use TypeScript for all new code
-- Follow ESLint configuration
-- Write tests for new features
-- Update documentation as needed
-
-### Commit Messages
-
-Format: `type(scope): description`
-
-Types:
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation
-- `style`: Formatting
-- `refactor`: Refactoring
-- `test`: Testing
-- `chore`: Maintenance
-
-## License
-
-This project is licensed under the MIT License.
-
-## Support
-
-- Documentation: [docs.shravankirana.dev](https://docs.shravankirana.dev)
-- Issues: [GitHub Issues](https://github.com/your-org/shravankirana/issues)
-- Email: support@shravankirana.dev
+See `infrastructure/README.md` for the production stack (nginx with TLS, then backend, MongoDB and Redis).

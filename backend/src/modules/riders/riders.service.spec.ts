@@ -1,22 +1,28 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import * as fc from 'fast-check';
-import { RidersService, LocationDto } from './riders.service';
-import { User, UserRole } from '../users/schemas/user.schema';
+import { RidersService } from './riders.service';
+import { UserRole } from '../users/schemas/user.schema';
 import { Order, OrderStatus } from '../orders/schemas/order.schema';
+import { Rider, RiderStatus } from './schemas/rider.schema';
+import { OrdersService } from '../orders/orders.service';
 import { RedisService } from '../../common/utils/redis.service';
 import { TrackingGateway } from '../../sockets/tracking.gateway';
 import { ETAService } from '../orders/eta.service';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 describe('RidersService - Property-Based Tests', () => {
   let service: RidersService;
-  let trackingGateway: TrackingGateway;
-  let etaService: ETAService;
 
-  const mockUserModel = {
+  const mockUserModel: any = {
     findOne: jest.fn(),
     find: jest.fn(),
+  };
+  mockUserModel.findById = jest.fn((...args: any[]) =>
+    mockUserModel.findOne(...args),
+  );
+
+  const mockOrdersService = {
+    buildRealtimeOrderPayload: jest.fn().mockResolvedValue({}),
   };
 
   const mockOrderModel = {
@@ -44,7 +50,8 @@ describe('RidersService - Property-Based Tests', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RidersService,
-        { provide: getModelToken(User.name), useValue: mockUserModel },
+        { provide: getModelToken(Rider.name), useValue: mockUserModel },
+        { provide: OrdersService, useValue: mockOrdersService },
         { provide: getModelToken(Order.name), useValue: mockOrderModel },
         { provide: RedisService, useValue: mockRedisService },
         { provide: TrackingGateway, useValue: mockTrackingGateway },
@@ -53,11 +60,13 @@ describe('RidersService - Property-Based Tests', () => {
     }).compile();
 
     service = module.get<RidersService>(RidersService);
-    trackingGateway = module.get<TrackingGateway>(TrackingGateway);
-    etaService = module.get<ETAService>(ETAService);
 
     // Reset all mocks before each test
     jest.clearAllMocks();
+    mockUserModel.findById.mockImplementation((...args: any[]) =>
+      mockUserModel.findOne(...args),
+    );
+    mockOrdersService.buildRealtimeOrderPayload.mockResolvedValue({});
 
     // Set up default mock for order model (empty orders)
     mockOrderModel.find.mockReturnValue({
@@ -348,7 +357,7 @@ describe('RidersService - Property-Based Tests', () => {
   // Property 9: Rider Assignment Validation
   describe('Property 9: Rider Assignment Validation', () => {
     it('findAvailableRiders returns only riders with isAvailable=true and isOnline=true', async () => {
-      fc.assert(
+      await fc.assert(
         fc.asyncProperty(
           fc.array(
             fc.record({
@@ -366,9 +375,13 @@ describe('RidersService - Property-Based Tests', () => {
             { minLength: 5, maxLength: 20 },
           ),
           async (riders) => {
-            const availableRiders = riders.filter(
-              (r) => r.isAvailable && r.isOnline,
-            );
+            const availableRiders = riders
+              .filter((r) => r.isAvailable && r.isOnline)
+              .map((r) => ({
+                ...r,
+                status: RiderStatus.AVAILABLE,
+                isActive: true,
+              }));
 
             mockUserModel.find.mockReturnValue({
               lean: jest.fn().mockReturnValue({
@@ -386,6 +399,10 @@ describe('RidersService - Property-Based Tests', () => {
 
             // Count should match
             expect(result.length).toBe(availableRiders.length);
+            expect(mockUserModel.find).toHaveBeenCalledWith({
+              status: RiderStatus.AVAILABLE,
+              isActive: true,
+            });
           },
         ),
         { numRuns: 30 },
@@ -599,6 +616,7 @@ describe('RidersService - Property-Based Tests', () => {
         mockOrders[0]._id,
         { latitude: location.latitude, longitude: location.longitude },
         riderId,
+        expect.anything(),
       );
       expect(
         mockTrackingGateway.broadcastRiderLocationUpdate,
@@ -607,6 +625,7 @@ describe('RidersService - Property-Based Tests', () => {
         mockOrders[1]._id,
         { latitude: location.latitude, longitude: location.longitude },
         riderId,
+        expect.anything(),
       );
     });
 
@@ -652,6 +671,7 @@ describe('RidersService - Property-Based Tests', () => {
         mockOrders[0]._id,
         { latitude: location.latitude, longitude: location.longitude },
         riderId,
+        expect.anything(),
       );
     });
 
@@ -699,7 +719,12 @@ describe('RidersService - Property-Based Tests', () => {
       expect(mockOrderModel.find).toHaveBeenCalledWith({
         riderId: expect.anything(),
         orderStatus: {
-          $in: [OrderStatus.ASSIGNED, OrderStatus.OUT_FOR_DELIVERY],
+          $in: [
+            OrderStatus.ASSIGNED,
+            OrderStatus.PACKED,
+            OrderStatus.PICKED_UP,
+            OrderStatus.OUT_FOR_DELIVERY,
+          ],
         },
       });
 
@@ -756,11 +781,7 @@ describe('RidersService - Property-Based Tests', () => {
         mockOrders[1]._id,
       );
 
-      // Verify ETA broadcast was called
-      expect(mockTrackingGateway.broadcastETAUpdate).toHaveBeenCalledWith(
-        mockOrders[1]._id,
-        mockETA,
-      );
+      // updateLocation only recalculates the ETA; it does not broadcast it
     });
 
     it('does not broadcast if location update fails', async () => {

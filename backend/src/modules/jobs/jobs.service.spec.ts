@@ -1,24 +1,27 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { getQueueToken } from '@nestjs/bullmq';
-import { Model, Types } from 'mongoose';
+import { Types } from 'mongoose';
 import * as fc from 'fast-check';
+import { ConfigService } from '@nestjs/config';
 import { JobsService } from './jobs.service';
 import {
+  StaleOrderProcessor,
+  AnomalyCheckProcessor,
+  EtaRecalculationProcessor,
+} from './jobs.processors';
+import {
   Order,
-  OrderDocument,
   OrderStatus,
+  PaymentMethod,
+  PaymentStatus,
 } from '../orders/schemas/order.schema';
-import { User, UserDocument, UserRole } from '../users/schemas/user.schema';
+import { User, UserRole } from '../users/schemas/user.schema';
 import { OrdersService } from '../orders/orders.service';
 import { ETAService } from '../orders/eta.service';
 
 describe('JobsService', () => {
   let service: JobsService;
-  let orderModel: Model<OrderDocument>;
-  let userModel: Model<UserDocument>;
-  let ordersService: OrdersService;
-  let etaService: ETAService;
 
   // Mock queue
   const mockQueue = {
@@ -40,6 +43,13 @@ describe('JobsService', () => {
   // Mock services
   const mockOrdersService = {
     addTimelineEntry: jest.fn(),
+    cancelOrder: jest.fn().mockResolvedValue({}),
+    markPaymentFailed: jest.fn().mockResolvedValue({ changed: true }),
+    autoAssignNearestRider: jest.fn().mockResolvedValue(null),
+  };
+
+  const mockConfigService = {
+    get: jest.fn().mockReturnValue(undefined),
   };
 
   const mockETAService = {
@@ -89,14 +99,14 @@ describe('JobsService', () => {
           provide: ETAService,
           useValue: mockETAService,
         },
+        {
+          provide: ConfigService,
+          useValue: mockConfigService,
+        },
       ],
     }).compile();
 
     service = module.get<JobsService>(JobsService);
-    orderModel = module.get<Model<OrderDocument>>(getModelToken(Order.name));
-    userModel = module.get<Model<UserDocument>>(getModelToken(User.name));
-    ordersService = module.get<OrdersService>(OrdersService);
-    etaService = module.get<ETAService>(ETAService);
   });
 
   it('should be defined', () => {
@@ -128,7 +138,7 @@ describe('JobsService', () => {
           ),
           async (orders) => {
             // Clear mocks for this iteration
-            mockOrdersService.addTimelineEntry.mockClear();
+            mockOrdersService.cancelOrder.mockClear();
             mockUserModel.findOne.mockClear();
             mockOrderModel.find.mockClear();
 
@@ -161,22 +171,22 @@ describe('JobsService', () => {
             });
 
             // Execute the job
-            await service.processStaleOrders({} as any);
+            await service.processStaleOrders();
 
-            // Verify all stale orders were cancelled
+            // Verify all stale orders were cancelled through the orders
+            // service cancel path (status log, stock release, broadcast)
             for (const orderMock of staleOrderMocks) {
-              expect(orderMock.orderStatus).toBe(OrderStatus.CANCELLED);
-              expect(orderMock.cancellationReason).toBe('AUTO_CANCELLED_STALE');
-              expect(orderMock.save).toHaveBeenCalled();
-              expect(mockOrdersService.addTimelineEntry).toHaveBeenCalledWith(
-                orderMock,
-                OrderStatus.CANCELLED,
+              expect(mockOrdersService.cancelOrder).toHaveBeenCalledWith(
+                orderMock._id.toString(),
                 systemUser._id.toString(),
+                'AUTO_CANCELLED_STALE',
               );
+              // No direct document mutation/save bypassing the service
+              expect(orderMock.save).not.toHaveBeenCalled();
             }
 
             // Verify the correct number of orders were processed
-            expect(mockOrdersService.addTimelineEntry).toHaveBeenCalledTimes(
+            expect(mockOrdersService.cancelOrder).toHaveBeenCalledTimes(
               expectedStaleOrders.length,
             );
           },
@@ -214,7 +224,7 @@ describe('JobsService', () => {
               exec: jest.fn().mockResolvedValue([]),
             });
 
-            await service.processStaleOrders({} as any);
+            await service.processStaleOrders();
 
             // Order should not be modified
             expect(order.save).not.toHaveBeenCalled();
@@ -250,7 +260,7 @@ describe('JobsService', () => {
               exec: jest.fn().mockResolvedValue([]),
             });
 
-            await service.processStaleOrders({} as any);
+            await service.processStaleOrders();
 
             // Order should not be modified
             expect(order.save).not.toHaveBeenCalled();
@@ -301,7 +311,7 @@ describe('JobsService', () => {
             const loggerWarnSpy = jest.spyOn(service['logger'], 'warn');
 
             // Execute the job
-            await service.processAnomalies({} as any);
+            await service.processAnomalies();
 
             // Verify all anomalous orders were detected and logged
             expect(loggerWarnSpy).toHaveBeenCalledTimes(
@@ -336,14 +346,7 @@ describe('JobsService', () => {
             .constantFrom(...Object.values(OrderStatus))
             .filter((status) => status !== OrderStatus.OUT_FOR_DELIVERY),
           fc.integer({ min: 121, max: 300 }), // Minutes ago (older than 2 hours)
-          async (orderStatus, minutesAgo) => {
-            const order = {
-              _id: new Types.ObjectId(),
-              orderId: 'TEST-ORDER',
-              orderStatus,
-              updatedAt: new Date(Date.now() - minutesAgo * 60 * 1000),
-            };
-
+          async () => {
             // Mock should return empty array since we're filtering for OUT_FOR_DELIVERY
             mockOrderModel.find.mockReturnValue({
               exec: jest.fn().mockResolvedValue([]),
@@ -351,7 +354,7 @@ describe('JobsService', () => {
 
             const loggerWarnSpy = jest.spyOn(service['logger'], 'warn');
 
-            await service.processAnomalies({} as any);
+            await service.processAnomalies();
 
             // Should not log any anomalies
             expect(loggerWarnSpy).not.toHaveBeenCalledWith(
@@ -369,14 +372,7 @@ describe('JobsService', () => {
       await fc.assert(
         fc.asyncProperty(
           fc.integer({ min: 0, max: 119 }), // Minutes ago (less than 2 hours)
-          async (minutesAgo) => {
-            const order = {
-              _id: new Types.ObjectId(),
-              orderId: 'TEST-ORDER',
-              orderStatus: OrderStatus.OUT_FOR_DELIVERY,
-              updatedAt: new Date(Date.now() - minutesAgo * 60 * 1000),
-            };
-
+          async () => {
             // Mock should return empty array since we're filtering for orders older than 2 hours
             mockOrderModel.find.mockReturnValue({
               exec: jest.fn().mockResolvedValue([]),
@@ -384,7 +380,7 @@ describe('JobsService', () => {
 
             const loggerWarnSpy = jest.spyOn(service['logger'], 'warn');
 
-            await service.processAnomalies({} as any);
+            await service.processAnomalies();
 
             // Should not log any anomalies
             expect(loggerWarnSpy).not.toHaveBeenCalledWith(
@@ -423,7 +419,7 @@ describe('JobsService', () => {
       const calls = mockQueue.add.mock.calls;
 
       for (const call of calls) {
-        const [jobName, data, options] = call;
+        const [, , options] = call;
 
         // Verify retry configuration
         expect(options.attempts).toBe(3);
@@ -595,7 +591,7 @@ describe('JobsService', () => {
 
             mockETAService.recalculateForOrder.mockResolvedValue(new Date());
 
-            await service.processETAUpdates({} as any);
+            await service.processETAUpdates();
 
             // Verify ETA was recalculated for each eligible order
             expect(mockETAService.recalculateForOrder).toHaveBeenCalledTimes(
@@ -635,10 +631,70 @@ describe('JobsService', () => {
         }),
       });
 
-      await service.processETAUpdates({} as any);
+      await service.processETAUpdates();
 
       // Should not call ETA service for orders without riders
       expect(mockETAService.recalculateForOrder).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Payment timeout auto-cancel', () => {
+    it('marks unpaid online orders older than PAYMENT_TIMEOUT_MINUTES as failed via the orders service', async () => {
+      mockConfigService.get.mockImplementation((key: string) =>
+        key === 'PAYMENT_TIMEOUT_MINUTES' ? '20' : undefined,
+      );
+      const unpaid = [
+        { _id: new Types.ObjectId(), orderId: 'ORD-1' },
+        { _id: new Types.ObjectId(), orderId: 'ORD-2' },
+      ];
+      mockOrderModel.find.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(unpaid),
+      });
+
+      const before = Date.now();
+      await service.processPaymentTimeouts();
+
+      const filter = mockOrderModel.find.mock.calls[0][0];
+      expect(filter.paymentMethod).toEqual({ $ne: PaymentMethod.COD });
+      expect(filter.paymentStatus).toBe(PaymentStatus.PENDING);
+      expect(filter.orderStatus).toBe(OrderStatus.PENDING);
+      const cutoff = filter.createdAt.$lt.getTime();
+      expect(before - cutoff).toBeGreaterThanOrEqual(20 * 60 * 1000 - 1000);
+      expect(before - cutoff).toBeLessThanOrEqual(20 * 60 * 1000 + 1000);
+
+      for (const order of unpaid) {
+        expect(mockOrdersService.markPaymentFailed).toHaveBeenCalledWith(
+          order._id.toString(),
+          'PAYMENT_TIMEOUT',
+        );
+      }
+      mockConfigService.get.mockReset();
+    });
+
+    it('defaults to a 15 minute timeout', async () => {
+      mockConfigService.get.mockReturnValue(undefined);
+      mockOrderModel.find.mockReturnValue({
+        exec: jest.fn().mockResolvedValue([]),
+      });
+      const before = Date.now();
+      await service.processPaymentTimeouts();
+      const cutoff = mockOrderModel.find.mock.calls[0][0].createdAt.$lt;
+      expect(Math.round((before - cutoff.getTime()) / 60000)).toBe(15);
+    });
+  });
+
+  describe('Processors', () => {
+    it('registers one processor class per queue, each delegating to JobsService', async () => {
+      const jobsService = { process: jest.fn().mockResolvedValue('ok') };
+      for (const ProcessorClass of [
+        StaleOrderProcessor,
+        AnomalyCheckProcessor,
+        EtaRecalculationProcessor,
+      ]) {
+        const processor = new ProcessorClass(jobsService as any);
+        await expect(processor.process({ id: '1' } as any)).resolves.toBe('ok');
+      }
+      expect(jobsService.process).toHaveBeenCalledTimes(3);
     });
   });
 });

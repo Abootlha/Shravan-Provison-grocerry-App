@@ -97,15 +97,36 @@ export const useOrders = () => {
     async (
       orderId: string,
       status: OrderStatus,
-      location?: { latitude: number; longitude: number }
+      location?: { latitude: number; longitude: number },
+      deliveryOtp?: string
     ) => {
-      const result = await dispatch(updateOrderStatus({ orderId, status, location }));
+      const result = await dispatch(updateOrderStatus({ orderId, status, location, deliveryOtp }));
       return updateOrderStatus.fulfilled.match(result) ? (result.payload as Order) : null;
     },
     [dispatch]
   );
 
+  // Marks DELIVERED with the OTP the customer reads out. The server verifies
+  // it (400 on a wrong OTP, lockout after repeated failures); its message is returned.
+  const completeDelivery = useCallback(
+    async (
+      orderId: string,
+      deliveryOtp: string,
+      location?: { latitude: number; longitude: number }
+    ): Promise<{ order: Order | null; error: string | null }> => {
+      const result = await dispatch(
+        updateOrderStatus({ orderId, status: 'delivered', location, deliveryOtp })
+      );
+      if (updateOrderStatus.fulfilled.match(result)) {
+        return { order: result.payload as Order, error: null };
+      }
+      return { order: null, error: (result.payload as string) || 'Failed to complete delivery' };
+    },
+    [dispatch]
+  );
+
   return {
+    completeDelivery,
     currentOrder,
     availableOrders,
     loading,

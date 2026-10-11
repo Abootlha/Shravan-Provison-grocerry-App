@@ -7,6 +7,7 @@ import {
     locationApi,
 } from './api';
 import { ENDPOINTS } from './config';
+import { getRefreshToken, clearSession } from './tokenStorage';
 
 const getCurrentUser = async () => {
     const profile = await UserService.getProfile();
@@ -27,8 +28,14 @@ export const AuthService = {
         return response.data;
     },
 
-    logout: async (refreshToken) => {
-        await authApi.post(ENDPOINTS.auth.LOGOUT, { refreshToken });
+    // Revokes the session server-side (best effort), then always clears local tokens.
+    logout: async () => {
+        try {
+            const refreshToken = await getRefreshToken();
+            await authApi.post(ENDPOINTS.auth.LOGOUT, { refreshToken: refreshToken || undefined });
+        } finally {
+            await clearSession();
+        }
     },
 };
 

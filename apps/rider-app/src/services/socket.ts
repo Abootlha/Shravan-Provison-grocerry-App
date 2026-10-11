@@ -11,16 +11,41 @@ class SocketService {
   private riderId: string = '';
   private listeners = new Map<string, Set<SocketEventHandler>>();
 
-  connect(token: string, riderId?: string): void {
-    if (this.socket?.connected) {
-      return;
-    }
+  private token: string | null = null;
+  private refCount = 0;
 
+  /** Register a consumer; the socket stays open while at least one consumer holds it. */
+  retain(): void {
+    this.refCount += 1;
+  }
+
+  /** Drop a consumer; the socket is closed when the last consumer releases it. */
+  release(): void {
+    this.refCount = Math.max(0, this.refCount - 1);
+    if (this.refCount === 0) {
+      this.disconnect();
+    }
+  }
+
+  connect(token: string, riderId?: string): void {
     if (riderId) {
       this.riderId = riderId;
     }
 
-    this.socket = io(SOCKET_URL, {
+    if (this.socket) {
+      if (this.token === token) {
+        // Same session: reuse the existing socket (connected or still reconnecting).
+        if (riderId && this.socket.connected) {
+          this.joinRooms();
+        }
+        return;
+      }
+      // Token changed (refresh or new login): dispose the old socket before creating a new one.
+      this.disposeSocket();
+    }
+
+    this.token = token;
+    const socket = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket', 'polling'],
       reconnection: true,
@@ -28,33 +53,50 @@ class SocketService {
       reconnectionDelay: 2000,
       reconnectionDelayMax: 10000,
     });
+    this.socket = socket;
 
-    this.socket.on('connect', () => {
-      console.log('Socket connected:', this.socket?.id);
-      // Auto-join rider room to receive order assignments
-      if (this.riderId) {
-        this.socket?.emit('joinRiderRoom', { riderId: this.riderId });
+    let initialConnectHandled = false;
+    socket.on('connect', () => {
+      if (__DEV__) console.log('Socket connected:', socket.id);
+      // Reconnects re-join via the manager 'reconnect' handler below.
+      if (!initialConnectHandled) {
+        initialConnectHandled = true;
+        this.joinRooms();
       }
     });
 
-    this.socket.on('disconnect', (reason) => {
-      console.log('Socket disconnected:', reason);
+    socket.on('disconnect', (reason) => {
+      if (__DEV__) console.log('Socket disconnected:', reason);
     });
 
-    this.socket.on('connect_error', (error) => {
+    socket.on('connect_error', (error) => {
       console.error('Socket connection error:', error.message);
     });
 
-    this.socket.on('reconnect', (attemptNumber) => {
-      console.log('Socket reconnected after', attemptNumber, 'attempts');
-      // Re-join rider room on reconnect
-      if (this.riderId) {
-        this.socket?.emit('joinRiderRoom', { riderId: this.riderId });
-      }
-      this.attachStoredListeners();
+    // 'reconnect' is emitted by the Manager (socket.io), not by the Socket.
+    socket.io.on('reconnect', (attemptNumber) => {
+      if (__DEV__) console.log('Socket reconnected after', attemptNumber, 'attempts');
+      this.joinRooms();
     });
 
     this.attachStoredListeners();
+  }
+
+  private joinRooms(): void {
+    if (this.riderId) {
+      this.socket?.emit('joinRiderRoom', { riderId: this.riderId });
+    }
+  }
+
+  private disposeSocket(): void {
+    if (!this.socket) {
+      return;
+    }
+    this.socket.io.off('reconnect');
+    this.socket.removeAllListeners();
+    this.socket.disconnect();
+    this.socket = null;
+    this.token = null;
   }
 
   setRiderId(riderId: string): void {
@@ -66,10 +108,7 @@ class SocketService {
 
   disconnect(): void {
     this.stopLocationUpdates();
-    if (this.socket) {
-      this.socket.disconnect();
-      this.socket = null;
-    }
+    this.disposeSocket();
   }
 
   on(event: string, handler: SocketEventHandler): void {

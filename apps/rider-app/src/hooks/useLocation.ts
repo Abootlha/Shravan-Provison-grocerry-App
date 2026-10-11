@@ -28,11 +28,8 @@ export const useLocation = () => {
   );
 
   const startTracking = useCallback(async () => {
-    const hasPermission = await locationService.requestPermissions();
-    if (!hasPermission) {
-      return false;
-    }
-
+    // locationService.startTracking checks/requests permissions and is
+    // idempotent, so concurrent callers share a single watcher.
     const started = await locationService.startTracking();
     if (started) {
       dispatch(setTracking(true));

@@ -1,51 +1,88 @@
-import { Controller, Post, Body, UseGuards, Get, Res } from '@nestjs/common';
-import { Response } from 'express';
+import {
+  Controller,
+  Post,
+  Body,
+  UseGuards,
+  Res,
+  Request,
+  HttpCode,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
+import type { Response } from 'express';
 import { PaymentsService } from './payments.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { SeamlessHashDto } from './dto/seamless-hash.dto';
 
 @Controller('payments')
 export class PaymentsController {
+  private readonly logger = new Logger(PaymentsController.name);
+
   constructor(private readonly paymentsService: PaymentsService) {}
-
-  @Get('token')
-  @UseGuards(JwtAuthGuard)
-  async getPaymentToken() {
-    const token = await this.paymentsService.getAccessToken();
-    // Usually you wouldn't return the token directly to the frontend,
-    // but this is a placeholder to verify the integration.
-    return { success: true, message: 'Token generated successfully' };
-  }
-
-  @Post('create-link')
-  @UseGuards(JwtAuthGuard)
-  async createLink(@Body() paymentDetails: any) {
-    const link = await this.paymentsService.createPaymentLink(paymentDetails);
-    return { success: true, data: link };
-  }
 
   @Post('seamless-hash')
   @UseGuards(JwtAuthGuard)
-  generateSeamlessHash(@Body() paymentDetails: any) {
-    const payload = this.paymentsService.generateSeamlessPayload(paymentDetails);
+  async generateSeamlessHash(
+    @Request() req: any,
+    @Body() body: SeamlessHashDto,
+  ) {
+    const payload = await this.paymentsService.generateSeamlessPayload(
+      req.user.userId,
+      body,
+    );
     return { success: true, data: payload };
   }
 
+  // Webhook/IPN endpoint (no JwtAuthGuard since it is called by PayU server).
+  // Authenticity comes from the reverse hash, verified in the service.
   @Post('webhook')
+  @HttpCode(200)
   async handleWebhook(@Body() payload: any) {
-    // Webhook/IPN endpoint (no JwtAuthGuard since it is called by PayU server)
-    const result = await this.paymentsService.processWebhook(payload);
-    return { success: true, data: result };
+    const result = await this.paymentsService.handlePayuCallback(
+      payload,
+      'webhook',
+    );
+    if (result.status === 'invalid') {
+      throw new BadRequestException('Invalid payment notification');
+    }
+    return { success: true, data: { status: result.status } };
   }
 
+  // PayU browser form posts (application/x-www-form-urlencoded).
   @Post('success')
-  handleSuccess(@Body() body: any, @Res() res: any) {
-    // PayU sends payment data in body. Redirect back to customer app's Checkout screen to place order
-    return res.redirect('http://localhost:8081/Checkout?payment=success');
+  async handleSuccess(@Body() body: any, @Res() res: Response) {
+    return this.handleBrowserReturn(body, 'success', res);
   }
 
   @Post('failure')
-  handleFailure(@Body() body: any, @Res() res: any) {
-    // Redirect back to customer app's checkout screen with failure status
-    return res.redirect('http://localhost:8081/Checkout?payment=failed');
+  async handleFailure(@Body() body: any, @Res() res: Response) {
+    return this.handleBrowserReturn(body, 'failure', res);
+  }
+
+  private async handleBrowserReturn(
+    body: any,
+    source: 'success' | 'failure',
+    res: Response,
+  ) {
+    let outcome: 'success' | 'failed' = 'failed';
+    let orderId: string | undefined;
+
+    try {
+      const result = await this.paymentsService.handlePayuCallback(
+        body,
+        source,
+      );
+      orderId = result.orderId;
+      outcome = result.status === 'success' ? 'success' : 'failed';
+    } catch (error) {
+      this.logger.error(
+        `Failed to process PayU ${source} return: ${(error as Error).message}`,
+      );
+    }
+
+    return res.redirect(
+      302,
+      this.paymentsService.buildReturnRedirect(outcome, orderId),
+    );
   }
 }

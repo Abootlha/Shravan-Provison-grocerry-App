@@ -90,25 +90,32 @@ class SocketService {
             }
         });
 
-        this.socket.on('reconnect', (attemptNumber) => {
-            console.log('Socket reconnected after', attemptNumber, 'attempts');
+        // Reconnection events are emitted by the Manager (socket.io), not the Socket.
+        const manager = this.socket.io;
+        manager.on('reconnect', (attemptNumber) => {
+            if (__DEV__) console.log('Socket reconnected after', attemptNumber, 'attempts');
             store.dispatch(setConnectionStatus('connected'));
             this.reconnectAttempts = 0;
+            // The server forgot our rooms; join again (emits are buffered until connected).
+            this.joinedOrderId = null;
+            if (this.currentOrderId) {
+                this.joinOrderRoom(this.currentOrderId);
+            }
         });
 
-        this.socket.on('reconnect_attempt', (attemptNumber) => {
-            console.log('Socket reconnection attempt:', attemptNumber);
+        manager.on('reconnect_attempt', (attemptNumber) => {
+            if (__DEV__) console.log('Socket reconnection attempt:', attemptNumber);
             store.dispatch(setConnectionStatus('reconnecting'));
         });
 
-        this.socket.on('reconnect_failed', () => {
+        manager.on('reconnect_failed', () => {
             console.warn('Socket reconnection failed');
             store.dispatch(setConnectionStatus('disconnected'));
             store.dispatch(setError('Failed to reconnect to tracking server'));
         });
 
         this.socket.on('orderStatusUpdate', (data) => {
-            console.log('Order status update received:', data);
+            if (__DEV__) console.log('Order status update received:', data);
             if (this.currentOrderId && data.orderId && data.orderId !== this.currentOrderId) {
                 return;
             }
@@ -123,7 +130,7 @@ class SocketService {
         });
 
         this.socket.on('riderLocationUpdate', (data) => {
-            console.log('Rider location update received:', data);
+            if (__DEV__) console.log('Rider location update received:', data);
             if (this.currentOrderId && data.orderId && data.orderId !== this.currentOrderId) {
                 return;
             }
@@ -140,7 +147,7 @@ class SocketService {
         });
 
         this.socket.on('etaUpdate', (data) => {
-            console.log('ETA update received:', data);
+            if (__DEV__) console.log('ETA update received:', data);
             if (this.currentOrderId && data.orderId && data.orderId !== this.currentOrderId) {
                 return;
             }
@@ -153,7 +160,7 @@ class SocketService {
         });
 
         this.socket.on('orderAssigned', (data) => {
-            console.log('Order assigned to rider:', data);
+            if (__DEV__) console.log('Order assigned to rider:', data);
             if (this.currentOrderId && data.orderId && data.orderId !== this.currentOrderId) {
                 return;
             }
@@ -231,6 +238,10 @@ class SocketService {
                 this.leaveOrderRoom(this.currentOrderId);
             }
 
+            this.socket.io?.off?.('reconnect');
+            this.socket.io?.off?.('reconnect_attempt');
+            this.socket.io?.off?.('reconnect_failed');
+            this.socket.removeAllListeners?.();
             this.socket.disconnect();
             this.socket = null;
             this.currentOrderId = null;

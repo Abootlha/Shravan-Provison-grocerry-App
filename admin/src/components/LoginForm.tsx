@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api } from '../lib/api';
+import { api, isTokenExpired } from '../lib/api';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
@@ -15,7 +15,7 @@ export default function LoginForm() {
         if (typeof window === 'undefined') return;
 
         const token = localStorage.getItem('adminToken');
-        if (token) {
+        if (token && !isTokenExpired(token)) {
             window.location.replace('/');
         }
     }, []);

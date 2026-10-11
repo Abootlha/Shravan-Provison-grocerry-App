@@ -5,15 +5,30 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { store } from './src/store';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { useAppDispatch } from './src/hooks/useAuth';
-import { loadUser } from './src/store/slices/authSlice';
+import { loadUser, sessionExpired, tokenRefreshed } from './src/store/slices/authSlice';
 import { notificationService } from './src/services/notifications';
-import './src/services/location';
+import { setSessionHandlers } from './src/services/authSession';
+import { socketService } from './src/services/socket';
+import { locationService } from './src/services/location';
 
 const AppContent: React.FC = () => {
   const dispatch = useAppDispatch();
 
   useEffect(() => {
     dispatch(loadUser());
+  }, [dispatch]);
+
+  useEffect(() => {
+    setSessionHandlers({
+      onTokenRefreshed: (token) => dispatch(tokenRefreshed(token)),
+      onSessionExpired: () => {
+        locationService.stopTracking();
+        locationService.stopBackgroundTracking().catch(() => undefined);
+        socketService.disconnect();
+        dispatch(sessionExpired());
+      },
+    });
+    return () => setSessionHandlers({});
   }, [dispatch]);
 
   useEffect(() => {

@@ -6,13 +6,16 @@ import { OrdersService } from './orders.service';
 import { Order, OrderStatus, PaymentStatus } from './schemas/order.schema';
 import { OrderStatusLog } from './schemas/order-status-log.schema';
 import { User } from '../users/schemas/user.schema';
+import { Rider } from '../riders/schemas/rider.schema';
 import { CartService } from '../cart/cart.service';
 import { ProductsService } from '../products/products.service';
+import { SettingsService } from '../settings/settings.service';
 import { RedisService } from '../../common/utils/redis.service';
 import { CacheService } from '../../common/utils/cache.service';
 import { TrackingGateway } from '../../sockets/tracking.gateway';
 import { ETAService } from './eta.service';
 import { Types } from 'mongoose';
+import { createFakeModel, fakeStoreSettings } from './testing/fake-model';
 
 describe('OrdersService - Cache Property-Based Tests', () => {
   let service: OrdersService;
@@ -28,12 +31,7 @@ describe('OrdersService - Cache Property-Based Tests', () => {
   );
 
   beforeEach(async () => {
-    mockOrderModel = {
-      findById: jest.fn(),
-      findOne: jest.fn(),
-      find: jest.fn(),
-      countDocuments: jest.fn(),
-    };
+    mockOrderModel = createFakeModel({ hiddenFields: ['deliveryOtp'] });
 
     const mockOrderStatusLogModel: any = jest.fn().mockImplementation(() => ({
       save: jest.fn().mockResolvedValue(true),
@@ -68,6 +66,7 @@ describe('OrdersService - Cache Property-Based Tests', () => {
     };
 
     const mockTrackingGateway = {
+      notifyRiderOrderPacked: jest.fn(),
       broadcastOrderStatusUpdate: jest.fn(),
       broadcastETAUpdate: jest.fn(),
       broadcastRiderLocationUpdate: jest.fn(),
@@ -88,6 +87,13 @@ describe('OrdersService - Cache Property-Based Tests', () => {
           useValue: mockOrderStatusLogModel,
         },
         { provide: getModelToken(User.name), useValue: mockUserModel },
+        { provide: getModelToken(Rider.name), useValue: createFakeModel() },
+        {
+          provide: SettingsService,
+          useValue: {
+            getStoreSettings: jest.fn().mockResolvedValue(fakeStoreSettings),
+          },
+        },
         { provide: getQueueToken('orders'), useValue: mockQueue },
         { provide: CartService, useValue: mockCartService },
         { provide: ProductsService, useValue: mockProductsService },
@@ -146,6 +152,7 @@ describe('OrdersService - Cache Property-Based Tests', () => {
             const result = await service.findById(orderId);
 
             // Verify cache was checked
+            // eslint-disable-next-line @typescript-eslint/unbound-method -- asserting on a jest mock, not invoking it
             expect(cacheService.getOrder).toHaveBeenCalledWith(orderId);
 
             // Verify MongoDB was NOT queried (cache hit)
@@ -194,23 +201,21 @@ describe('OrdersService - Cache Property-Based Tests', () => {
             jest.spyOn(cacheService, 'getOrder').mockResolvedValue(null);
             jest.spyOn(cacheService, 'setOrder').mockResolvedValue(undefined);
 
-            // Set up MongoDB to return the order
-            mockOrderModel.findById.mockReturnValue({
-              lean: jest.fn().mockReturnValue({
-                exec: jest.fn().mockResolvedValue(mockOrder),
-              }),
-            });
+            // Seed the database with the order
+            mockOrderModel.insert(mockOrder);
 
             // Call findById
             const result = await service.findById(orderId);
 
             // Verify cache was checked first
+            // eslint-disable-next-line @typescript-eslint/unbound-method -- asserting on a jest mock, not invoking it
             expect(cacheService.getOrder).toHaveBeenCalledWith(orderId);
 
             // Verify MongoDB was queried (cache miss)
             expect(mockOrderModel.findById).toHaveBeenCalledWith(orderId);
 
             // Verify result was cached
+            // eslint-disable-next-line @typescript-eslint/unbound-method -- asserting on a jest mock, not invoking it
             expect(cacheService.setOrder).toHaveBeenCalledWith(
               orderId,
               mockOrder,
@@ -274,7 +279,11 @@ describe('OrdersService - Cache Property-Based Tests', () => {
             };
 
             // Mock the order model to return the order
-            mockOrderModel.findById.mockResolvedValue(mockOrder);
+            mockOrderModel.insert({
+              ...mockOrder,
+              save: undefined,
+              deliveryOtp: '4321',
+            });
 
             // Spy on cache invalidation
             jest
@@ -283,16 +292,20 @@ describe('OrdersService - Cache Property-Based Tests', () => {
 
             // Call updateStatus
             try {
-              await service.updateStatus(orderId, newStatus, userId);
+              await service.updateStatus(orderId, newStatus, userId, {
+                actorRole: 'admin',
+                deliveryOtp: '4321',
+              });
 
               // Verify cache was invalidated
+              // eslint-disable-next-line @typescript-eslint/unbound-method -- asserting on a jest mock, not invoking it
               expect(cacheService.deleteOrder).toHaveBeenCalledWith(orderId);
             } catch (error) {
               // Some transitions may fail due to business logic (e.g., payment verification)
               // That's okay - we're testing cache invalidation when update succeeds
               if (
                 error instanceof Error &&
-                error.message.includes('Payment must be completed')
+                error.message.includes('payment has not been completed')
               ) {
                 return true;
               }
@@ -354,30 +367,34 @@ describe('OrdersService - Cache Property-Based Tests', () => {
             const updatedOrder = { ...mockOrder, orderStatus: newStatus };
 
             // Mock the order model
-            mockOrderModel.findById.mockResolvedValue(mockOrder);
+            mockOrderModel.insert({
+              ...mockOrder,
+              save: undefined,
+              deliveryOtp: '4321',
+            });
 
             // Set up cache behavior
             let cacheDeleted = false;
-            jest
-              .spyOn(cacheService, 'deleteOrder')
-              .mockImplementation(async () => {
-                cacheDeleted = true;
-              });
-            jest
-              .spyOn(cacheService, 'getOrder')
-              .mockImplementation(async () => {
-                // Return null after cache is deleted
-                return cacheDeleted ? null : mockOrder;
-              });
+            jest.spyOn(cacheService, 'deleteOrder').mockImplementation(() => {
+              cacheDeleted = true;
+              return Promise.resolve();
+            });
+            jest.spyOn(cacheService, 'getOrder').mockImplementation(() => {
+              // Return null after cache is deleted
+              return Promise.resolve(cacheDeleted ? null : mockOrder);
+            });
             jest.spyOn(cacheService, 'setOrder').mockResolvedValue(undefined);
 
             // Update status (which should invalidate cache)
             try {
-              await service.updateStatus(orderId, newStatus, userId);
+              await service.updateStatus(orderId, newStatus, userId, {
+                actorRole: 'admin',
+                deliveryOtp: '4321',
+              });
             } catch (error) {
               if (
                 error instanceof Error &&
-                error.message.includes('Payment must be completed')
+                error.message.includes('payment has not been completed')
               ) {
                 return true;
               }
@@ -387,14 +404,10 @@ describe('OrdersService - Cache Property-Based Tests', () => {
             // Verify cache was deleted
             expect(cacheDeleted).toBe(true);
 
-            // Now query the order again
-            mockOrderModel.findById.mockReturnValue({
-              lean: jest.fn().mockReturnValue({
-                exec: jest.fn().mockResolvedValue(updatedOrder),
-              }),
-            });
+            // Seed the database with the order
+            mockOrderModel.insert(updatedOrder);
 
-            const result = await service.findById(orderId);
+            await service.findById(orderId);
 
             // Verify MongoDB was queried (cache miss after invalidation)
             expect(mockOrderModel.findById).toHaveBeenCalled();
@@ -444,12 +457,8 @@ describe('OrdersService - Cache Property-Based Tests', () => {
             // Simulate Redis failure by returning null (CacheService catches errors internally)
             jest.spyOn(cacheService, 'getOrder').mockResolvedValue(null);
 
-            // Set up MongoDB to return the order
-            mockOrderModel.findById.mockReturnValue({
-              lean: jest.fn().mockReturnValue({
-                exec: jest.fn().mockResolvedValue(mockOrder),
-              }),
-            });
+            // Seed the database with the order
+            mockOrderModel.insert(mockOrder);
 
             // Call findById - should work despite Redis being unavailable
             const result = await service.findById(orderId);
@@ -502,12 +511,8 @@ describe('OrdersService - Cache Property-Based Tests', () => {
             // Simulate Redis set doing nothing (graceful degradation - CacheService catches errors)
             jest.spyOn(cacheService, 'setOrder').mockResolvedValue(undefined);
 
-            // Set up MongoDB to return the order
-            mockOrderModel.findById.mockReturnValue({
-              lean: jest.fn().mockReturnValue({
-                exec: jest.fn().mockResolvedValue(mockOrder),
-              }),
-            });
+            // Seed the database with the order
+            mockOrderModel.insert(mockOrder);
 
             // Call findById - should work and return result even if caching fails
             const result = await service.findById(orderId);
@@ -569,7 +574,11 @@ describe('OrdersService - Cache Property-Based Tests', () => {
             };
 
             // Mock the order model
-            mockOrderModel.findById.mockResolvedValue(mockOrder);
+            mockOrderModel.insert({
+              ...mockOrder,
+              save: undefined,
+              deliveryOtp: '4321',
+            });
 
             // Simulate Redis delete doing nothing (graceful degradation - CacheService catches errors)
             jest
@@ -582,16 +591,17 @@ describe('OrdersService - Cache Property-Based Tests', () => {
                 orderId,
                 newStatus,
                 userId,
+                { actorRole: 'admin', deliveryOtp: '4321' },
               );
 
               // Verify order was updated despite cache invalidation potentially failing
               expect(result).toBeDefined();
-              expect(mockOrder.save).toHaveBeenCalled();
+              expect(mockOrderModel.get(orderId).orderStatus).toBe(newStatus);
             } catch (error) {
               // Some transitions may fail due to business logic
               if (
                 error instanceof Error &&
-                error.message.includes('Payment must be completed')
+                error.message.includes('payment has not been completed')
               ) {
                 return true;
               }

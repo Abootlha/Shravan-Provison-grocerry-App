@@ -1,7 +1,7 @@
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import * as fc from 'fast-check';
-import { CreateOrderDto, OrderItemDto, AddressDto } from './create-order.dto';
+import { CreateOrderDto } from './create-order.dto';
 import { PaymentMethod, PaymentStatus } from '../schemas/order.schema';
 
 // Custom generator for MongoDB ObjectId (24 hex characters)
@@ -93,7 +93,6 @@ describe('CreateOrderDto Property Tests', () => {
               }),
             }),
             paymentMethod: fc.constantFrom(...Object.values(PaymentMethod)),
-            paymentStatus: fc.constantFrom(...Object.values(PaymentStatus)),
             deliveryInstructions: fc.option(
               fc.string({ minLength: 1, maxLength: 500 }),
               { nil: undefined },
@@ -155,7 +154,6 @@ describe('CreateOrderDto Property Tests', () => {
               }),
             }),
             paymentMethod: fc.constantFrom(...Object.values(PaymentMethod)),
-            paymentStatus: fc.constantFrom(...Object.values(PaymentStatus)),
           }),
           async (orderData) => {
             const dto = plainToInstance(CreateOrderDto, orderData);
@@ -224,7 +222,6 @@ describe('CreateOrderDto Property Tests', () => {
               }),
             }),
             paymentMethod: fc.constantFrom(...Object.values(PaymentMethod)),
-            paymentStatus: fc.constantFrom(...Object.values(PaymentStatus)),
           }),
           async (orderData) => {
             const dto = plainToInstance(CreateOrderDto, orderData);
@@ -256,7 +253,6 @@ describe('CreateOrderDto Property Tests', () => {
           longitude: -74.006,
         },
         paymentMethod: PaymentMethod.COD,
-        paymentStatus: PaymentStatus.PENDING,
       };
 
       const dto = plainToInstance(CreateOrderDto, orderData);
@@ -268,39 +264,46 @@ describe('CreateOrderDto Property Tests', () => {
       expect(itemsError).toBeDefined();
     });
 
-    it('should reject orders with invalid payment status enum', async () => {
-      const orderData = {
-        items: [
-          {
-            productId: '507f1f77bcf86cd799439011',
-            name: 'Test Product',
-            quantity: 1,
-            price: 100,
+    it('should reject a client-supplied paymentStatus (server-controlled field)', async () => {
+      for (const paymentStatus of [
+        ...Object.values(PaymentStatus),
+        'INVALID_STATUS',
+      ]) {
+        const orderData = {
+          items: [
+            {
+              productId: '507f1f77bcf86cd799439011',
+              name: 'Test Product',
+              quantity: 1,
+              price: 100,
+            },
+          ],
+          itemTotal: 100,
+          totalAmount: 100,
+          deliveryAddress: {
+            type: 'Home',
+            address: '123 Test St',
+            city: 'Test City',
+            pincode: '123456',
+            latitude: 40.7128,
+            longitude: -74.006,
           },
-        ],
-        itemTotal: 100,
-        totalAmount: 100,
-        deliveryAddress: {
-          type: 'Home',
-          address: '123 Test St',
-          city: 'Test City',
-          pincode: '123456',
-          latitude: 40.7128,
-          longitude: -74.006,
-        },
-        paymentMethod: PaymentMethod.COD,
-        paymentStatus: 'INVALID_STATUS', // Invalid enum value
-      };
+          paymentMethod: PaymentMethod.UPI,
+          paymentStatus,
+        };
 
-      const dto = plainToInstance(CreateOrderDto, orderData);
-      const errors = await validate(dto);
+        const dto = plainToInstance(CreateOrderDto, orderData);
+        // Same options as the global ValidationPipe in main.ts
+        const errors = await validate(dto, {
+          whitelist: true,
+          forbidNonWhitelisted: true,
+        });
 
-      // Should have validation error for invalid payment status
-      expect(errors.length).toBeGreaterThan(0);
-      const paymentStatusError = errors.find(
-        (e) => e.property === 'paymentStatus',
-      );
-      expect(paymentStatusError).toBeDefined();
+        const paymentStatusError = errors.find(
+          (e) => e.property === 'paymentStatus',
+        );
+        expect(paymentStatusError).toBeDefined();
+      }
     });
   });
 });
