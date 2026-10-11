@@ -61,7 +61,7 @@ function Node({ name, value, depth }: { name: string; value: unknown; depth: num
             >
                 <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform duration-150', open && 'rotate-90')} aria-hidden />
                 <span className="text-muted-foreground">{name}:</span>
-                <span className="text-xs text-muted-foreground/80">{summary}</span>
+                <span className="text-xs text-muted-foreground">{summary}</span>
             </button>
             {open && size > 0 ? (
                 <ul role="group">

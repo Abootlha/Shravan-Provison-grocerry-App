@@ -98,6 +98,11 @@ export interface DataTableProps<TData, TValue = unknown> {
     toolbar?: React.ReactNode;
     /** Right side of the toolbar, before the Columns menu. */
     toolbarActions?: React.ReactNode;
+    /**
+     * Makes each row open something (detail sheet, editor). Rows become focusable: Enter or Space
+     * opens, ↑/↓ move between rows. Clicks on buttons, links and inputs inside the row keep their
+     * own behaviour.
+     */
     onRowClick?: (row: TData) => void;
     pageSizeOptions?: number[];
     /** Scroll area height cap; the header sticks inside it. Default: viewport minus chrome. */
@@ -105,6 +110,28 @@ export interface DataTableProps<TData, TValue = unknown> {
     /** Accessible name for the table. */
     label: string;
     className?: string;
+}
+
+const INTERACTIVE = 'a, button, input, select, textarea, label, [role="checkbox"], [role="menuitem"], [role="switch"], [role="combobox"]';
+
+/** True when the event came from a control inside the row rather than the row itself. */
+function fromInnerControl(event: React.SyntheticEvent<HTMLElement>) {
+    const hit = (event.target as HTMLElement).closest(INTERACTIVE);
+    return !!hit && hit !== event.currentTarget && event.currentTarget.contains(hit);
+}
+
+function handleRowKeyDown(event: React.KeyboardEvent<HTMLTableRowElement>, open: () => void) {
+    if (event.target !== event.currentTarget) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        open();
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        const sibling = event.key === 'ArrowDown' ? event.currentTarget.nextElementSibling : event.currentTarget.previousElementSibling;
+        if (sibling instanceof HTMLElement && sibling.tabIndex === 0) {
+            event.preventDefault();
+            sibling.focus();
+        }
+    }
 }
 
 function defaultRowId(row: unknown, index: number) {
@@ -337,10 +364,22 @@ export function DataTable<TData, TValue = unknown>({
                                   <TableRow
                                       key={row.id}
                                       data-state={row.getIsSelected() ? 'selected' : undefined}
-                                      onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+                                      tabIndex={onRowClick ? 0 : undefined}
+                                      onClick={
+                                          onRowClick
+                                              ? (event) => {
+                                                    if (fromInnerControl(event)) return;
+                                                    // Selecting text in a cell should not open the row.
+                                                    if (window.getSelection()?.toString()) return;
+                                                    onRowClick(row.original);
+                                                }
+                                              : undefined
+                                      }
+                                      onKeyDown={onRowClick ? (event) => handleRowKeyDown(event, () => onRowClick(row.original)) : undefined}
                                       className={cn(
                                           'data-[state=selected]:bg-brand-tint/60',
-                                          onRowClick && 'cursor-pointer',
+                                          onRowClick &&
+                                              'cursor-pointer focus-visible:bg-muted/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
                                       )}
                                   >
                                       {row.getVisibleCells().map((cell) => {
@@ -377,7 +416,7 @@ function ColumnToggle<TData>({ table }: { table: TanstackTable<TData> }) {
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" aria-label="Columns">
                     <Columns3 aria-hidden />
                     <span className="hidden sm:inline">Columns</span>
                 </Button>

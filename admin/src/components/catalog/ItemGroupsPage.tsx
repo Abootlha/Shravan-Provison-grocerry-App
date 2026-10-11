@@ -40,7 +40,6 @@ import { RowActions } from './RowActions';
 import { imageSchema } from './schemas';
 import { refId, refName, type Category, type ItemGroup, type Subcategory } from './types';
 import { useCatalogSearch } from './useCatalogSearch';
-import { SHEET_WIDTH } from './parts';
 import { useClientTable } from './useClientTable';
 
 const ALL = 'all';
@@ -458,7 +457,6 @@ function ItemGroupsPage() {
             <FormSheet
                 open={formOpen}
                 onOpenChange={setFormOpen}
-                className={SHEET_WIDTH}
                 title={editing ? `Edit ${editing.name}` : 'New item group'}
                 schema={schema}
                 defaultValues={{

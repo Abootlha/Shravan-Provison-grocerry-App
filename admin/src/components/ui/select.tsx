@@ -6,9 +6,30 @@ import { Select as SelectPrimitive } from "radix-ui"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
 function Select({
+  value,
+  onValueChange,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Root>) {
-  return <SelectPrimitive.Root data-slot="select" {...props} />
+  // Inside a <form>, Radix mirrors the value into a hidden native <select>. When the value is set
+  // in the same render its options first mount (form.reset() with async options), that <select>
+  // has no matching <option> yet, falls back to "" and Radix reports "" as a change, silently
+  // clearing the field. No SelectItem can have the value "" (Radix forbids it), so an empty change
+  // while a value is held is always that artifact and is dropped here, for every Select.
+  const handleValueChange = React.useCallback(
+    (next: string) => {
+      if (next === "" && value) return
+      onValueChange?.(next)
+    },
+    [value, onValueChange]
+  )
+  return (
+    <SelectPrimitive.Root
+      data-slot="select"
+      value={value}
+      onValueChange={handleValueChange}
+      {...props}
+    />
+  )
 }
 
 function SelectGroup({

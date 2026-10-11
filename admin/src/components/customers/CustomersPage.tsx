@@ -69,7 +69,7 @@ function CustomersPage() {
     const [sorting, setSorting] = React.useState<SortingState>([]);
     const [openId, setOpenId] = React.useState<string | null>(null);
     const mobile = useIsMobile();
-    const columnVisibility = React.useMemo(() => (mobile ? { createdAt: false } : {}), [mobile]);
+    const columnVisibility = React.useMemo(() => ({ createdAt: !mobile }), [mobile]);
 
     useCustomerSearchProvider();
 

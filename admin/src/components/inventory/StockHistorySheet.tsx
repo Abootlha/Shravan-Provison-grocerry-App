@@ -50,7 +50,7 @@ export function StockHistorySheet({
 
     return (
         <Sheet open={open} onOpenChange={onOpenChange}>
-            <SheetContent className="gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-md">
+            <SheetContent size="md" className="gap-0 p-0">
                 <SheetHeader className="border-b p-4 pr-12">
                     <SheetTitle>Stock history</SheetTitle>
                     <SheetDescription className="line-clamp-2">

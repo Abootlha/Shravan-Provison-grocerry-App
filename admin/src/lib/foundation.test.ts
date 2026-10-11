@@ -39,7 +39,12 @@ describe('nav matching', () => {
         expect(isNavItemActive('/orders', '/orders', '')).toBe(true);
         expect(isNavItemActive('/orders', '/orders', '?status=completed')).toBe(false);
         expect(isNavItemActive('/orders?status=completed', '/orders/', '?status=completed')).toBe(true);
-        expect(findNavLocation('/orders', '?status=returns')?.item.title).toBe('Cancelled & returns');
+        expect(findNavLocation('/orders', '?status=cancelled')?.item.title).toBe('Cancelled');
+        // Old links keep working and keep the item highlighted.
+        expect(findNavLocation('/orders', '?status=returns')?.item.title).toBe('Cancelled');
+        expect(findNavLocation('/orders', '?status=all')?.item.title).toBe('All orders');
+        expect(findNavLocation('/orders', '?status=bogus')?.item.title).toBe('Orders');
+        expect(findNavLocation('/orders', '?id=abc')?.item.title).toBe('Live orders');
         expect(findNavLocation('/products', '?action=new')?.group.label).toBe('Catalog');
     });
 });

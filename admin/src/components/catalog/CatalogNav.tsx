@@ -40,7 +40,7 @@ export function CatalogNav({ current }: { current: CatalogLevel }) {
                             >
                                 <span className="sr-only">Level {i + 1}: </span>
                                 {level.label}
-                                <span className={cn('tabular-nums text-xs', active ? 'text-muted-foreground' : 'text-muted-foreground/80')}>
+                                <span className="text-xs tabular-nums text-muted-foreground">
                                     {counts[level.key] === undefined ? '' : formatNumber(counts[level.key])}
                                 </span>
                             </a>

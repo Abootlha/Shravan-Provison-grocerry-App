@@ -64,7 +64,8 @@ export function ProductEditor({
     return (
         <Sheet open={!!target} onOpenChange={(open) => !open && requestClose()}>
             <SheetContent
-                className="gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-3xl data-[side=right]:xl:max-w-4xl"
+                size="xl"
+                className="gap-0 p-0 sm:max-w-3xl xl:max-w-4xl"
                 onInteractOutside={(e) => e.preventDefault()}
                 onOpenAutoFocus={(e) => {
                     // Focus the first field instead of the first section link.
@@ -98,9 +99,8 @@ function EditorBody({
     );
     const form = useZodForm(productSchema, initial) as Form;
     const initialRef = React.useRef(initial);
-    // Fields mount only after the form holds the product's values: a Radix Select whose value
-    // changes in the same render its options first appear resets itself to "" (its hidden native
-    // <select> has no matching option yet), which would silently clear the category.
+    // Fields mount only after the form holds the product's values, so the editor never flashes an
+    // empty form (or lets Save run) between the product arriving and form.reset().
     const [ready, setReady] = React.useState(isCreate);
 
     React.useEffect(() => {

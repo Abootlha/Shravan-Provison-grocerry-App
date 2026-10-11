@@ -99,7 +99,7 @@ export function BannerForm({
         <FormSheet
             open={open}
             onOpenChange={onOpenChange}
-            className="data-[side=right]:w-full data-[side=right]:sm:max-w-xl"
+            size="xl"
             title={banner ? 'Edit banner' : 'New banner'}
             description="Banners run across the top of the customer app’s home screen."
             schema={bannerSchema}

@@ -55,6 +55,29 @@ describe('DataTable', () => {
         await userEvent.click(screen.getByRole('button', { name: /try again/i }));
         expect(retry).toHaveBeenCalled();
     });
+
+    it('makes clickable rows reachable and operable by keyboard', async () => {
+        const open = vi.fn();
+        const data = [
+            { _id: '1', name: 'Atta 5kg', qty: 4 },
+            { _id: '2', name: 'Rice 1kg', qty: 9 },
+        ];
+        const withButton: ColumnDef<Row>[] = [
+            ...columns,
+            { id: 'act', cell: () => <button type="button">Inner</button> },
+        ];
+        render(<DataTable label="Products" columns={withButton} data={data} onRowClick={open} enableColumnToggle={false} />);
+        const first = screen.getByText('Atta 5kg').closest('tr')!;
+        expect(first).toHaveAttribute('tabindex', '0');
+        first.focus();
+        await userEvent.keyboard('{ArrowDown}');
+        expect(document.activeElement).toBe(screen.getByText('Rice 1kg').closest('tr'));
+        await userEvent.keyboard('{Enter}');
+        expect(open).toHaveBeenLastCalledWith(data[1]);
+        open.mockClear();
+        await userEvent.click(screen.getAllByRole('button', { name: 'Inner' })[0]);
+        expect(open).not.toHaveBeenCalled();
+    });
 });
 
 describe('StatCard and StatusBadge', () => {

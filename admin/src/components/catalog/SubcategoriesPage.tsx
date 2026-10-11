@@ -38,7 +38,6 @@ import { RowActions } from './RowActions';
 import { imageSchema } from './schemas';
 import { refId, refName, type Category, type Subcategory } from './types';
 import { useCatalogSearch } from './useCatalogSearch';
-import { SHEET_WIDTH } from './parts';
 import { useClientTable } from './useClientTable';
 
 const DEFAULT_TILE_COLOR = '#F2F2F0';
@@ -406,7 +405,6 @@ function SubcategoriesPage() {
             <FormSheet
                 open={formOpen}
                 onOpenChange={setFormOpen}
-                className={SHEET_WIDTH}
                 title={editing ? `Edit ${editing.name}` : 'New subcategory'}
                 schema={schema}
                 defaultValues={{

@@ -57,10 +57,11 @@ function sortParam(sorting: SortingState): OrderSort {
 }
 
 /**
- * The tab lives in ?status= so the sidebar links (/orders?status=completed, ?status=returns)
- * open the matching tab and stay highlighted. ?id= opens an order (used by links and ⌘K).
+ * The tab lives in ?status= so the sidebar links (/orders?status=completed, ?status=cancelled)
+ * open the matching tab and stay highlighted. ?status=returns is the old name for Cancelled and
+ * still opens it. ?id= opens an order (used by links and ⌘K).
  */
-const TAB_PARAM: Record<OrdersTab, string | null> = { live: null, completed: 'completed', cancelled: 'returns', all: 'all' };
+const TAB_PARAM: Record<OrdersTab, string | null> = { live: null, completed: 'completed', cancelled: 'cancelled', all: 'all' };
 const PARAM_TAB: Record<string, OrdersTab> = { completed: 'completed', delivered: 'completed', returns: 'cancelled', cancelled: 'cancelled', all: 'all', live: 'live' };
 
 function initialUrlState(): { tab: OrdersTab; id: string | null } {
@@ -304,7 +305,7 @@ function OrdersPage() {
                 <Tabs value={filters.tab} onValueChange={(v) => isOrdersTab(v) && updateFilters({ tab: v, statuses: [] })}>
                     <TabsList>
                         {TABS.map((tab) => (
-                            <TabsTrigger key={tab.value} value={tab.value} className="px-3">
+                            <TabsTrigger key={tab.value} value={tab.value} className="px-3" aria-controls="orders-panel">
                                 {tab.label}
                                 {tab.value === 'live' && liveCount.data ? (
                                     <span className="rounded bg-muted-foreground/15 px-1.5 text-xs tabular-nums">{formatNumber(liveCount.data)}</span>
@@ -315,6 +316,8 @@ function OrdersPage() {
                 </Tabs>
             </PageHeader>
 
+            {/* One panel serves every tab: the tabs only change the query. */}
+            <div id="orders-panel" role="tabpanel" aria-label={`${TABS.find((t) => t.value === filters.tab)?.label ?? 'Live'} orders`}>
             <DataTable<Order>
                 label="Orders"
                 columns={columns}
@@ -343,6 +346,7 @@ function OrdersPage() {
                 empty={empty}
                 onRowClick={(order) => openOrder(order._id)}
             />
+            </div>
 
             <OrderDetailSheet orderId={openId} onOpenChange={(open) => !open && setOpenId(null)} />
         </PageContainer>

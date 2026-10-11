@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useLiftToasts } from '@/components/ui/sonner';
 import { errorMessage } from '@/lib/http';
 import { queryClient, queryKeys } from '@/lib/query';
 import { cn } from '@/lib/utils';
@@ -385,8 +386,10 @@ function SaveBar({
     error?: string;
     onDiscard: () => void;
 }) {
+    const ref = React.useRef<HTMLDivElement>(null);
+    useLiftToasts(ref);
     return (
-        <div className="sticky bottom-3 z-30 transition-[opacity,translate] duration-200 ease-out starting:translate-y-2 starting:opacity-0 motion-reduce:transition-none">
+        <div ref={ref} className="sticky bottom-3 z-30 transition-[opacity,translate] duration-200 ease-out starting:translate-y-2 starting:opacity-0 motion-reduce:transition-none">
             <div className="flex flex-col gap-3 rounded-xl bg-popover px-4 py-3 text-popover-foreground shadow-float ring-1 ring-border sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0 text-sm" role="status">
                     <p className="font-medium">Unsaved changes</p>

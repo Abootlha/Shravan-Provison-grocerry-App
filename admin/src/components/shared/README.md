@@ -218,6 +218,3 @@ only for actions and selection), `bg-brand-tint` (selected row/chip), `text-succ
 `bg-success-tint`, `text-warning` + `bg-warning-tint`, `text-destructive` + `bg-destructive-tint`,
 `chart-1…5`, `shadow-float` (only for things that float), `tabular-nums`. Cards are flat with a
 hairline; no gradients, glow or blur.
-
-`src/styles/legacy.css` only exists to keep unconverted pages readable; do not use its classes or
-`var(--text-primary)`-style variables in new code, and delete the file when the last page is rebuilt.

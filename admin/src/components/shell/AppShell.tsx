@@ -136,7 +136,7 @@ function Navigation({ pathname, search }: { pathname: string; search: string }) 
                     <SidebarGroupContent>
                         <SidebarMenu>
                             {group.items.map((item) => {
-                                const active = isNavItemActive(item.href, pathname, search);
+                                const active = isNavItemActive(item, pathname, search);
                                 return (
                                     <SidebarMenuItem key={item.href}>
                                         <SidebarMenuButton
@@ -253,6 +253,7 @@ function ShellInner({ title, pathname: serverPathname, breadcrumbs, children }: 
         if (breadcrumbs?.length) return breadcrumbs;
         const location = findNavLocation(pathname, search);
         if (!location) return [{ label: title }];
+        if (location.item.title === location.group.label) return [{ label: location.item.title }];
         return [{ label: location.group.label }, { label: location.item.title }];
     }, [breadcrumbs, pathname, search, title]);
 
@@ -282,7 +283,7 @@ function ShellInner({ title, pathname: serverPathname, breadcrumbs, children }: 
             <OverlayBoundary>
                 <ConfirmHost />
             </OverlayBoundary>
-            <Toaster position="bottom-right" />
+            <Toaster />
         </SidebarProvider>
     );
 }

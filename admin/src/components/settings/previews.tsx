@@ -127,26 +127,26 @@ export function BillPreview({ fees }: { fees: Partial<Fees> }) {
                 </span>
             </label>
             {bill ? (
-                <dl className="mt-3 grid gap-1.5 text-sm">
-                    <Line label="Items" value={formatMoney(bill.itemTotal)} />
-                    <Line
-                        label="Delivery"
-                        value={bill.freeDelivery ? 'Free' : formatMoney(bill.deliveryFee)}
-                        valueClassName={bill.freeDelivery ? 'text-success-text' : undefined}
-                    />
-                    <Line label="Packaging" value={formatMoney(bill.packagingFee)} />
-                    {bill.discount > 0 ? (
-                        <Line label={`Discount (${percent}%)`} value={`−${formatMoney(bill.discount)}`} valueClassName="text-success-text" />
-                    ) : null}
-                    <div className="mt-1 border-t pt-2">
-                        <Line label="Customer pays" value={formatMoney(bill.totalAmount)} strong />
-                    </div>
+                <div className="mt-3 grid gap-1.5 text-sm">
+                    <dl className="grid gap-1.5">
+                        <Line label="Items" value={formatMoney(bill.itemTotal)} />
+                        <Line
+                            label="Delivery"
+                            value={bill.freeDelivery ? 'Free' : formatMoney(bill.deliveryFee)}
+                            valueClassName={bill.freeDelivery ? 'text-success-text' : undefined}
+                        />
+                        <Line label="Packaging" value={formatMoney(bill.packagingFee)} />
+                        {bill.discount > 0 ? (
+                            <Line label={`Discount (${percent}%)`} value={`−${formatMoney(bill.discount)}`} valueClassName="text-success-text" />
+                        ) : null}
+                        <Line label="Customer pays" value={formatMoney(bill.totalAmount)} strong className="mt-1 border-t pt-2" />
+                    </dl>
                     {shortBy > 0 ? (
                         <p className="mt-1 text-xs text-muted-foreground">
                             {formatMoney(shortBy)} more in the cart makes delivery free.
                         </p>
                     ) : null}
-                </dl>
+                </div>
             ) : (
                 <p className="mt-3 text-sm text-muted-foreground">Fill in all four fees to see the bill.</p>
             )}
@@ -154,9 +154,21 @@ export function BillPreview({ fees }: { fees: Partial<Fees> }) {
     );
 }
 
-function Line({ label, value, strong, valueClassName }: { label: string; value: string; strong?: boolean; valueClassName?: string }) {
+function Line({
+    label,
+    value,
+    strong,
+    valueClassName,
+    className,
+}: {
+    label: string;
+    value: string;
+    strong?: boolean;
+    valueClassName?: string;
+    className?: string;
+}) {
     return (
-        <div className="flex items-baseline justify-between gap-4">
+        <div className={cn('flex items-baseline justify-between gap-4', className)}>
             <dt className={cn(strong ? 'font-semibold text-foreground' : 'text-muted-foreground')}>{label}</dt>
             <dd className={cn('tabular-nums', strong ? 'font-semibold text-foreground' : 'text-foreground', valueClassName)}>{value}</dd>
         </div>

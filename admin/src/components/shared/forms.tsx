@@ -87,6 +87,8 @@ interface FormContainerProps<TSchema extends AnyZodObject> {
     /** Fields. Receives the form so fields can be bound with `control={form.control}`. */
     children: (form: UseFormReturn<z.input<TSchema>, unknown, z.output<TSchema>>) => React.ReactNode;
     className?: string;
+    /** FormSheet only: sheet width from `sm` up (default `lg`, 32rem). */
+    size?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
 function useContainerForm<TSchema extends AnyZodObject>({
@@ -164,11 +166,11 @@ export function FormDialog<TSchema extends AnyZodObject>(props: FormContainerPro
 
 /** A longer form in a right-hand sheet (full width on phones). Body scrolls, footer stays. */
 export function FormSheet<TSchema extends AnyZodObject>(props: FormContainerProps<TSchema>) {
-    const { open, onOpenChange, title, description, submitLabel = 'Save', children, className } = props;
+    const { open, onOpenChange, title, description, submitLabel = 'Save', children, className, size = 'lg' } = props;
     const { form, handleSubmit } = useContainerForm(props);
     return (
         <Sheet open={open} onOpenChange={(next) => !form.formState.isSubmitting && onOpenChange(next)}>
-            <SheetContent className={cn('w-full gap-0 p-0 sm:max-w-lg', className)}>
+            <SheetContent size={size} className={cn('gap-0 p-0', className)}>
                 <form onSubmit={handleSubmit} noValidate className="flex h-full min-h-0 flex-col">
                     <SheetHeader className="border-b p-4 pr-12">
                         <SheetTitle>{title}</SheetTitle>
@@ -309,10 +311,15 @@ export function SelectField<T extends FieldValues>({
             name={name}
             render={({ field, fieldState }) => {
                 const id = `${String(name)}-field`;
+                const value: string = field.value ?? '';
+                // Label comes from the options, not from Radix's mounted items, so a value that
+                // arrives before (or without) its option still reads as something.
+                const selected = value ? options.find((o) => o.value === value) : undefined;
+                const shown = value ? (selected?.label ?? (options.length ? 'Unavailable option' : 'Loading…')) : undefined;
                 return (
                     <Field data-invalid={fieldState.invalid || undefined} className={className}>
                         <FieldLabel htmlFor={id}>{label}</FieldLabel>
-                        <Select value={field.value ?? ''} onValueChange={field.onChange} disabled={disabled} name={field.name}>
+                        <Select value={value} onValueChange={field.onChange} disabled={disabled} name={field.name}>
                             <SelectTrigger
                                 id={id}
                                 ref={field.ref}
@@ -321,7 +328,7 @@ export function SelectField<T extends FieldValues>({
                                 aria-invalid={fieldState.invalid || undefined}
                                 aria-describedby={`${id}-help`}
                             >
-                                <SelectValue placeholder={placeholder} />
+                                <SelectValue placeholder={placeholder}>{shown}</SelectValue>
                             </SelectTrigger>
                             <SelectContent>
                                 {options.map((option) => (

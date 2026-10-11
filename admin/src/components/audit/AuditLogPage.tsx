@@ -61,7 +61,7 @@ function AuditDetailSheet({ log, onClose }: { log: AuditLog | null; onClose: () 
     const changes = log?.diff?.changes;
     return (
         <Sheet open={!!log} onOpenChange={(open) => !open && onClose()}>
-            <SheetContent className="w-full gap-0 p-0 sm:max-w-lg">
+            <SheetContent size="lg" className="gap-0 p-0">
                 {log && described ? (
                     <>
                         <SheetHeader className="border-b p-4 pr-12">
@@ -131,7 +131,7 @@ function AuditLogPage() {
     const admin = isAdminRole(user);
     // Phones: the sentence is what matters; who and area fold into it.
     const mobile = useIsMobile();
-    const columnVisibility = React.useMemo(() => (mobile ? { actor: false, area: false } : {}), [mobile]);
+    const columnVisibility = React.useMemo(() => ({ actor: !mobile, area: !mobile }), [mobile]);
 
     const [actorId, setActorId] = React.useState<string>(ALL);
     const [entity, setEntity] = React.useState<string>(ALL);

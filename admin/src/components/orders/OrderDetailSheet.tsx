@@ -44,7 +44,8 @@ export function OrderDetailSheet({ orderId, onOpenChange }: OrderDetailSheetProp
         <Sheet open={Boolean(orderId)} onOpenChange={onOpenChange}>
             <SheetContent
                 side="right"
-                className="w-full gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-xl"
+                size="xl"
+                className="gap-0 p-0"
                 aria-describedby={undefined}
             >
                 {shownId ? <OrderDetailBody id={shownId} /> : null}

@@ -37,7 +37,6 @@ import { ActiveSwitch } from './ActiveSwitch';
 import { SortableList } from './SortableList';
 import { refId, type Category } from './types';
 import { useCatalogSearch } from './useCatalogSearch';
-import { SHEET_WIDTH } from './parts';
 import { imageSchema } from './schemas';
 
 /** New categories get a neutral tile colour; the app no longer tints tiles per category. */
@@ -354,7 +353,6 @@ function CategoriesPage() {
             <FormSheet
                 open={formOpen}
                 onOpenChange={setFormOpen}
-                className={SHEET_WIDTH}
                 title={editing ? `Edit ${editing.name}` : 'New category'}
                 description={editing ? undefined : 'Customers see the English and Hindi names on the home screen and in browse.'}
                 schema={schema}

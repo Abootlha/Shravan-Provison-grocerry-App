@@ -262,7 +262,7 @@ export function BilingualName({ name, nameHi, inactive }: { name: string; nameHi
                     {nameHi}
                 </span>
             ) : (
-                <span className="text-xs text-muted-foreground/70">No Hindi name</span>
+                <span className="text-xs text-muted-foreground">No Hindi name</span>
             )}
         </span>
     );
@@ -313,6 +313,3 @@ export function SearchInput({
         </div>
     );
 }
-
-/** The sheet primitive is 3/4 wide on phones; catalogue forms need the full width there. */
-export const SHEET_WIDTH = 'data-[side=right]:w-full data-[side=right]:sm:max-w-lg';

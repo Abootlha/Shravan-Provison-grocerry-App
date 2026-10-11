@@ -84,7 +84,7 @@ export function RiderDetailSheet({
 
     return (
         <Sheet open={open} onOpenChange={onOpenChange}>
-            <SheetContent className="w-full gap-0 p-0 sm:max-w-md">
+            <SheetContent size="md" className="gap-0 p-0">
                 {rider ? (
                     <>
                         <SheetHeader className="border-b p-4 pr-12">

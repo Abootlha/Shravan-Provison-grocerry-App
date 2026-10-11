@@ -209,7 +209,7 @@ function TeamPage() {
                 accessorKey: 'email',
                 header: 'Email',
                 meta: { label: 'Email', className: 'max-w-56 truncate text-muted-foreground' },
-                cell: ({ row }) => row.original.email || <span className="text-muted-foreground/70">Not set</span>,
+                cell: ({ row }) => row.original.email || <span className="text-muted-foreground">Not set</span>,
             },
             {
                 accessorKey: 'createdAt',

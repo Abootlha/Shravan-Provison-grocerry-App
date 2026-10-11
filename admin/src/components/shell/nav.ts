@@ -1,4 +1,5 @@
 import {
+    Ban,
     BarChart3,
     Bike,
     Boxes,
@@ -13,7 +14,6 @@ import {
     Radio,
     Store,
     Tags,
-    Undo2,
     UserCog,
     Users,
 } from 'lucide-react';
@@ -24,6 +24,8 @@ export interface NavItem {
     icon: LucideIcon;
     /** Extra words the command palette should match. */
     keywords?: string[];
+    /** Other ?status= values that open the same page (old links, synonyms). */
+    aliases?: string[];
 }
 
 export interface NavGroup {
@@ -42,9 +44,9 @@ export const NAV_GROUPS: NavGroup[] = [
     {
         label: 'Orders',
         items: [
-            { title: 'Live orders', href: '/orders', icon: Radio, keywords: ['pending', 'active', 'new'] },
-            { title: 'Completed', href: '/orders?status=completed', icon: CircleCheck, keywords: ['delivered', 'history'] },
-            { title: 'Cancelled & returns', href: '/orders?status=returns', icon: Undo2, keywords: ['refund', 'cancel'] },
+            { title: 'Live orders', href: '/orders', icon: Radio, keywords: ['pending', 'active', 'new'], aliases: ['live'] },
+            { title: 'Delivered', href: '/orders?status=completed', icon: CircleCheck, keywords: ['completed', 'history'], aliases: ['delivered'] },
+            { title: 'Cancelled', href: '/orders?status=cancelled', icon: Ban, keywords: ['refund', 'cancel', 'returns'], aliases: ['returns'] },
         ],
     },
     {
@@ -75,6 +77,14 @@ export const NAV_GROUPS: NavGroup[] = [
     },
 ];
 
+/**
+ * Query-param tabs that have no sidebar entry but still need their own breadcrumb, so
+ * /orders?status=all reads "All orders" instead of borrowing "Live orders".
+ */
+const UNLISTED_LOCATIONS: { group: string; item: NavItem }[] = [
+    { group: 'Orders', item: { title: 'All orders', href: '/orders?status=all', icon: Radio } },
+];
+
 function parseHref(href: string) {
     const [pathname, search = ''] = href.split('?');
     return { pathname, status: new URLSearchParams(search).get('status') };
@@ -84,26 +94,35 @@ function normalizePath(pathname: string) {
     return pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
 }
 
-/** True when `href` is the page at `pathname` + `search`. Query-less items match only without a status filter. */
-export function isNavItemActive(href: string, pathname: string, search: string): boolean {
+/**
+ * True when `item` is the page at `pathname` + `search`. A query-less item matches only without a
+ * status filter (or one of its `aliases`); an item with ?status=x matches x or its aliases.
+ */
+export function isNavItemActive(item: NavItem | string, pathname: string, search: string): boolean {
+    const { href, aliases = [] } = typeof item === 'string' ? { href: item } : item;
     const target = parseHref(href);
     if (target.pathname !== normalizePath(pathname)) return false;
-    const status = new URLSearchParams(search).get('status');
-    return (target.status ?? null) === (status ?? null);
+    const status = new URLSearchParams(search).get('status') || null;
+    return status === target.status || (status !== null && aliases.includes(status));
 }
 
 /** Group and item for the current location (for breadcrumbs). Falls back to a pathname-only match. */
 export function findNavLocation(pathname: string, search: string): { group: NavGroup; item: NavItem } | null {
     for (const group of NAV_GROUPS) {
         for (const item of group.items) {
-            if (isNavItemActive(item.href, pathname, search)) return { group, item };
+            if (isNavItemActive(item, pathname, search)) return { group, item };
         }
     }
+    for (const extra of UNLISTED_LOCATIONS) {
+        const group = NAV_GROUPS.find((g) => g.label === extra.group);
+        if (group && isNavItemActive(extra.item, pathname, search)) return { group, item: extra.item };
+    }
+    // Unknown ?status= value: name the page by its group rather than claiming a specific tab.
     const path = normalizePath(pathname);
     for (const group of NAV_GROUPS) {
-        for (const item of group.items) {
-            if (parseHref(item.href).pathname === path) return { group, item };
-        }
+        const items = group.items.filter((item) => parseHref(item.href).pathname === path);
+        if (items.length === 1) return { group, item: items[0] };
+        if (items.length > 1) return { group, item: { ...items[0], title: group.label, href: path } };
     }
     return null;
 }

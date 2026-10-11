@@ -46,7 +46,7 @@ export function CustomerDetailSheet({
 
     return (
         <Sheet open={!!customerId} onOpenChange={onOpenChange}>
-            <SheetContent className="w-full gap-0 p-0 sm:max-w-md">
+            <SheetContent size="md" className="gap-0 p-0">
                 <SheetHeader className="border-b p-4 pr-12">
                     <div className="flex flex-wrap items-center gap-2">
                         <SheetTitle className="text-lg">{c ? (name ?? formatPhone(c.phone)) : 'Customer'}</SheetTitle>
