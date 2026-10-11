@@ -3,10 +3,11 @@
  * (same endpoint as ProductService.searchProducts). Each new query aborts the in-flight
  * request and stale responses are ignored. Hindi names are translated like Home/Category.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { productApi } from '../../services/api';
 import { ENDPOINTS } from '../../services/config';
 import { translateToHindi } from '../../services/translationService';
+import { normalizeProductPage } from '../../services/normalize';
 
 const DEBOUNCE_MS = 250;
 const LIMIT = 40;
@@ -14,6 +15,8 @@ const LIMIT = 40;
 export default function useProductSearch(query, currentLanguage) {
     const [state, setState] = useState({ results: [], total: 0, loading: false, error: null, query: '' });
     const seq = useRef(0);
+    const [attempt, setAttempt] = useState(0);
+    const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
     useEffect(() => {
         const q = query.trim();
@@ -31,7 +34,8 @@ export default function useProductSearch(query, currentLanguage) {
                     params: { search: q, limit: LIMIT },
                     signal: controller?.signal,
                 });
-                let list = res?.data?.products || [];
+                const page = normalizeProductPage(res?.data, 'GET /products?search');
+                let list = page.products;
                 if (currentLanguage === 'hi' && list.length) {
                     try {
                         list = await Promise.all(
@@ -42,7 +46,7 @@ export default function useProductSearch(query, currentLanguage) {
                     }
                 }
                 if (id !== seq.current) return;
-                setState({ results: list, total: res?.data?.total ?? list.length, loading: false, error: null, query: q });
+                setState({ results: list, total: page.total ?? list.length, loading: false, error: null, query: q });
             } catch (err) {
                 if (id !== seq.current || err?.name === 'CanceledError' || err?.name === 'AbortError') return;
                 console.error('Search error:', err);
@@ -54,7 +58,7 @@ export default function useProductSearch(query, currentLanguage) {
             clearTimeout(timer);
             controller?.abort();
         };
-    }, [query, currentLanguage]);
+    }, [query, currentLanguage, attempt]);
 
-    return state;
+    return { ...state, retry };
 }

@@ -13,6 +13,8 @@ import { useTranslation } from '../hooks/useTranslation';
 import { translateToHindi } from '../services/translationService';
 import SubcategoryRail, { RAIL_WIDTH } from './categories/SubcategoryRail';
 import { discountOf, headerThemeFor, nameOf, toCardProduct } from './home/catalog';
+import { getPrice, isInStock } from '../components/product/productUtils';
+import { describeError } from '../services/normalize';
 
 const GRID_PAD = space.md;
 const GRID_GAP = space.sm + space.xxs; // 10 — Part C #7 (8–10)
@@ -124,7 +126,7 @@ const CategoryScreen = ({ route, navigation }) => {
             }
         } catch (err) {
             console.error('Error fetching data:', err);
-            setError('Failed to load data');
+            setError(describeError(err) || 'Failed to load data');
             setLoading(false);
         }
     };
@@ -158,6 +160,7 @@ const CategoryScreen = ({ route, navigation }) => {
         } catch (err) {
             console.error('Error fetching products:', err);
             setProducts([]);
+            setError(describeError(err) || 'Failed to load products');
         } finally {
             setLoading(false);
         }
@@ -176,9 +179,9 @@ const CategoryScreen = ({ route, navigation }) => {
     const cardW = Math.floor((gridW - GRID_PAD * 2 - GRID_GAP) / 2);
 
     const visible = useMemo(() => {
-        let list = inStockOnly ? products.filter((p) => p.isAvailable && p.stock > 0) : products;
-        if (sort === 'priceAsc') list = [...list].sort((a, b) => (a.price || 0) - (b.price || 0));
-        else if (sort === 'priceDesc') list = [...list].sort((a, b) => (b.price || 0) - (a.price || 0));
+        let list = inStockOnly ? products.filter(isInStock) : products;
+        if (sort === 'priceAsc') list = [...list].sort((a, b) => getPrice(a) - getPrice(b));
+        else if (sort === 'priceDesc') list = [...list].sort((a, b) => getPrice(b) - getPrice(a));
         else if (sort === 'discount') list = [...list].sort((a, b) => discountOf(b) - discountOf(a));
         return list;
     }, [products, sort, inStockOnly]);
@@ -261,7 +264,7 @@ const CategoryScreen = ({ route, navigation }) => {
                     <EmptyState
                         mood="sad"
                         title={isHi ? 'यह श्रेणी लोड नहीं हुई' : 'Couldn’t load this aisle'}
-                        subtitle={isHi ? 'इंटरनेट जाँचें और फिर कोशिश करें।' : 'Check your connection and try again.'}
+                        subtitle={__DEV__ ? error : isHi ? 'इंटरनेट जाँचें और फिर कोशिश करें।' : 'Check your connection and try again.'}
                         actionLabel={t('retry')}
                         onAction={fetchData}
                         style={styles.state}

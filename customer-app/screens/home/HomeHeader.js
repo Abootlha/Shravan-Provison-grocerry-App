@@ -15,7 +15,7 @@
  * violet underline is the only state colour.
  */
 import React, { memo, useCallback, useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Alert, Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import Animated, {
@@ -30,6 +30,14 @@ import CategoryTabBar from '../../components/CategoryTabBar';
 import { radii, space, z } from '../../constants/theme';
 import { makeStyles, useTheme } from '../../theme';
 import { press } from '../../theme/motion';
+import { apiConfigSummary } from '../../services/config';
+
+// Dev builds: long-press the avatar to see which backend this build is talking to.
+const showApiDiagnostics = () => {
+    const text = apiConfigSummary().split('  ').join('\n');
+    if (Platform.OS === 'web') window.alert(text);
+    else Alert.alert('API config', text);
+};
 
 const HomeHeader = ({
     theme,
@@ -129,6 +137,7 @@ const HomeHeader = ({
                             </View>
                             <PressableScale
                                 onPress={onProfilePress}
+                                onLongPress={__DEV__ ? showApiDiagnostics : undefined}
                                 haptic="selection"
                                 scaleTo={press.scale}
                                 accessibilityRole="button"

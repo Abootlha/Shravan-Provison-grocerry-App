@@ -24,6 +24,11 @@ const groupById = Object.fromEntries(itemGroups.map((g) => [g._id, g]));
 
 const publicCategory = ({ key, ...c }) => c;
 const publicSub = ({ key, ...s }) => s;
+// Subcategory endpoints mirror .populate('parentId', 'name icon color').
+const populatedSub = (s) => {
+    const parent = categoryById[s.parentId];
+    return { ...publicSub(s), parentId: parent ? { _id: parent._id, name: parent.name, icon: parent.icon, color: parent.color } : s.parentId };
+};
 
 // Mirrors .populate('categoryId', 'name type').populate('subcategoryId', 'name parentId')...
 const populateProduct = (p) => {
@@ -44,14 +49,14 @@ const toInt = (v, fallback) => {
 };
 
 const listProducts = (q) => {
-    let list = products;
+    let list = products.filter((p) => p.isAvailable); // products.service: filter { isAvailable: true }
     if (q.categoryId) list = list.filter((p) => p.categoryId === q.categoryId);
     if (q.subcategoryId) list = list.filter((p) => p.subcategoryId === q.subcategoryId);
     if (q.itemGroupId) list = list.filter((p) => p.itemGroupId === q.itemGroupId);
     if (q.search) {
         const terms = String(q.search).toLowerCase().split(/\s+/).filter(Boolean);
         list = list.filter((p) => {
-            const hay = `${p.name} ${p.brand} ${p.subcategory} ${categoryById[p.categoryId]?.name}`.toLowerCase();
+            const hay = `${p.name} ${p.brand} ${subById[p.subcategoryId]?.name} ${categoryById[p.categoryId]?.name}`.toLowerCase();
             return terms.some((t) => hay.includes(t));
         });
     }
@@ -387,17 +392,17 @@ const routes = [
     ['GET', /^\/categories\/nested$/, () => ok({
         categories: categories.map((c) => ({ ...publicCategory(c), subcategories: subcategories.filter((s) => s.parentId === c._id).map(publicSub) })),
     })],
-    ['GET', /^\/categories\/([^/]+)\/subcategories$/, ({ params }) => ok({ subcategories: subcategories.filter((s) => s.parentId === params[0]).map(publicSub) })],
+    ['GET', /^\/categories\/([^/]+)\/subcategories$/, ({ params }) => ok({ subcategories: subcategories.filter((s) => s.parentId === params[0]).map(populatedSub) })],
     ['GET', /^\/categories\/([^/]+)$/, ({ params }) => {
         const c = categoryById[params[0]];
         return c ? ok({ category: publicCategory(c) }) : fail(404, 'Category not found');
     }],
     ['GET', /^\/subcategories$/, ({ query }) => ok({
-        subcategories: subcategories.filter((s) => !query.parentId || s.parentId === query.parentId).map(publicSub),
+        subcategories: subcategories.filter((s) => !query.parentId || s.parentId === query.parentId).map(populatedSub),
     })],
     ['GET', /^\/subcategories\/([^/]+)$/, ({ params }) => {
         const s = subById[params[0]];
-        return s ? ok({ subcategory: publicSub(s) }) : fail(404, 'Subcategory not found');
+        return s ? ok({ subcategory: populatedSub(s) }) : fail(404, 'Subcategory not found');
     }],
     ['GET', /^\/item-groups$/, ({ query }) => ok({
         itemGroups: itemGroups.filter((g) => !query.subcategoryId || g.subcategoryId === query.subcategoryId),

@@ -337,8 +337,9 @@ export const products = PRODUCT_ROWS.map((row, i) => {
         categoryId: cat._id,
         subcategoryId: sub._id,
         itemGroupId: itemGroups[subIndex]._id,
-        subcategory: sub.name,
-        pricing: { mrp, sellingPrice: price, gst: 5 },
+        // Live rows come in two generations: newer ones carry `pricing`, older ones only
+        // `price`/`originalPrice` (about one in six on the deployed catalogue). Mirror both.
+        ...(i % 6 === 5 ? {} : { pricing: { mrp, sellingPrice: price, gst: 5 } }),
         price,
         originalPrice: mrp,
         pack: { unit, weight },
@@ -361,7 +362,7 @@ export const products = PRODUCT_ROWS.map((row, i) => {
         image,
         description: describe(name, brand, unit, cat.name),
         highlights: highlightsFor(storage),
-        isAvailable: stock > 0,
+        isAvailable: true, // admin toggle; sold-out is stock 0 (the API still lists those)
         rating,
         reviewCount,
         soldCount: Math.round(reviewCount * 3.4),

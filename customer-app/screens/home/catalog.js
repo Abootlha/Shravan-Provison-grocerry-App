@@ -4,6 +4,7 @@
  * header theme lookup.
  */
 import { themes } from '../../constants/theme';
+import { getCategoryId, getImage, getMrp, getPrice, getUnit, isInStock } from '../../components/product/productUtils';
 
 export const idOf = (obj) => {
     if (!obj) return null;
@@ -28,21 +29,21 @@ export const glyphOf = (item, fallback = 'basket-outline') =>
     typeof item?.icon === 'string' && item.icon && !isImageUri(item.icon) && !item.icon.startsWith('data:') ? item.icon : fallback;
 
 export const discountOf = (p) => {
-    const price = Number(p?.price) || 0;
-    const mrp = Number(p?.originalPrice) || 0;
-    return mrp > price ? Math.round((1 - price / mrp) * 100) : 0;
+    const price = getPrice(p);
+    const mrp = getMrp(p);
+    return mrp > price && price > 0 ? Math.round((1 - price / mrp) * 100) : 0;
 };
 
 /** API product -> the `product` prop ProductCard expects (unchanged contract). */
 export const toCardProduct = (item, currentLanguage) => ({
-    id: item._id,
+    id: item._id || item.id,
     name: nameOf(item, currentLanguage),
-    price: item.price,
-    originalPrice: item.originalPrice,
-    unit: item.unit,
-    image: item.image,
-    categoryId: item.categoryId?._id || item.categoryId,
-    inStock: item.isAvailable && item.stock > 0,
+    price: getPrice(item),
+    originalPrice: getMrp(item),
+    unit: getUnit(item),
+    image: getImage(item),
+    categoryId: getCategoryId(item),
+    inStock: isInStock(item),
     discount: discountOf(item),
 });
 

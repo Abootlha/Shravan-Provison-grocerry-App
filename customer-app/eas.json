@@ -11,7 +11,8 @@
         "simulator": true
       },
       "env": {
-        "PUBLIC_NODE_ENV": "development"
+        "PUBLIC_NODE_ENV": "development",
+        "EXPO_ROUTER_DISABLE_RN_NAVIGATION_CHECK": "1"
       }
     },
     "preview": {
@@ -19,8 +20,9 @@
       "env": {
         "NODE_ENV": "production",
         "PUBLIC_NODE_ENV": "production",
-        "API_BASE_URL": "https://api.example.com/api/v1",
-        "TRACKING_URL": "https://api.example.com/tracking"
+        "API_BASE_URL": "https://api.lumioui.com/api/v1",
+        "TRACKING_URL": "https://api.lumioui.com/tracking",
+        "EXPO_ROUTER_DISABLE_RN_NAVIGATION_CHECK": "1"
       }
     },
     "production": {
@@ -28,8 +30,9 @@
       "env": {
         "NODE_ENV": "production",
         "PUBLIC_NODE_ENV": "production",
-        "API_BASE_URL": "https://api.example.com/api/v1",
-        "TRACKING_URL": "https://api.example.com/tracking"
+        "API_BASE_URL": "https://api.lumioui.com/api/v1",
+        "TRACKING_URL": "https://api.lumioui.com/tracking",
+        "EXPO_ROUTER_DISABLE_RN_NAVIGATION_CHECK": "1"
       }
     }
   },

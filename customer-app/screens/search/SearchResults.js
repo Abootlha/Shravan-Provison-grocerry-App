@@ -9,6 +9,7 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import Animated from 'react-native-reanimated';
 import { AnimatedListItem, EmptyState, SectionHeader, SkeletonGroup, Text } from '../../components/ui';
+import { describeError } from '../../services/normalize';
 import { space } from '../../constants/theme';
 import ProductCard from '../../components/ProductCard';
 import ProductCardSkeleton from '../../components/ProductCardSkeleton';
@@ -26,7 +27,7 @@ const Cell = memo(({ item, index, onPress }) => (
 
 const AnimatedFlashList = Animated.createAnimatedComponent(FlashList);
 
-function SearchResults({ query, results, total, loading, matchedCategories, onProductPress, onCategory, onClear, isHi, bottomPad, onScroll }) {
+function SearchResults({ query, results, total, loading, error, onRetry, matchedCategories, onProductPress, onCategory, onClear, isHi, bottomPad, onScroll }) {
     const renderItem = useCallback(
         ({ item, index }) => <Cell item={item} index={index} onPress={onProductPress} />,
         [onProductPress]
@@ -43,6 +44,18 @@ function SearchResults({ query, results, total, loading, matchedCategories, onPr
                     ))}
                 </SkeletonGroup>
             </View>
+        );
+    }
+
+    if (!loading && error && results.length === 0) {
+        return (
+            <EmptyState
+                mood="sad"
+                title={isHi ? 'खोज नहीं हो सकी' : 'Search didn’t load'}
+                subtitle={__DEV__ ? describeError(error) : isHi ? 'इंटरनेट जाँचें और फिर कोशिश करें।' : 'Check your connection and try again.'}
+                actionLabel={isHi ? 'फिर कोशिश करें' : 'Try again'}
+                onAction={onRetry}
+            />
         );
     }
 

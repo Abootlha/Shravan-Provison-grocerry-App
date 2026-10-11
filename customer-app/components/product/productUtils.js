@@ -16,8 +16,9 @@ export const getCategoryId = (p) => {
     return c && typeof c === 'object' ? c._id || c.id : c;
 };
 
-export const getPrice = (p) => Number(p?.price ?? p?.pricing?.sellingPrice) || 0;
-export const getMrp = (p) => Number(p?.originalPrice ?? p?.pricing?.mrp) || 0;
+// Positive values win: an unpriced legacy `price: 0` falls through to `pricing`.
+export const getPrice = (p) => Number(p?.price) || Number(p?.pricing?.sellingPrice) || 0;
+export const getMrp = (p) => Number(p?.originalPrice) || Number(p?.pricing?.mrp) || 0;
 export const getUnit = (p) => p?.unit || p?.pack?.unit || p?.packSize || '';
 export const getImage = (p) => p?.image || (Array.isArray(p?.images) ? p.images[0] : undefined);
 
