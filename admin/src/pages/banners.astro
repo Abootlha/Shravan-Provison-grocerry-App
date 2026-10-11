@@ -1,14 +1,8 @@
 ---
 import AdminLayout from "../layouts/AdminLayout.astro";
-import { BeingBuilt } from "../components/shared/BeingBuilt";
-import { GalleryHorizontalEnd } from "lucide-react";
+import BannersPage from "../components/banners/BannersPage";
 ---
 
 <AdminLayout title="Banners">
-  <BeingBuilt
-    title="Banners"
-    description="Promotional banners shown on the customer app home screen."
-    plannedFor="You will be able to upload banner images, link them to a category or product, schedule them and set their order. Until then the app hides the carousel."
-    icon={GalleryHorizontalEnd}
-  />
+  <BannersPage client:load />
 </AdminLayout>

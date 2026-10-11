@@ -68,7 +68,7 @@ export const NAV_GROUPS: NavGroup[] = [
     {
         label: 'Settings',
         items: [
-            { title: 'Store & delivery', href: '/settings', icon: Store, keywords: ['fees', 'radius', 'timings', 'delivery'] },
+            { title: 'Store & delivery', href: '/settings', icon: Store, keywords: ['fees', 'radius', 'timings', 'hours', 'delivery', 'location', 'map', 'pause', 'gstin', 'contact'] },
             { title: 'Team & roles', href: '/team', icon: UserCog, keywords: ['staff', 'permissions', 'managers'] },
             { title: 'Audit log', href: '/audit-log', icon: History, keywords: ['activity', 'changes'] },
         ],

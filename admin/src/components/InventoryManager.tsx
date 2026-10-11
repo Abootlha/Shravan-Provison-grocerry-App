@@ -1,389 +1,316 @@
-import { useState, useEffect } from 'react';
-import { api } from '../lib/api';
-import { Badge } from './legacy-ui/badge';
-import { Button } from './legacy-ui/button';
-import { Input } from './legacy-ui/input';
-import { Skeleton } from './legacy-ui/Skeleton';
-import { EmptyState } from './legacy-ui/EmptyState';
-import {
-    Package, AlertTriangle, Search, RefreshCw, TrendingDown, ArrowUpDown,
-    ChevronLeft, ChevronRight, Boxes, CheckCircle2, XCircle
-} from 'lucide-react';
+import * as React from 'react';
+import type { ColumnDef, PaginationState, SortingState } from '@tanstack/react-table';
+import { Boxes, History, Plus, Search, SearchX, X } from 'lucide-react';
+import { DataTable, DataTableColumnHeader, DateTime, EmptyState, PageContainer, PageHeader, withProviders } from '@/components/shared';
+import { registerSearchProvider } from '@/components/shell/command-registry';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { formatNumber } from '@/lib/format';
+import { cn } from '@/lib/utils';
+import { AdjustStockDialog, type StockTarget } from './inventory/AdjustStockDialog';
+import { ReorderLevelCell } from './inventory/ReorderLevelCell';
+import { StockHistorySheet } from './inventory/StockHistorySheet';
+import { fetchProducts, useCategories, useProductCounts, useProducts, type ProductListParams } from './products/data';
+import { ProductThumb, StockCell } from './products/ProductBits';
+import { productImage, productStatus, productUnit, refName, type AdminProduct, type ProductStatus } from './products/types';
 
-interface Product {
-    _id: string;
-    name: string;
-    unit: string;
-    stock: number;
-    image?: string;
-    categoryId: { _id: string; name: string } | string;
+type StockFilter = 'all' | 'low' | 'out';
+type StatusFilter = 'active' | 'draft' | 'all';
+
+const SORTABLE = new Set(['name', 'stock', 'soldCount', 'updatedAt']);
+
+function readUrl(): { stock: StockFilter; q: string } {
+    if (typeof window === 'undefined') return { stock: 'all', q: '' };
+    const p = new URLSearchParams(window.location.search);
+    const f = p.get('filter') ?? p.get('stock');
+    return { stock: f === 'low' || f === 'out' ? f : 'all', q: p.get('q') ?? '' };
 }
 
-interface StockStats {
-    total: number;
-    inStock: number;
-    lowStock: number;
-    outOfStock: number;
+function toTarget(p: AdminProduct): StockTarget {
+    return { _id: p._id, name: p.name, stock: p.stock, reorderLevel: p.reorderLevel, unit: productUnit(p) };
 }
 
-export default function InventoryManager() {
-    const [products, setProducts] = useState<Product[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
-    const [search, setSearch] = useState('');
-    const [filter, setFilter] = useState<'all' | 'low' | 'out'>('all');
-    const [page, setPage] = useState(1);
-    const ITEMS_PER_PAGE = 15;
+function InventoryManager() {
+    const initial = React.useMemo(readUrl, []);
+    const [stock, setStock] = React.useState<StockFilter>(initial.stock);
+    const [status, setStatus] = React.useState<StatusFilter>('active');
+    const [search, setSearch] = React.useState(initial.q);
+    const [q, setQ] = React.useState(initial.q);
+    const [categoryId, setCategoryId] = React.useState('');
+    const [pagination, setPagination] = React.useState<PaginationState>({ pageIndex: 0, pageSize: 20 });
+    const [sorting, setSorting] = React.useState<SortingState>([{ id: 'stock', desc: false }]);
+    const [adjusting, setAdjusting] = React.useState<StockTarget | null>(null);
+    const [history, setHistory] = React.useState<StockTarget | null>(null);
 
-    const REORDER_LEVEL = 10;
-    const LOW_STOCK_THRESHOLD = 20;
+    React.useEffect(() => {
+        const t = setTimeout(() => setQ(search.trim()), 300);
+        return () => clearTimeout(t);
+    }, [search]);
 
-    useEffect(() => {
-        fetchData();
-    }, []);
+    const sort = sorting[0] && SORTABLE.has(sorting[0].id) ? `${sorting[0].desc ? '-' : ''}${sorting[0].id}` : undefined;
+    const params: ProductListParams = {
+        page: pagination.pageIndex + 1,
+        limit: pagination.pageSize,
+        q: q || undefined,
+        status: status === 'all' ? undefined : (status as ProductStatus),
+        categoryId: categoryId || undefined,
+        stock: stock === 'all' ? undefined : stock,
+        sort,
+    };
+    const products = useProducts(params);
+    const counts = useProductCounts();
+    const categories = useCategories();
 
-    async function fetchData() {
-        try {
-            const data = await api.getAllProducts();
-            setProducts(data.products || []);
-        } catch (error) {
-            console.error('Error:', error);
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
+    const filterKey = JSON.stringify([stock, status, q, categoryId, sort]);
+    const first = React.useRef(true);
+    React.useEffect(() => {
+        if (first.current) {
+            first.current = false;
+            return;
         }
-    }
+        setPagination((p) => ({ ...p, pageIndex: 0 }));
+    }, [filterKey]);
 
-    const handleRefresh = () => {
-        setRefreshing(true);
-        fetchData();
-    };
+    React.useEffect(() => {
+        const url = new URL(window.location.href);
+        if (stock === 'all') url.searchParams.delete('filter');
+        else url.searchParams.set('filter', stock);
+        url.searchParams.delete('stock');
+        if (q) url.searchParams.set('q', q);
+        else url.searchParams.delete('q');
+        window.history.replaceState(window.history.state, '', url);
+    }, [stock, q]);
 
-    const stats: StockStats = {
-        total: products.length,
-        inStock: products.filter(p => p.stock >= LOW_STOCK_THRESHOLD).length,
-        lowStock: products.filter(p => p.stock > 0 && p.stock < LOW_STOCK_THRESHOLD).length,
-        outOfStock: products.filter(p => p.stock === 0).length,
-    };
+    React.useEffect(
+        () =>
+            registerSearchProvider({
+                id: 'products',
+                group: 'Products',
+                minQueryLength: 2,
+                search: async (query, signal) =>
+                    (await fetchProducts({ page: 1, limit: 8, q: query }, signal)).products.map((p) => ({
+                        id: `product-${p._id}`,
+                        label: p.name,
+                        group: 'Products',
+                        hint: `${formatNumber(p.stock)} in stock`,
+                        href: `/products?id=${p._id}`,
+                    })),
+            }),
+        [],
+    );
 
-    const filteredProducts = products.filter(p => {
-        const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
-        const matchesFilter = filter === 'all' ||
-            (filter === 'low' && p.stock > 0 && p.stock < LOW_STOCK_THRESHOLD) ||
-            (filter === 'out' && p.stock === 0);
-        return matchesSearch && matchesFilter;
-    }).sort((a, b) => a.stock - b.stock);
+    // Keep the open dialogs in sync with the refreshed row (stock changes after an adjustment).
+    const rows = products.data?.products;
+    React.useEffect(() => {
+        if (!rows) return;
+        setHistory((h) => {
+            const fresh = h && rows.find((r) => r._id === h._id);
+            return fresh ? toTarget(fresh) : h;
+        });
+    }, [rows]);
 
-    const paginatedProducts = filteredProducts.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
-    const totalPages = Math.ceil(filteredProducts.length / ITEMS_PER_PAGE) || 1;
-
-    if (loading) {
-        return (
-            <div className="dashboard-bg min-h-screen">
-                <div className="relative z-10 p-6 lg:p-8 space-y-8">
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                        {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24 rounded-2xl" />)}
+    const columns = React.useMemo<ColumnDef<AdminProduct>[]>(
+        () => [
+            {
+                id: 'name',
+                accessorKey: 'name',
+                header: ({ column }) => <DataTableColumnHeader column={column} title="Product" />,
+                enableHiding: false,
+                meta: { className: 'min-w-[11rem] max-w-[24rem] whitespace-normal py-2', label: 'Product' },
+                cell: ({ row }) => {
+                    const p = row.original;
+                    return (
+                        <div className="flex items-center gap-3">
+                            <ProductThumb src={productImage(p)} alt="" size={40} />
+                            <div className="min-w-0">
+                                <p className="line-clamp-2 leading-snug font-medium">{p.name}</p>
+                                <p className="truncate text-xs text-muted-foreground">
+                                    {[productUnit(p).replace(/\s+/g, ' '), productStatus(p) !== 'active' ? (productStatus(p) === 'draft' ? 'Draft' : 'Archived') : ''].filter(Boolean).join(' · ')}
+                                </p>
+                            </div>
+                        </div>
+                    );
+                },
+            },
+            {
+                id: 'category',
+                header: 'Category',
+                enableSorting: false,
+                meta: { label: 'Category', className: 'hidden max-w-[12rem] truncate text-muted-foreground lg:table-cell', headerClassName: 'hidden lg:table-cell' },
+                cell: ({ row }) => refName(row.original.categoryId) || '—',
+            },
+            {
+                id: 'stock',
+                accessorKey: 'stock',
+                header: ({ column }) => <DataTableColumnHeader column={column} title="In stock" />,
+                meta: { align: 'right', label: 'In stock' },
+                cell: ({ row }) => <StockCell stock={row.original.stock} reorderLevel={row.original.reorderLevel} state={row.original.stockState} />,
+            },
+            {
+                id: 'reorderLevel',
+                header: 'Reorder at',
+                enableSorting: false,
+                meta: { align: 'right', label: 'Reorder at' },
+                cell: ({ row }) => <ReorderLevelCell productId={row.original._id} name={row.original.name} value={row.original.reorderLevel ?? 10} />,
+            },
+            {
+                id: 'soldCount',
+                accessorKey: 'soldCount',
+                header: ({ column }) => <DataTableColumnHeader column={column} title="Sold" />,
+                meta: { align: 'right', label: 'Sold', className: 'hidden text-muted-foreground md:table-cell', headerClassName: 'hidden md:table-cell' },
+                cell: ({ row }) => formatNumber(row.original.soldCount ?? 0),
+            },
+            {
+                id: 'updatedAt',
+                accessorKey: 'updatedAt',
+                header: ({ column }) => <DataTableColumnHeader column={column} title="Updated" />,
+                meta: { label: 'Updated', className: 'hidden whitespace-nowrap text-muted-foreground xl:table-cell', headerClassName: 'hidden xl:table-cell' },
+                cell: ({ row }) => <DateTime value={row.original.updatedAt} format="relative" />,
+            },
+            {
+                id: 'actions',
+                enableHiding: false,
+                enableSorting: false,
+                meta: { align: 'right' },
+                cell: ({ row }) => (
+                    <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                        <Button variant="outline" size="sm" onClick={() => setAdjusting(toTarget(row.original))} aria-label={`Adjust stock for ${row.original.name}`}>
+                            <Plus aria-hidden /> <span className="hidden sm:inline">Adjust</span>
+                        </Button>
+                        <Button variant="ghost" size="icon-sm" onClick={() => setHistory(toTarget(row.original))} aria-label={`Stock history for ${row.original.name}`}>
+                            <History aria-hidden />
+                        </Button>
                     </div>
-                    <Skeleton className="h-96 rounded-2xl" />
-                </div>
-            </div>
-        );
-    }
+                ),
+            },
+        ],
+        [],
+    );
+
+    const c = counts.data;
+    const tabs: { id: StockFilter; label: string; count?: number; tone?: 'warning' | 'destructive' }[] = [
+        { id: 'all', label: 'All stock' },
+        { id: 'low', label: 'Low', count: c?.lowStock, tone: 'warning' },
+        { id: 'out', label: 'Out', count: c?.outOfStock, tone: 'destructive' },
+    ];
+    const filtered = !!(q || categoryId || stock !== 'all' || status !== 'active');
+    const clear = () => {
+        setSearch('');
+        setCategoryId('');
+        setStock('all');
+        setStatus('active');
+    };
 
     return (
-        <div className="dashboard-bg min-h-screen">
-            <div className="relative z-10 p-6 lg:p-8 space-y-8">
-
-                {/* Header */}
-                <div className="animate-slide-up delay-1">
-                    <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
-                        <div>
-                            <div className="flex items-center gap-3 mb-2">
-                                <Boxes className="w-5 h-5" style={{ color: 'var(--primary)' }} />
-                                <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
-                                    Stock Control
-                                </span>
-                            </div>
-                            <h1 className="font-display text-4xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
-                                Inventory
-                            </h1>
-                            <p className="mt-2 text-lg" style={{ color: 'var(--text-secondary)' }}>
-                                Monitor stock levels and manage inventory
-                            </p>
-                        </div>
-                        <Button variant="outline" onClick={handleRefresh} disabled={refreshing}>
-                            <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-                            Refresh
-                        </Button>
-                    </div>
-                </div>
-
-                {/* Stats Cards */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 animate-slide-up delay-2">
-                    <div
-                        className={`kpi-card group cursor-pointer ${filter === 'all' ? 'ring-2 ring-[var(--primary)]' : ''}`}
-                        onClick={() => setFilter('all')}
-                    >
-                        <div className="flex items-center gap-4">
-                            <div className="icon-container icon-amber group-hover:scale-110 transition-transform">
-                                <Package className="w-5 h-5" />
-                            </div>
-                            <div>
-                                <p className="metric-value">{stats.total}</p>
-                                <p className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>Total Products</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="kpi-card group">
-                        <div className="flex items-center gap-4">
-                            <div className="icon-container icon-green group-hover:scale-110 transition-transform">
-                                <CheckCircle2 className="w-5 h-5" />
-                            </div>
-                            <div>
-                                <p className="metric-value" style={{ color: 'var(--success)' }}>{stats.inStock}</p>
-                                <p className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>In Stock</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div
-                        className={`kpi-card group cursor-pointer ${filter === 'low' ? 'ring-2 ring-[var(--warning)]' : ''}`}
-                        onClick={() => setFilter(filter === 'low' ? 'all' : 'low')}
-                    >
-                        <div className="flex items-center gap-4">
-                            <div className="icon-container icon-orange group-hover:scale-110 transition-transform">
-                                <TrendingDown className="w-5 h-5" />
-                            </div>
-                            <div>
-                                <p className="metric-value" style={{ color: 'var(--warning)' }}>{stats.lowStock}</p>
-                                <p className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>Low Stock</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div
-                        className={`kpi-card group cursor-pointer ${filter === 'out' ? 'ring-2 ring-[var(--danger)]' : ''}`}
-                        onClick={() => setFilter(filter === 'out' ? 'all' : 'out')}
-                    >
-                        <div className="flex items-center gap-4">
-                            <div className="icon-container icon-red group-hover:scale-110 transition-transform">
-                                <XCircle className="w-5 h-5" />
-                            </div>
-                            <div>
-                                <p className="metric-value" style={{ color: 'var(--danger)' }}>{stats.outOfStock}</p>
-                                <p className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>Out of Stock</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Alert Banner */}
-                {stats.outOfStock > 0 && (
-                    <div
-                        className="animate-slide-up delay-3 p-4 rounded-2xl flex items-center gap-4"
-                        style={{
-                            background: 'var(--danger-light)',
-                            border: '1px solid var(--danger)',
-                            boxShadow: '0 0 20px rgba(239, 68, 68, 0.15)'
-                        }}
-                    >
-                        <div
-                            className="p-3 rounded-xl"
-                            style={{ background: 'var(--danger)', color: '#fff' }}
-                        >
-                            <AlertTriangle className="w-5 h-5" />
-                        </div>
-                        <div className="flex-1">
-                            <p className="font-display font-semibold" style={{ color: 'var(--danger)' }}>
-                                Attention Required
-                            </p>
-                            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                                {stats.outOfStock} product(s) are out of stock and need restocking
-                            </p>
-                        </div>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setFilter('out')}
-                            style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}
-                        >
-                            View Items
-                        </Button>
-                    </div>
-                )}
-
-                {/* Search and Filters */}
-                <div className="flex gap-4 animate-slide-up delay-4">
-                    <div className="relative flex-1 max-w-md">
-                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-muted)' }} />
-                        <Input
-                            placeholder="Search products..."
-                            value={search}
-                            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                            className="pl-11"
-                        />
-                    </div>
-                    <select
-                        value={filter}
-                        onChange={(e) => { setFilter(e.target.value as any); setPage(1); }}
-                        className="px-4 py-2 rounded-xl text-sm font-medium transition-colors"
-                        style={{
-                            background: 'var(--bg-tertiary)',
-                            border: '1px solid var(--border)',
-                            color: 'var(--text-primary)',
-                            outline: 'none'
-                        }}
-                    >
-                        <option value="all">All Stock Levels</option>
-                        <option value="low">Low Stock (&lt;{LOW_STOCK_THRESHOLD})</option>
-                        <option value="out">Out of Stock</option>
-                    </select>
-                </div>
-
-                {/* Inventory Table */}
-                <div
-                    className="rounded-2xl overflow-hidden animate-slide-up delay-5"
-                    style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
-                >
-                    <table className="modern-table">
-                        <thead>
-                            <tr>
-                                <th>Product</th>
-                                <th>Category</th>
-                                <th>
-                                    <div className="flex items-center gap-2">
-                                        Available Stock
-                                        <ArrowUpDown className="w-3 h-3" />
-                                    </div>
-                                </th>
-                                <th>Reorder Level</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {paginatedProducts.length === 0 ? (
-                                <tr>
-                                    <td colSpan={5}>
-                                        <EmptyState type="products" title="No products found" description="Try adjusting your filters" />
-                                    </td>
-                                </tr>
-                            ) : (
-                                paginatedProducts.map((product, index) => {
-                                    const isLowStock = product.stock > 0 && product.stock < LOW_STOCK_THRESHOLD;
-                                    const isOutOfStock = product.stock === 0;
-                                    const needsReorder = product.stock <= REORDER_LEVEL;
-
-                                    return (
-                                        <tr
-                                            key={product._id}
-                                            className="animate-fade-in"
-                                            style={{
-                                                animationDelay: `${index * 0.03}s`,
-                                                background: isOutOfStock ? 'rgba(239, 68, 68, 0.05)' : isLowStock ? 'rgba(245, 158, 11, 0.05)' : 'transparent'
-                                            }}
-                                        >
-                                            <td>
-                                                <div className="flex items-center gap-3">
-                                                    {product.image ? (
-                                                        <img
-                                                            src={product.image}
-                                                            alt={product.name}
-                                                            className="w-11 h-11 rounded-xl object-cover"
-                                                            style={{ border: '1px solid var(--border)' }}
-                                                        />
-                                                    ) : (
-                                                        <div
-                                                            className="w-11 h-11 rounded-xl flex items-center justify-center"
-                                                            style={{ background: 'var(--bg-tertiary)' }}
-                                                        >
-                                                            <Package className="w-5 h-5" style={{ color: 'var(--text-muted)' }} />
-                                                        </div>
-                                                    )}
-                                                    <div>
-                                                        <p className="font-semibold" style={{ color: 'var(--text-primary)' }}>{product.name}</p>
-                                                        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{product.unit}</p>
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td>
-                                                {typeof product.categoryId === 'object' ? product.categoryId?.name : '-'}
-                                            </td>
-                                            <td>
-                                                <span
-                                                    className="text-xl font-display font-bold"
-                                                    style={{
-                                                        color: isOutOfStock ? 'var(--danger)' : isLowStock ? 'var(--warning)' : 'var(--text-primary)'
-                                                    }}
-                                                >
-                                                    {product.stock}
-                                                </span>
-                                                <span className="text-sm ml-1" style={{ color: 'var(--text-muted)' }}>units</span>
-                                            </td>
-                                            <td>
-                                                <span style={{ color: 'var(--text-secondary)' }}>{REORDER_LEVEL} units</span>
-                                                {needsReorder && (
-                                                    <Badge variant="warning" className="ml-2 text-[10px]">Reorder</Badge>
-                                                )}
-                                            </td>
-                                            <td>
-                                                {isOutOfStock ? (
-                                                    <Badge variant="destructive">
-                                                        <AlertTriangle className="w-3 h-3 mr-1" />
-                                                        Out of Stock
-                                                    </Badge>
-                                                ) : isLowStock ? (
-                                                    <Badge variant="warning">
-                                                        <TrendingDown className="w-3 h-3 mr-1" />
-                                                        Low Stock
-                                                    </Badge>
-                                                ) : (
-                                                    <Badge variant="success">In Stock</Badge>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    );
-                                })
+        <PageContainer>
+            <PageHeader title="Inventory" description="Stock on hand for active products. Every adjustment is logged with a reason and who made it.">
+                <div role="tablist" aria-label="Stock level" className="flex w-full gap-1 rounded-xl bg-muted p-1 sm:w-fit">
+                    {tabs.map((t) => (
+                        <button
+                            key={t.id}
+                            role="tab"
+                            type="button"
+                            aria-selected={stock === t.id}
+                            onClick={() => setStock(t.id)}
+                            className={cn(
+                                'flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-medium whitespace-nowrap transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none sm:flex-none',
+                                stock === t.id ? 'bg-card text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.06)]' : 'text-muted-foreground hover:text-foreground',
                             )}
-                        </tbody>
-                    </table>
-
-                    {/* Pagination */}
-                    {filteredProducts.length > 0 && (
-                        <div
-                            className="flex items-center justify-between px-6 py-4"
-                            style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-tertiary)' }}
                         >
-                            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                                Showing {((page - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(page * ITEMS_PER_PAGE, filteredProducts.length)} of {filteredProducts.length} products
-                            </p>
-                            <div className="flex items-center gap-2">
-                                <Button
-                                    variant="outline"
-                                    size="icon"
-                                    className="h-8 w-8"
-                                    onClick={() => setPage(p => Math.max(1, p - 1))}
-                                    disabled={page === 1}
+                            {t.label}
+                            {t.count !== undefined ? (
+                                <span
+                                    className={cn(
+                                        'rounded-md px-1.5 text-xs tabular-nums',
+                                        t.count === 0 ? 'text-muted-foreground' : t.tone === 'destructive' ? 'bg-destructive-tint text-destructive' : 'bg-warning-tint text-warning',
+                                    )}
                                 >
-                                    <ChevronLeft className="w-4 h-4" />
-                                </Button>
-                                <span className="px-3 text-sm" style={{ color: 'var(--text-secondary)' }}>
-                                    Page {page} of {totalPages}
+                                    {formatNumber(t.count)}
                                 </span>
-                                <Button
-                                    variant="outline"
-                                    size="icon"
-                                    className="h-8 w-8"
-                                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                                    disabled={page === totalPages}
-                                >
-                                    <ChevronRight className="w-4 h-4" />
-                                </Button>
-                            </div>
-                        </div>
-                    )}
+                            ) : null}
+                        </button>
+                    ))}
                 </div>
-            </div>
-        </div>
+            </PageHeader>
+
+            <DataTable
+                label="Inventory"
+                columns={columns}
+                data={rows}
+                loading={products.isPending}
+                fetching={products.isFetching}
+                error={products.error ?? undefined}
+                onRetry={() => products.refetch()}
+                pagination={pagination}
+                onPaginationChange={setPagination}
+                rowCount={products.data?.total}
+                sorting={sorting}
+                onSortingChange={setSorting}
+                onRowClick={(p) => setHistory(toTarget(p))}
+                toolbar={
+                    <>
+                        <div className="relative w-full sm:w-64">
+                            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                            <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, brand, barcode or SKU" aria-label="Search stock" className="pl-8" />
+                        </div>
+                        <Select value={categoryId || 'all'} onValueChange={(v) => setCategoryId(v === 'all' ? '' : v)}>
+                            <SelectTrigger className="w-[calc(50%-0.25rem)] sm:w-44" aria-label="Category">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All categories</SelectItem>
+                                {(categories.data ?? []).map((cat) => (
+                                    <SelectItem key={cat._id} value={cat._id}>
+                                        {cat.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
+                            <SelectTrigger className="w-[calc(50%-0.25rem)] sm:w-40" aria-label="Product status">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="active">Active products</SelectItem>
+                                <SelectItem value="draft">Drafts</SelectItem>
+                                <SelectItem value="all">All, incl. archived</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        {filtered ? (
+                            <Button variant="ghost" size="sm" onClick={clear}>
+                                <X aria-hidden /> Clear
+                            </Button>
+                        ) : null}
+                    </>
+                }
+                empty={
+                    filtered ? (
+                        <EmptyState
+                            icon={stock === 'all' ? SearchX : Boxes}
+                            title={stock === 'low' ? 'Nothing is running low' : stock === 'out' ? 'Nothing is out of stock' : 'No products match these filters'}
+                            description={stock !== 'all' ? 'Every product here is above its reorder level.' : 'Try a shorter search or clear the filters.'}
+                            action={
+                                <Button variant="outline" onClick={clear}>
+                                    Show all stock
+                                </Button>
+                            }
+                        />
+                    ) : (
+                        <EmptyState icon={Boxes} title="No active products" description="Products appear here once they are published from the Products page." />
+                    )
+                }
+            />
+
+            <AdjustStockDialog product={adjusting} open={!!adjusting} onOpenChange={(o) => !o && setAdjusting(null)} />
+            <StockHistorySheet
+                product={history}
+                open={!!history}
+                onOpenChange={(o) => !o && setHistory(null)}
+                onAdjust={() => history && setAdjusting(history)}
+            />
+        </PageContainer>
     );
 }
+
+export default withProviders(InventoryManager);
