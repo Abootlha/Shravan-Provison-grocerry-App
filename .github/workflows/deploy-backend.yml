@@ -1,0 +1,212 @@
+# Builds the NestJS backend and deploys it to the production VPS (PM2).
+# Server setup, secrets and rollback: docs/DEPLOYMENT.md
+name: Deploy backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref (branch, tag or commit SHA) to deploy. Empty = the branch selected above.'
+        required: false
+        default: ''
+        type: string
+      rollback:
+        description: 'Do not build: switch the server back to the previous release.'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify and package
+    if: ${{ !inputs.rollback }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    outputs:
+      sha: ${{ steps.package.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: backend/.nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - run: npm ci
+
+      - name: Lint
+        run: npx eslint "{src,apps,libs,test}/**/*.ts"
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npx jest --ci
+
+      - name: Build
+        run: npm run build
+
+      # Runtime files only: no .env, node_modules, sources or tests. Production
+      # dependencies (including native ones like sharp and bcrypt) are installed
+      # on the server so they match its platform.
+      - name: Package release
+        id: package
+        run: |
+          sha="$(git rev-parse HEAD)"
+          printf '%s\n' "$sha" > REVISION
+          tar -czf "$RUNNER_TEMP/release.tar.gz" \
+            dist package.json package-lock.json .nvmrc ecosystem.config.js \
+            scripts create-admin.js REVISION
+          rm REVISION
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          ls -lh "$RUNNER_TEMP/release.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-release
+          path: ${{ runner.temp }}/release.tar.gz
+          retention-days: 7
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy to production
+    needs: verify
+    # Runs after a successful verify, or alone for a rollback (verify skipped).
+    if: ${{ !cancelled() && (needs.verify.result == 'success' || (inputs.rollback && needs.verify.result == 'skipped')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    concurrency:
+      group: deploy-backend-production
+      cancel-in-progress: false
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || vars.DEPLOY_PORT || '22' }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || vars.DEPLOY_PATH || '/var/www/shravan-backend' }}
+      DEPLOY_HEALTHCHECK_URL: ${{ secrets.DEPLOY_HEALTHCHECK_URL || vars.DEPLOY_HEALTHCHECK_URL }}
+      PUBLIC_HEALTHCHECK_URL: ${{ secrets.PUBLIC_HEALTHCHECK_URL || vars.PUBLIC_HEALTHCHECK_URL }}
+      MODE: ${{ inputs.rollback && 'rollback' || 'deploy' }}
+      SHA: ${{ needs.verify.outputs.sha }}
+    steps:
+      # The deploy script always comes from this run's checkout (for a rollback:
+      # the branch the workflow was dispatched on).
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          sparse-checkout: backend/scripts/deploy
+
+      - name: Download release
+        if: env.MODE == 'deploy'
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-release
+          path: ${{ runner.temp }}/release
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          missing=""
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required secrets:$missing (see docs/DEPLOYMENT.md)"
+            exit 1
+          fi
+          echo "::add-mask::$DEPLOY_PATH"
+
+          umask 077
+          dir="$RUNNER_TEMP/ssh"
+          mkdir -p "$dir"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$dir/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$dir/known_hosts"
+          cat > "$dir/config" <<EOF
+          Host deploy-target
+            HostName $DEPLOY_HOST
+            Port $DEPLOY_PORT
+            User $DEPLOY_USER
+            IdentityFile $dir/key
+            IdentitiesOnly yes
+            UserKnownHostsFile $dir/known_hosts
+            StrictHostKeyChecking yes
+            BatchMode yes
+            ConnectTimeout 20
+            ServerAliveInterval 15
+            ServerAliveCountMax 4
+            LogLevel ERROR
+          EOF
+          chmod 600 "$dir/key" "$dir/known_hosts" "$dir/config"
+          echo "SSH_CONFIG=$dir/config" >> "$GITHUB_ENV"
+
+      - name: Upload release
+        run: |
+          incoming="$DEPLOY_PATH/incoming"
+          ssh -F "$SSH_CONFIG" deploy-target "mkdir -p $(printf '%q' "$incoming")"
+          files=(backend/scripts/deploy/remote-deploy.sh)
+          if [ "$MODE" = deploy ]; then
+            files+=("$RUNNER_TEMP/release/release.tar.gz")
+          fi
+          scp -F "$SSH_CONFIG" -q "${files[@]}" "deploy-target:$(printf '%q' "$incoming")/"
+
+      - name: Run remote ${{ env.MODE }}
+        run: |
+          incoming="$DEPLOY_PATH/incoming"
+          cmd="DEPLOY_PATH=$(printf '%q' "$DEPLOY_PATH")"
+          if [ -n "$DEPLOY_HEALTHCHECK_URL" ]; then
+            cmd="$cmd HEALTHCHECK_URL=$(printf '%q' "$DEPLOY_HEALTHCHECK_URL")"
+          fi
+          cmd="$cmd bash $(printf '%q' "$incoming/remote-deploy.sh") $MODE"
+          if [ "$MODE" = deploy ]; then
+            cmd="$cmd $(printf '%q' "$incoming/release.tar.gz") $(printf '%q' "$SHA")"
+          fi
+          ssh -F "$SSH_CONFIG" deploy-target "$cmd"
+
+      - name: Report deployed commit
+        run: |
+          deployed="$(ssh -F "$SSH_CONFIG" deploy-target "cat $(printf '%q' "$DEPLOY_PATH/DEPLOYED_SHA")")"
+          echo "Deployed commit: $deployed"
+          {
+            echo "### Backend ${MODE} succeeded"
+            echo ""
+            echo "Live commit: \`$deployed\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Through Cloudflare and nginx. Failing here does not roll back: the app
+      # was healthy on the server, so the problem is in front of it.
+      - name: Public health check
+        if: env.PUBLIC_HEALTHCHECK_URL != ''
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fsS --max-time 10 -o /dev/null "$PUBLIC_HEALTHCHECK_URL"; then
+              echo "Public health check passed"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::Public health check failed (app is healthy on the server; check nginx/Cloudflare)"
+          exit 1
+
+      - name: Clean up
+        if: always()
+        run: |
+          if [ -n "${SSH_CONFIG:-}" ]; then
+            ssh -F "$SSH_CONFIG" deploy-target "rm -f $(printf '%q' "$DEPLOY_PATH/incoming/release.tar.gz")" || true
+          fi
+          rm -rf "$RUNNER_TEMP/ssh" "$RUNNER_TEMP/release"

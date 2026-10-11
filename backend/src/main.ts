@@ -101,6 +101,9 @@ async function bootstrap() {
   // API prefix
   app.setGlobalPrefix('api/v1');
 
+  // Close Mongo/Redis/BullMQ cleanly on SIGINT/SIGTERM (PM2 reloads, deploys).
+  app.enableShutdownHooks();
+
   const port = configService.get<number>('port') || 3000;
   // Listen on 0.0.0.0 to accept connections from all network interfaces (needed for mobile testing)
   await app.listen(port, '0.0.0.0');
@@ -108,5 +111,11 @@ async function bootstrap() {
   console.log(
     `🚀 ShravanKirana Backend running on: http://0.0.0.0:${port}/api/v1`,
   );
+
+  // Under PM2 (wait_ready), tell it this instance is accepting connections so a
+  // reload only stops the old instance once the new one is up.
+  if (typeof process.send === 'function') {
+    process.send('ready');
+  }
 }
 bootstrap();
