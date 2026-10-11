@@ -15,10 +15,18 @@ import { useAppDispatch, useAppSelector } from '../hooks/useAuth';
 import { verifyOtp, clearError, sendOtp } from '../store/slices/authSlice';
 import type { OTPScreenProps } from '../types/navigation';
 
+const DEFAULT_OTP_LENGTH = 4;
+
+// OTP length from the send-otp response (4-6), else the default.
+const normalizeOtpLength = (value: unknown): number => {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 4 && n <= 6 ? n : DEFAULT_OTP_LENGTH;
+};
+
 export const OTPScreen: React.FC<OTPScreenProps> = ({ navigation, route }) => {
   const { phone, name, isNewAccount } = route.params;
-  const otpLength = 4;
-  const [otp, setOtp] = useState<string[]>(Array(otpLength).fill(''));
+  const [otpLength, setOtpLength] = useState(() => normalizeOtpLength(route.params.otpLength));
+  const [otp, setOtp] = useState<string[]>(() => Array(otpLength).fill(''));
   const [timer, setTimer] = useState(30);
   const inputRefs = useRef<(TextInput | null)[]>([]);
   const verifyInFlightRef = useRef(false);
@@ -45,13 +53,33 @@ export const OTPScreen: React.FC<OTPScreenProps> = ({ navigation, route }) => {
     }
   }, [dispatch, error]);
 
+  // One digit per box. Several digits at once (paste or SMS autofill) fill the
+  // boxes from this one onward. The last digit submits.
   const handleChange = (value: string, index: number) => {
+    const digits = value.replace(/\D/g, '');
     const newOtp = [...otp];
-    newOtp[index] = value;
+    if (digits.length > 1) {
+      const start = digits.length >= otpLength ? 0 : index;
+      digits
+        .slice(0, otpLength - start)
+        .split('')
+        .forEach((d, i) => {
+          newOtp[start + i] = d;
+        });
+    } else {
+      newOtp[index] = digits;
+    }
     setOtp(newOtp);
 
-    if (value && index < otpLength - 1) {
-      inputRefs.current[index + 1]?.focus();
+    const code = newOtp.join('');
+    if (code.length === otpLength) {
+      inputRefs.current[Math.min(index, otpLength - 1)]?.blur();
+      handleVerify(code);
+      return;
+    }
+    const next = newOtp.findIndex((d) => !d);
+    if (digits && next > index) {
+      inputRefs.current[next]?.focus();
     }
   };
 
@@ -88,8 +116,12 @@ export const OTPScreen: React.FC<OTPScreenProps> = ({ navigation, route }) => {
       return;
     }
     setTimer(30);
-    setOtp(Array(otpLength).fill(''));
-    await dispatch(sendOtp(phone));
+    const result = await dispatch(sendOtp(phone));
+    const length = sendOtp.fulfilled.match(result)
+      ? normalizeOtpLength(result.payload?.otpLength)
+      : otpLength;
+    setOtpLength(length);
+    setOtp(Array(length).fill(''));
     inputRefs.current[0]?.focus();
   };
 
@@ -116,10 +148,14 @@ export const OTPScreen: React.FC<OTPScreenProps> = ({ navigation, route }) => {
               ref={(ref) => { inputRefs.current[index] = ref; }}
               style={[styles.otpInput, error ? styles.otpInputError : null]}
               value={digit}
-              onChangeText={(value) => handleChange(value.replace(/\D/g, ''), index)}
+              onChangeText={(value) => handleChange(value, index)}
               onKeyPress={(e) => handleKeyPress(e, index)}
               keyboardType="number-pad"
-              maxLength={1}
+              // The first box takes the whole code from SMS autofill or paste.
+              maxLength={index === 0 ? otpLength : 1}
+              textContentType={index === 0 ? 'oneTimeCode' : 'none'}
+              autoComplete={index === 0 ? 'sms-otp' : 'off'}
+              accessibilityLabel={`Digit ${index + 1} of ${otpLength}`}
               selectTextOnFocus
             />
           ))}
@@ -188,11 +224,11 @@ const styles = StyleSheet.create({
   otpContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 12,
+    gap: 8,
     marginBottom: 24,
   },
   otpInput: {
-    width: 48,
+    width: 44,
     height: 56,
     backgroundColor: COLORS.surface,
     borderRadius: 12,

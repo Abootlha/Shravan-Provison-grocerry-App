@@ -1,4 +1,5 @@
-// PM2 process file for the production backend. See docs/DEPLOYMENT.md.
+// PM2 process file for the backend (production, and the development instance
+// on the same server). See docs/DEPLOYMENT.md.
 //
 // Deployed layout (managed by scripts/deploy/remote-deploy.sh):
 //   <DEPLOY_PATH>/releases/<release>/ecosystem.config.js   <- this file
@@ -34,10 +35,21 @@ function parseInstances(value) {
   return Number.isInteger(n) && n !== 0 ? n : 1;
 }
 
+// Each deploy target is its own PM2 app: shravan-backend (production) and
+// e.g. shravan-backend-dev. remote-deploy.sh exports PM2_APP_NAME from APP_NAME.
+const appName = process.env.PM2_APP_NAME || 'shravan-backend';
+
+// NODE_ENV comes from the target's shared/.env (remote-deploy.sh exports it as
+// DEPLOY_NODE_ENV). PM2 env values win over .env, so hard-coding 'production'
+// here would turn the development instance into a production one. Anything
+// unset or unknown stays 'production', the safe default for the live app.
+const nodeEnv =
+  process.env.DEPLOY_NODE_ENV === 'development' ? 'development' : 'production';
+
 module.exports = {
   apps: [
     {
-      name: 'shravan-backend',
+      name: appName,
       cwd: appDir,
       script: path.join(appDir, 'dist', 'main.js'),
       // Cluster mode gives zero-downtime `pm2 reload`, even with one instance.
@@ -56,7 +68,7 @@ module.exports = {
       error_file: path.join(logDir, 'error.log'),
       merge_logs: true,
       env_production: {
-        NODE_ENV: 'production',
+        NODE_ENV: nodeEnv,
       },
     },
   ],

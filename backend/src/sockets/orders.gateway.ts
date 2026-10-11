@@ -9,6 +9,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { Logger, Inject, forwardRef } from '@nestjs/common';
 import Redis from 'ioredis';
+import { redisConnectionOptions } from '../config/redis-options';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { OrdersService } from '../modules/orders/orders.service';
@@ -35,11 +36,7 @@ export class OrdersGateway
     private ordersService: OrdersService,
   ) {
     // Create a separate Redis connection for subscribing
-    this.subscriber = new Redis({
-      host: this.configService.get<string>('redis.host'),
-      port: this.configService.get<number>('redis.port'),
-      password: this.configService.get<string>('redis.password'),
-    });
+    this.subscriber = new Redis(redisConnectionOptions(this.configService));
 
     // Subscribe to order updates channel
     this.subscriber.subscribe('order-updates', (err) => {

@@ -1,15 +1,26 @@
-# Builds the NestJS backend and deploys it to the production VPS (PM2).
-# Server setup, secrets and rollback: docs/DEPLOYMENT.md
+# Builds the NestJS backend and deploys it to the VPS (PM2).
+#   main    -> production  (DEPLOY_PATH,     PM2 app shravan-backend)
+#   develop -> development (DEPLOY_PATH_DEV, PM2 app shravan-backend-dev)
+# Both targets live on the same server. Server setup, secrets and rollback:
+# docs/DEPLOYMENT.md
 name: Deploy backend
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - 'backend/**'
       - '.github/workflows/deploy-backend.yml'
   workflow_dispatch:
     inputs:
+      target:
+        description: 'Where to deploy (or roll back).'
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+          - development
       ref:
         description: 'Git ref (branch, tag or commit SHA) to deploy. Empty = the branch selected above.'
         required: false
@@ -83,26 +94,72 @@ jobs:
           if-no-files-found: error
 
   deploy:
-    name: Deploy to production
+    name: Deploy to ${{ (github.event_name == 'workflow_dispatch' && inputs.target) || (github.ref == 'refs/heads/develop' && 'development') || 'production' }}
     needs: verify
     # Runs after a successful verify, or alone for a rollback (verify skipped).
     if: ${{ !cancelled() && (needs.verify.result == 'success' || (inputs.rollback && needs.verify.result == 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: production
+    # push to main -> production, push to develop -> development,
+    # workflow_dispatch -> the `target` input.
+    environment: ${{ (github.event_name == 'workflow_dispatch' && inputs.target) || (github.ref == 'refs/heads/develop' && 'development') || 'production' }}
     concurrency:
-      group: deploy-backend-production
+      group: deploy-backend-${{ (github.event_name == 'workflow_dispatch' && inputs.target) || (github.ref == 'refs/heads/develop' && 'development') || 'production' }}
       cancel-in-progress: false
     env:
+      TARGET: ${{ (github.event_name == 'workflow_dispatch' && inputs.target) || (github.ref == 'refs/heads/develop' && 'development') || 'production' }}
+      # Same server, user and key for both targets.
       DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || vars.DEPLOY_PORT || '22' }}
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || vars.DEPLOY_PATH || '/var/www/shravan-backend' }}
-      DEPLOY_HEALTHCHECK_URL: ${{ secrets.DEPLOY_HEALTHCHECK_URL || vars.DEPLOY_HEALTHCHECK_URL }}
-      PUBLIC_HEALTHCHECK_URL: ${{ secrets.PUBLIC_HEALTHCHECK_URL || vars.PUBLIC_HEALTHCHECK_URL }}
+      # Per-target settings; the "Select target" step picks one set.
+      PROD_DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || vars.DEPLOY_PATH || '/var/www/shravan-backend' }}
+      PROD_HEALTHCHECK_URL: ${{ secrets.DEPLOY_HEALTHCHECK_URL || vars.DEPLOY_HEALTHCHECK_URL }}
+      PROD_PUBLIC_HEALTHCHECK_URL: ${{ secrets.PUBLIC_HEALTHCHECK_URL || vars.PUBLIC_HEALTHCHECK_URL }}
+      DEV_DEPLOY_PATH: ${{ secrets.DEPLOY_PATH_DEV || vars.DEPLOY_PATH_DEV }}
+      DEV_HEALTHCHECK_URL: ${{ secrets.DEPLOY_HEALTHCHECK_URL_DEV || vars.DEPLOY_HEALTHCHECK_URL_DEV }}
+      DEV_PUBLIC_HEALTHCHECK_URL: ${{ secrets.PUBLIC_HEALTHCHECK_URL_DEV || vars.PUBLIC_HEALTHCHECK_URL_DEV }}
       MODE: ${{ inputs.rollback && 'rollback' || 'deploy' }}
       SHA: ${{ needs.verify.outputs.sha }}
     steps:
+      # Sets DEPLOY_PATH, APP_NAME and the health check URLs for this target.
+      # The development target never falls back to production values.
+      - name: Select target
+        run: |
+          case "$TARGET" in
+            production)
+              deploy_path="$PROD_DEPLOY_PATH"
+              app_name=shravan-backend
+              health="$PROD_HEALTHCHECK_URL"
+              public_health="$PROD_PUBLIC_HEALTHCHECK_URL"
+              ;;
+            development)
+              deploy_path="$DEV_DEPLOY_PATH"
+              app_name=shravan-backend-dev
+              health="$DEV_HEALTHCHECK_URL"
+              public_health="$DEV_PUBLIC_HEALTHCHECK_URL"
+              if [ -z "$deploy_path" ]; then
+                echo "::error::DEPLOY_PATH_DEV secret/variable is not set (see docs/DEPLOYMENT.md)"
+                exit 1
+              fi
+              if [ "${deploy_path%/}" = "${PROD_DEPLOY_PATH%/}" ]; then
+                echo "::error::DEPLOY_PATH_DEV must differ from the production DEPLOY_PATH"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::Unknown target: $TARGET"
+              exit 1
+              ;;
+          esac
+          {
+            echo "DEPLOY_PATH=$deploy_path"
+            echo "APP_NAME=$app_name"
+            echo "DEPLOY_HEALTHCHECK_URL=$health"
+            echo "PUBLIC_HEALTHCHECK_URL=$public_health"
+          } >> "$GITHUB_ENV"
+          echo "Target: $TARGET (PM2 app $app_name)"
+
       # The deploy script always comes from this run's checkout (for a rollback:
       # the branch the workflow was dispatched on).
       - uses: actions/checkout@v4
@@ -168,7 +225,7 @@ jobs:
       - name: Run remote ${{ env.MODE }}
         run: |
           incoming="$DEPLOY_PATH/incoming"
-          cmd="DEPLOY_PATH=$(printf '%q' "$DEPLOY_PATH")"
+          cmd="DEPLOY_PATH=$(printf '%q' "$DEPLOY_PATH") APP_NAME=$(printf '%q' "$APP_NAME")"
           if [ -n "$DEPLOY_HEALTHCHECK_URL" ]; then
             cmd="$cmd HEALTHCHECK_URL=$(printf '%q' "$DEPLOY_HEALTHCHECK_URL")"
           fi
@@ -183,7 +240,7 @@ jobs:
           deployed="$(ssh -F "$SSH_CONFIG" deploy-target "cat $(printf '%q' "$DEPLOY_PATH/DEPLOYED_SHA")")"
           echo "Deployed commit: $deployed"
           {
-            echo "### Backend ${MODE} succeeded"
+            echo "### Backend ${MODE} to ${TARGET} succeeded"
             echo ""
             echo "Live commit: \`$deployed\`"
           } >> "$GITHUB_STEP_SUMMARY"

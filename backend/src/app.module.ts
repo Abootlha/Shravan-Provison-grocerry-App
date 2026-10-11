@@ -27,6 +27,7 @@ import { AppService } from './app.service';
 
 // Config
 import configuration from './config/configuration';
+import { redisConnectionOptions } from './config/redis-options';
 
 @Module({
   imports: [
@@ -77,11 +78,8 @@ import configuration from './config/configuration';
     BullModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('redis.host'),
-          port: configService.get<number>('redis.port'),
-          password: configService.get<string>('redis.password'),
-        },
+        // Includes REDIS_DB, so each environment has its own BullMQ queues.
+        connection: redisConnectionOptions(configService),
       }),
       inject: [ConfigService],
     }),

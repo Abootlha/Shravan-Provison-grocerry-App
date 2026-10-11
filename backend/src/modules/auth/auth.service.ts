@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { UsersService } from '../users/users.service';
 import { RidersService } from '../riders/riders.service';
-import { OtpService } from './otp.service';
+import { OtpService, SendOtpResult } from './otp.service';
 import { RedisService } from '../../common/utils/redis.service';
 import * as bcrypt from 'bcrypt';
 import { UserRole } from '../users/schemas/user.schema';
@@ -133,9 +133,7 @@ export class AuthService {
     };
   }
 
-  async sendOtp(
-    phone: string,
-  ): Promise<{ message: string; requestId?: string }> {
+  async sendOtp(phone: string): Promise<SendOtpResult> {
     return this.otpService.sendOtp(phone);
   }
 

@@ -14,6 +14,7 @@ import { Logger, UseGuards, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
+import { redisConnectionOptions } from '../config/redis-options';
 import { WsJwtGuard } from '../modules/auth/guards/ws-jwt.guard';
 import { Order, OrderStatus } from '../modules/orders/schemas/order.schema';
 import { OrdersService } from '../modules/orders/orders.service';
@@ -71,21 +72,14 @@ export class TrackingGateway
   ) {}
 
   afterInit(server: Server): void {
-    const redisHost =
-      this.configService.get<string>('redis.host') || 'localhost';
-    const redisPort = this.configService.get<number>('redis.port') || 6379;
+    const options = redisConnectionOptions(this.configService);
 
     try {
-      const pubClient = new Redis({
-        host: redisHost,
-        port: redisPort,
-        password: this.configService.get<string>('redis.password'),
-        maxRetriesPerRequest: 3,
-      });
+      const pubClient = new Redis({ ...options, maxRetriesPerRequest: 3 });
       const subClient = pubClient.duplicate();
       server.adapter(createAdapter(pubClient, subClient));
       this.logger.log(
-        `Socket.IO Redis adapter enabled for tracking gateway at ${redisHost}:${redisPort}`,
+        `Socket.IO Redis adapter enabled for tracking gateway at ${options.host}:${options.port} (db ${options.db})`,
       );
     } catch (error) {
       this.logger.warn(

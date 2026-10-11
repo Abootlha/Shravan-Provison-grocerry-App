@@ -1,6 +1,7 @@
 /**
  * OtpBoxes — N digit boxes driven by ONE transparent TextInput laid over them, so typing,
- * SMS autofill (oneTimeCode / sms-otp) and paste all work. Boxes are 48pt wide.
+ * SMS autofill (oneTimeCode / sms-otp) and paste all work. Boxes are 48pt wide, and shrink (down
+ * to 36pt, with a tighter gap) when `length` boxes would not fit the row, e.g. 6 digits on a small phone.
  *
  * Motion
  *   · mount: the boxes pop in staggered (0.9 → 1 + fade, 45 ms apart)
@@ -13,7 +14,7 @@
  * Props
  *   value        string of digits
  *   onChange     (digits) => void
- *   length       default 4
+ *   length       default 4 (4-6; the server's otpLength)
  *   error        boolean — red borders
  *   success      boolean — green borders + tint (verified)
  *   shakeKey     number — increment to trigger a shake
@@ -21,7 +22,7 @@
  *   disabled
  *   accessibilityLabel
  */
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, TextInput } from 'react-native';
 import Animated, {
     interpolateColor,
@@ -39,8 +40,22 @@ import { springs, durations, easings } from '../../theme/motion';
 import { Text } from '../../components/ui';
 
 const STAGGER = 45;
+const BOX_W = 48;
+const BOX_H = 56;
+const MIN_BOX_W = 36;
 
-function Box({ index, digit, active, error, success }) {
+// Largest box (<= 48) and gap that fit `length` boxes into `width`.
+function fitBoxes(width, length) {
+    if (!width) return { size: BOX_W, gap: length > 4 ? space.sm : space.md };
+    for (const gap of [space.md, space.sm, space.xs]) {
+        const size = Math.floor((width - gap * (length - 1)) / length);
+        if (size >= BOX_W) return { size: BOX_W, gap };
+        if (gap === space.xs || size >= 44) return { size: Math.max(MIN_BOX_W, size), gap };
+    }
+    return { size: BOX_W, gap: space.md };
+}
+
+function Box({ index, digit, active, error, success, size = BOX_W }) {
     const styles = useStyles();
     const { colors } = useTheme();
     const reduce = useReducedMotion();
@@ -87,11 +102,12 @@ function Box({ index, digit, active, error, success }) {
         transform: [{ scale: reduce ? 1 : 0.92 + 0.08 * lift.value }],
     }));
     const ink = success ? colors.successInk : error ? 'error' : 'ink';
+    const dims = size === BOX_W ? null : { width: size, height: Math.round((size * BOX_H) / BOX_W) };
     return (
-        <Animated.View style={[styles.cell, cell]}>
+        <Animated.View style={[styles.cell, dims, cell]}>
             <Animated.View style={[styles.ring, ringStyle, { pointerEvents: 'none' }]} />
-            <Animated.View style={[styles.box, style]}>
-                <Text variant="h1" color={ink}>{digit || ''}</Text>
+            <Animated.View style={[styles.box, dims, style]}>
+                <Text variant={size < 44 ? 'h2' : 'h1'} color={ink}>{digit || ''}</Text>
                 {active && !digit ? <Animated.View style={styles.caret} /> : null}
             </Animated.View>
         </Animated.View>
@@ -102,7 +118,10 @@ export function OtpBoxes({ value, onChange, length = 4, error, success = false, 
     const styles = useStyles();
     const reduce = useReducedMotion();
     const [focused, setFocused] = useState(false);
+    const [rowWidth, setRowWidth] = useState(0);
     const shake = useSharedValue(0);
+    const { size, gap } = fitBoxes(rowWidth, length);
+    const onLayout = useCallback((e) => setRowWidth(Math.floor(e.nativeEvent.layout.width)), []);
 
     useEffect(() => {
         if (!shakeKey) return;
@@ -121,9 +140,9 @@ export function OtpBoxes({ value, onChange, length = 4, error, success = false, 
     const activeIndex = Math.min(digits.length, length - 1);
 
     return (
-        <Animated.View style={[styles.row, rowStyle]}>
+        <Animated.View style={[styles.row, { gap }, rowStyle]} onLayout={onLayout}>
             {Array.from({ length }).map((_, i) => (
-                <Box key={i} index={i} digit={digits[i]} active={focused && i === activeIndex && !disabled} error={error} success={success} />
+                <Box key={`${length}-${i}`} index={i} digit={digits[i]} active={focused && i === activeIndex && !disabled} error={error} success={success} size={size} />
             ))}
             <TextInput
                 ref={inputRef}
@@ -148,11 +167,11 @@ export function OtpBoxes({ value, onChange, length = 4, error, success = false, 
 
 const useStyles = makeStyles((t) => ({
     row: { flexDirection: 'row', justifyContent: 'center', gap: space.md },
-    cell: { width: 48, height: 56, alignItems: 'center', justifyContent: 'center' },
+    cell: { width: BOX_W, height: BOX_H, alignItems: 'center', justifyContent: 'center' },
     ring: { position: 'absolute', top: -4, left: -4, right: -4, bottom: -4, borderRadius: radii.input + 4, backgroundColor: t.colors.brandTint },
     box: {
-        width: 48,
-        height: 56,
+        width: BOX_W,
+        height: BOX_H,
         borderRadius: radii.input,
         borderWidth: 1.5,
         alignItems: 'center',

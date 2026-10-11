@@ -23,7 +23,9 @@ If Expo fails with a react-navigation check error, also set
 Restart with `--clear` after toggling the variable, because `EXPO_PUBLIC_*`
 values are inlined at bundle time.
 
-Log in with any 10-digit phone and any 4-digit OTP (e.g. `1234`). The browser
+Log in with any 10-digit phone and any 4-digit OTP (e.g. `1234`). Like the
+backend, send-otp returns `otpLength`; set `EXPO_PUBLIC_MOCK_OTP_LENGTH=6`
+before starting to preview the 6-digit flow (any 6 digits work). The browser
 console shows a purple `[mock api] ENABLED` banner and one line per request.
 
 ## Login sessions

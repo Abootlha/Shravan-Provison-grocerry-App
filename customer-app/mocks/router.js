@@ -315,13 +315,20 @@ const cartView = () => {
 
 // ---------- route table ----------
 
+const MOCK_OTP_LENGTH = (() => {
+    const n = Number(process.env.EXPO_PUBLIC_MOCK_OTP_LENGTH);
+    return Number.isInteger(n) && n >= 4 && n <= 6 ? n : 4;
+})();
+
 const PUBLIC = [/^\/auth\/(send-otp|verify-otp|refresh)$/, /^\/(products|categories|subcategories|item-groups|brands|settings|maps|banners)(\/|$)/];
 
 const routes = [
     // auth
     ['POST', /^\/auth\/send-otp$/, ({ body }) => {
         if (!/^\+?\d{10,13}$/.test(String(body?.phone || '').replace(/\s/g, ''))) return fail(400, 'Please enter a valid phone number');
-        return ok({ message: 'OTP sent successfully (mock mode: any 4-digit OTP works)', sessionId: `mock-${Date.now()}` });
+        // Same shape as the backend: otpLength tells the app how many boxes to show.
+        // EXPO_PUBLIC_MOCK_OTP_LENGTH=6 previews the 6-digit flow (default 4). Any code works.
+        return ok({ message: `OTP sent successfully (mock mode: any ${MOCK_OTP_LENGTH}-digit OTP works)`, sessionId: `mock-${Date.now()}`, otpLength: MOCK_OTP_LENGTH });
     }],
     ['POST', /^\/auth\/verify-otp$/, ({ body }) => {
         if (!/^\d{4,6}$/.test(String(body?.otp || ''))) return fail(400, 'Invalid OTP');

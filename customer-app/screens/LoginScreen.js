@@ -67,7 +67,7 @@ const LoginScreen = ({ navigation, route }) => {
             const response = await AuthService.sendOtp(phoneNumber);
             if (response.message) {
                 slide.leave(-1);
-                navigation.navigate('OTP', { phoneNumber });
+                navigation.navigate('OTP', { phoneNumber, otpLength: response.otpLength });
             }
         } catch (error) {
             const errorMessage = error.response?.data?.message || error.message || 'Failed to send OTP. Please try again.';
