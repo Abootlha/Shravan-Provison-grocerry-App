@@ -2,13 +2,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import Animated from 'react-native-reanimated';
-import { AnimatedListItem, ContentSwap, GradientHeader, icon3dFor, Screen, SectionHeader, Skeleton, SkeletonGroup, Text } from '../components/ui';
+import { AnimatedListItem, ContentSwap, EmptyState, GradientHeader, icon3dFor, Screen, SectionHeader, Skeleton, SkeletonGroup, Text } from '../components/ui';
 import { CategoryCard, FloatingCartBar, SearchBar } from '../components';
 import { space } from '../constants/theme';
 import { stagger } from '../theme/motion';
 import { useTheme } from '../theme';
 import { useCartBarOffset, useTabBarHeight } from '../components/BottomTabsIcons';
-import { CATEGORIES, CATEGORY_GROUPS } from '../constants';
+import { CATEGORY_GROUPS } from '../constants';
+import { describeError } from '../services/normalize';
 import { ProductService } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
 import { translateToHindi } from '../services/translationService';
@@ -45,15 +46,15 @@ const CategoriesScreen = ({ navigation }) => {
 
     const [categories, setCategories] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
     const [translatedGroups, setTranslatedGroups] = useState(CATEGORY_GROUPS);
 
     const fetchData = useCallback(async () => {
         try {
             setLoading(true);
+            setError(null);
 
-            // Fetch real categories from backend API
-            const apiCategories = await ProductService.getCategories();
-            const rawList = apiCategories && apiCategories.length > 0 ? apiCategories : CATEGORIES;
+            const rawList = await ProductService.getCategories();
 
             if (currentLanguage === 'hi') {
                 try {
@@ -79,8 +80,8 @@ const CategoriesScreen = ({ navigation }) => {
             }
         } catch (err) {
             console.error('Error loading categories:', err);
-            setCategories(CATEGORIES);
-            setTranslatedGroups(CATEGORY_GROUPS);
+            setCategories([]);
+            setError(describeError(err) || 'Failed to load categories');
         } finally {
             setLoading(false);
         }
@@ -166,9 +167,28 @@ const CategoriesScreen = ({ navigation }) => {
                 <TopBar onSearchPress={handleSearchPress} isHi={isHi} count={categories.length} loading={loading} theme={theme} />
                 <Animated.View style={[styles.fill, enter.rise]}>
                     {/* skeleton → grid crossfade (no pop, no layout jump) */}
-                    <ContentSwap stateKey={loading ? 'loading' : 'data'} style={styles.fill}>
+                    <ContentSwap stateKey={loading ? 'loading' : error ? 'error' : categories.length ? 'data' : 'empty'} style={styles.fill}>
                         {loading ? (
                             <GridSkeleton columns={columns} tileW={tileW} style={listPad} />
+                        ) : error || !categories.length ? (
+                            <EmptyState
+                                mood={error ? 'sad' : 'sleepy'}
+                                title={error ? (isHi ? 'श्रेणियाँ लोड नहीं हुईं' : 'Couldn’t load categories') : isHi ? 'अभी कोई श्रेणी नहीं' : 'No categories yet'}
+                                subtitle={
+                                    error
+                                        ? __DEV__
+                                            ? error
+                                            : isHi
+                                              ? 'इंटरनेट जाँचें और फिर कोशिश करें।'
+                                              : 'Check your connection and try again.'
+                                        : isHi
+                                          ? 'दुकान जल्द ही सामान जोड़ेगी।'
+                                          : 'The store hasn’t added any aisles yet. Check back soon.'
+                                }
+                                actionLabel={isHi ? 'फिर कोशिश करें' : 'Try again'}
+                                onAction={fetchData}
+                                style={styles.state}
+                            />
                         ) : (
                             <AnimatedFlashList
                                 data={rows}
@@ -247,6 +267,7 @@ const styles = StyleSheet.create({
         marginBottom: space.xl,
     },
     boneSub: { marginTop: space.sm },
+    state: { paddingTop: space['4xl'], paddingHorizontal: space['2xl'] },
     boneLabel: { marginTop: space.sm, alignSelf: 'center' },
 });
 

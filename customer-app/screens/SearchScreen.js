@@ -33,7 +33,7 @@ const SearchScreen = ({ navigation, route }) => {
     const [categories, setCategories] = useState([]);
     const inputRef = useRef(null);
     const { recent, add: addRecent, remove: removeRecent, clear: clearRecent } = useRecentSearches();
-    const { results, total, loading, query: resultQuery } = useProductSearch(query, currentLanguage);
+    const { results, total, loading, error: searchError, retry: retrySearch, query: resultQuery } = useProductSearch(query, currentLanguage);
 
     useEffect(() => {
         let alive = true;
@@ -87,7 +87,9 @@ const SearchScreen = ({ navigation, route }) => {
         ? 'idle'
         : loading && results.length === 0
           ? 'loading'
-          : !loading && results.length === 0 && matchedCategories.length === 0
+          : !loading && searchError && results.length === 0
+            ? 'error'
+            : !loading && results.length === 0 && matchedCategories.length === 0
             ? 'empty'
             : 'results';
 
@@ -110,6 +112,8 @@ const SearchScreen = ({ navigation, route }) => {
                     results={results}
                     total={total}
                     loading={loading}
+                    error={searchError}
+                    onRetry={retrySearch}
                     matchedCategories={matchedCategories}
                     onProductPress={openProduct}
                     onCategory={openCategory}

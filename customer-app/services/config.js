@@ -47,6 +47,19 @@ if (IS_PRODUCTION) {
 
 export const API_URL = ORDER_URL;
 
+/** One line naming the backend this build talks to (dev diagnostics). */
+export const apiConfigSummary = () => {
+    const overrides = { PRODUCT_URL, LOCATION_URL, ORDER_URL, AUTH_URL }; // only listed when they differ
+    const extra = Object.entries(overrides)
+        .filter(([, url]) => url !== API_BASE_URL)
+        .map(([key, url]) => `${key}=${url}`);
+    return [`API_BASE_URL=${API_BASE_URL || '(empty)'}`, `TRACKING_URL=${TRACKING_URL || '(empty)'}`, `env=${PUBLIC_NODE_ENV}`, ...extra].join('  ');
+};
+
+if (__DEV__) {
+    console.info(`[config] ${apiConfigSummary()}`);
+}
+
 export const API_CONFIG = {
     timeout: 30000,
 };

@@ -15,16 +15,16 @@
       "env": {
         "NODE_ENV": "production",
         "PUBLIC_NODE_ENV": "production",
-        "API_BASE_URL": "https://api.example.com/api/v1",
-        "TRACKING_URL": "https://api.example.com/tracking"
+        "API_BASE_URL": "https://api.lumioui.com/api/v1",
+        "TRACKING_URL": "https://api.lumioui.com/tracking"
       }
     },
     "production": {
       "env": {
         "NODE_ENV": "production",
         "PUBLIC_NODE_ENV": "production",
-        "API_BASE_URL": "https://api.example.com/api/v1",
-        "TRACKING_URL": "https://api.example.com/tracking"
+        "API_BASE_URL": "https://api.lumioui.com/api/v1",
+        "TRACKING_URL": "https://api.lumioui.com/tracking"
       },
       "autoIncrement": true
     }

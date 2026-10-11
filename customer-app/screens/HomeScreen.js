@@ -16,8 +16,10 @@ import { space, z } from '../constants/theme';
 import { useTheme } from '../theme';
 import { durations, easings, springs } from '../theme/motion';
 import { OrderService, ProductService, SettingsService } from '../services';
+import { API_BASE_URL } from '../services/config';
 import { useTranslation } from '../hooks/useTranslation';
 import { translateToHindi } from '../services/translationService';
+import { describeError } from '../services/normalize';
 import HomeHeader from './home/HomeHeader';
 import { CategoryGrid, HomeSkeleton, ProductRail, RailSkeleton } from './home/HomeSections';
 import { FreshSection, MomentSection, PriceStore, Reveal, SeasonBlock } from './home/EditorialSections';
@@ -96,6 +98,7 @@ const HomeScreen = ({ navigation }) => {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState(null);
+    const [partialError, setPartialError] = useState(null); // one of categories/products failed
     const [settings, setSettings] = useState(null);
     const [activeTab, setActiveTab] = useState('all');
     const [catProducts, setCatProducts] = useState({}); // categoryId -> products | 'loading'
@@ -117,20 +120,32 @@ const HomeScreen = ({ navigation }) => {
             try {
                 if (!silent) setLoading(true);
                 setError(null);
-                const [categoriesData, productsData] = await Promise.all([
+                setPartialError(null);
+                // Independent requests: one failing must not blank the other.
+                const [catRes, prodRes] = await Promise.allSettled([
                     ProductService.getCategories(),
                     ProductService.getProducts({ limit: 100 }),
                 ]);
+                const failed = [
+                    catRes.status === 'rejected' && `categories: ${describeError(catRes.reason)}`,
+                    prodRes.status === 'rejected' && `products: ${describeError(prodRes.reason)}`,
+                ].filter(Boolean);
+                if (failed.length) console.error('[home] catalogue request failed', failed.join(' | '));
                 const [cats, prods] = await Promise.all([
-                    translateList(categoriesData || [], currentLanguage),
-                    translateList(productsData.products || [], currentLanguage),
+                    translateList(catRes.status === 'fulfilled' ? catRes.value : [], currentLanguage),
+                    translateList(prodRes.status === 'fulfilled' ? prodRes.value.products : [], currentLanguage),
                 ]);
                 setCategories(cats);
                 setProducts(prods);
                 setCatProducts({});
+                // Only an error page when nothing usable came back; a partial catalogue still renders.
+                if (failed.length) {
+                    if (!cats.length && !prods.length) setError(failed.join(' | '));
+                    else setPartialError(failed.join(' | '));
+                }
             } catch (err) {
                 console.error('Error fetching data:', err);
-                setError('Failed to load data. Please try again.');
+                setError(describeError(err) || 'Failed to load data.');
             } finally {
                 setLoading(false);
                 setRefreshing(false);
@@ -322,10 +337,18 @@ const HomeScreen = ({ navigation }) => {
             }));
         }
 
-        return buildHomeSections({ products, categories, orders: orderHistory, now: resolveNow(), language: currentLanguage, t, eta: etaMinutes });
+        if (!products.length && !categories.length) return [{ key: 'banners', type: 'banners' }, { key: 'catalogEmpty', type: 'catalogEmpty' }];
+
+        const built = buildHomeSections({ products, categories, orders: orderHistory, now: resolveNow(), language: currentLanguage, t, eta: etaMinutes });
+        // Too few products for any curated collection: still show everything as one rail.
+        if (products.length && !built.some((x) => x.type !== 'banners' && x.type !== 'grid')) {
+            built.push({ key: 'everything', type: 'rail', title: isHi ? 'सभी उत्पाद' : 'All products', subtitle: `${products.length} ${isHi ? 'आइटम' : 'items'}`, products: products.slice(0, 30) });
+        }
+        if (partialError) built.splice(1, 0, { key: 'partialError', type: 'error', detail: partialError, partial: true });
+        return built;
         // `t` is a fresh function every render but only depends on the language, so key on that instead
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [loading, error, activeCategory, catProducts, categories, products, orderHistory, currentLanguage, isHi, handleCategoryPress, etaMinutes]);
+    }, [loading, error, partialError, activeCategory, catProducts, categories, products, orderHistory, currentLanguage, isHi, handleCategoryPress, etaMinutes]);
 
     const banners = useMemo(
         () =>
@@ -357,8 +380,33 @@ const HomeScreen = ({ navigation }) => {
                     return (
                         <EmptyState
                             mood="sad"
-                            title={isHi ? 'कुछ गड़बड़ हो गई' : 'Couldn’t load the store'}
-                            subtitle={isHi ? 'इंटरनेट जाँचें और फिर कोशिश करें।' : 'Check your connection and try again.'}
+                            compact={item.partial}
+                            title={
+                                item.partial
+                                    ? isHi
+                                        ? 'कुछ सामान लोड नहीं हुआ'
+                                        : 'Part of the store didn’t load'
+                                    : isHi
+                                      ? 'कुछ गड़बड़ हो गई'
+                                      : 'Couldn’t load the store'
+                            }
+                            subtitle={__DEV__ && (item.detail || error) ? item.detail || error : isHi ? 'इंटरनेट जाँचें और फिर कोशिश करें।' : 'Check your connection and try again.'}
+                            actionLabel={t('retry')}
+                            onAction={fetchData}
+                            style={styles.state}
+                        />
+                    );
+                case 'catalogEmpty':
+                    return (
+                        <EmptyState
+                            title={isHi ? 'दुकान अभी खाली है' : 'The shelves are empty'}
+                            subtitle={
+                                __DEV__
+                                    ? `The API returned no categories or products (${API_BASE_URL}).`
+                                    : isHi
+                                      ? 'दुकान जल्द ही सामान जोड़ेगी।'
+                                      : 'The store is stocking up. Pull down to refresh, or check back soon.'
+                            }
                             actionLabel={t('retry')}
                             onAction={fetchData}
                             style={styles.state}
@@ -443,7 +491,7 @@ const HomeScreen = ({ navigation }) => {
                 </Reveal>
             );
         },
-        [banners, currentLanguage, fetchData, firstPaint, freshLabels, handleAllCategories, handleBannerPress, handleCategoryPress, handleProductPress, isHi, onTabSelect, scrollY, t],
+        [banners, currentLanguage, error, fetchData, firstPaint, freshLabels, handleAllCategories, handleBannerPress, handleCategoryPress, handleProductPress, isHi, onTabSelect, scrollY, t],
     );
 
     const addressType = selectedAddress?.type || (isHi ? 'घर' : 'Home');

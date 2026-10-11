@@ -9,6 +9,14 @@ import {
 } from './api';
 import { ENDPOINTS } from './config';
 import { getRefreshToken, clearSession } from './tokenStorage';
+import {
+    listFrom,
+    normalizeCategories,
+    normalizeProduct,
+    normalizeProductPage,
+    normalizeSubcategories,
+    UnexpectedResponseError,
+} from './normalize';
 
 const getCurrentUser = async () => {
     const profile = await UserService.getProfile();
@@ -46,27 +54,30 @@ export const AuthService = {
 export const ProductService = {
     getCategories: async () => {
         const response = await productApi.get(ENDPOINTS.categories.LIST);
-        return response.data.categories || [];
+        return normalizeCategories(listFrom(response.data, 'categories', 'GET /categories'));
     },
 
     getSubcategories: async ({ parentId }) => {
         const response = await productApi.get(ENDPOINTS.categories.SUBCATEGORIES(parentId));
-        return response.data;
+        return { subcategories: normalizeSubcategories(listFrom(response.data, 'subcategories', 'GET /subcategories')) };
     },
 
     getProducts: async (params = {}) => {
         const response = await productApi.get(ENDPOINTS.products.LIST, { params });
-        return response.data;
+        return normalizeProductPage(response.data);
     },
 
     getProductById: async (id) => {
         const response = await productApi.get(ENDPOINTS.products.DETAIL(id));
-        return response.data.product;
+        const body = response.data;
+        const product = normalizeProduct(body?.product || body);
+        if (!product) throw new UnexpectedResponseError(`GET /products/${id}`, body);
+        return product;
     },
 
-    searchProducts: async (query) => {
-        const response = await productApi.get(ENDPOINTS.products.LIST, { params: { search: query } });
-        return response.data;
+    searchProducts: async (query, params = {}) => {
+        const response = await productApi.get(ENDPOINTS.products.LIST, { params: { search: query, ...params } });
+        return normalizeProductPage(response.data, 'GET /products?search');
     },
 };
 
@@ -152,7 +163,9 @@ export const UserService = {
 export const SettingsService = {
     getStoreSettings: async () => {
         const response = await locationApi.get('/settings/store');
-        return response.data;
+        const body = response.data;
+        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new UnexpectedResponseError('GET /settings/store', body);
+        return body;
     },
 
     checkServiceability: async (latitude, longitude) => {
