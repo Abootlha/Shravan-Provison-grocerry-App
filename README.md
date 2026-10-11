@@ -19,7 +19,7 @@ More docs: `App_Flow_And_Architecture.md`, `docs/`. Older status notes are in `d
 
 ## Local setup
 
-Prerequisites: Node.js 20, npm, Docker (for MongoDB/Redis).
+Prerequisites: Node.js 22 (see `backend/.nvmrc`), npm, Docker (for MongoDB/Redis).
 
 ### 1. Backend + MongoDB + Redis
 
@@ -92,9 +92,14 @@ cd apps/rider-app && npx tsc --noEmit
 - **rider-app**: `npm ci`, `tsc --noEmit`
 - **customer-app**: `npm ci`, `expo config` check
 
-On pushes to `main`, the backend Docker image is built and pushed to
-`ghcr.io/<owner>/<repo>/backend`. No deploy step is configured yet.
+`.github/workflows/deploy-backend.yml` deploys the backend to production on pushes
+to `main` that touch `backend/` (verify, build, upload, PM2 reload, health check,
+automatic rollback).
 
 ## Deployment
 
-See `infrastructure/README.md` for the production stack (nginx with TLS, then backend, MongoDB and Redis).
+Production backend (VPS + PM2, auto-deploy from `main`, rollback, server setup):
+**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
+
+`infrastructure/README.md` describes an alternative Docker Compose stack (nginx with TLS,
+backend, MongoDB and Redis); it is not used by the automated deploy.

@@ -20,8 +20,8 @@
       "env": {
         "NODE_ENV": "production",
         "PUBLIC_NODE_ENV": "production",
-        "API_BASE_URL": "https://api.lumioui.com/api/v1",
-        "TRACKING_URL": "https://api.lumioui.com/tracking",
+        "API_BASE_URL": "https://api.shravanprovision.com/api/v1",
+        "TRACKING_URL": "https://api.shravanprovision.com/tracking",
         "EXPO_ROUTER_DISABLE_RN_NAVIGATION_CHECK": "1"
       }
     },
@@ -30,8 +30,8 @@
       "env": {
         "NODE_ENV": "production",
         "PUBLIC_NODE_ENV": "production",
-        "API_BASE_URL": "https://api.lumioui.com/api/v1",
-        "TRACKING_URL": "https://api.lumioui.com/tracking",
+        "API_BASE_URL": "https://api.shravanprovision.com/api/v1",
+        "TRACKING_URL": "https://api.shravanprovision.com/tracking",
         "EXPO_ROUTER_DISABLE_RN_NAVIGATION_CHECK": "1"
       }
     }
