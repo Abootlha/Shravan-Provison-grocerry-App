@@ -31,7 +31,6 @@ import { press } from '../theme/motion';
 import { hydrateCart, removeFromCart } from '../store/slices/cartSlice';
 import { useCheckout } from './checkout/useCheckout';
 import { DeliveryEtaCard } from './checkout/DeliveryEtaCard';
-import { useServiceArea } from './address/useServiceArea';
 import { CheckoutItemRow } from './checkout/CheckoutItemRow';
 import { OffersCard } from './checkout/OffersCard';
 import { GROUP_RADIUS, ICON_CIRCLE } from './checkout/layout';
@@ -58,7 +57,9 @@ const CheckoutScreen = ({ navigation, route }) => {
     const insets = useSafeAreaInsets();
     const c = useCheckout({ navigation, route });
     const { isHi } = c;
-    const { etaMinutes } = useServiceArea(); // store settings estimatedDeliveryMinutes, 10 until it loads
+    // Delivery time only from the store settings (null while unknown) and only while the store is open.
+    const etaMinutes = c.store.isOpen ? c.store.etaMinutes : null;
+    const closedLine = c.store.isOpen ? null : c.store.closedLine(isHi);
 
     const [addressSheet, setAddressSheet] = useState(false);
     const [paymentSheet, setPaymentSheet] = useState(false);
@@ -179,7 +180,12 @@ const CheckoutScreen = ({ navigation, route }) => {
 
     const header = (
         <View style={styles.header}>
-            <IconButton name="arrow-left" variant="ghost" accessibilityLabel={isHi ? 'वापस जाएं' : 'Go back'} onPress={goBack} />
+            {/* the Cart tab is a root: no back arrow there (the pushed Checkout keeps it) */}
+            {inTab ? (
+                <View style={styles.headerSpacer} />
+            ) : (
+                <IconButton name="arrow-left" variant="ghost" accessibilityLabel={isHi ? 'वापस जाएं' : 'Go back'} onPress={goBack} />
+            )}
             <Text variant="h3" accessibilityRole="header" style={styles.headerTitle}>
                 {isHi ? 'चेकआउट' : 'Checkout'}
             </Text>
@@ -199,7 +205,15 @@ const CheckoutScreen = ({ navigation, route }) => {
         <View style={[styles.empty, { paddingBottom: barOffset }]}>
             <EmptyState
                 title={isHi ? 'आपकी कार्ट खाली है' : 'Your cart is empty'}
-                subtitle={isHi ? 'अभी कुछ नहीं जोड़ा गया। आज की ज़रूरत का सामान जोड़ें, हम लगभग 10 मिनट में पहुँचा देंगे।' : 'Nothing added yet. Add today’s essentials and we’ll deliver in about 10 minutes.'}
+                subtitle={
+                    etaMinutes
+                        ? isHi
+                            ? `अभी कुछ नहीं जोड़ा गया। आज की ज़रूरत का सामान जोड़ें, हम लगभग ${etaMinutes} मिनट में पहुँचा देंगे।`
+                            : `Nothing added yet. Add today’s essentials and we’ll deliver in about ${etaMinutes} minutes.`
+                        : isHi
+                          ? 'अभी कुछ नहीं जोड़ा गया। आज की ज़रूरत का सामान जोड़ें।'
+                          : 'Nothing added yet. Add today’s essentials to get started.'
+                }
                 actionLabel={isHi ? 'खरीदारी शुरू करें' : 'Start shopping'}
                 onAction={goShopping}
             />
@@ -215,7 +229,7 @@ const CheckoutScreen = ({ navigation, route }) => {
                 keyboardShouldPersistTaps="handled"
             >
                 <View style={styles.gutter}>
-                    <DeliveryEtaCard minutes={etaMinutes} itemCount={c.totalItems} isHi={isHi}>
+                    <DeliveryEtaCard minutes={etaMinutes} closedLine={closedLine} itemCount={c.totalItems} isHi={isHi}>
                         <FreeDeliveryNudge itemTotal={c.bill.itemTotal} gap={c.bill.freeDeliveryGap} isHi={isHi} />
                     </DeliveryEtaCard>
                 </View>
@@ -303,6 +317,7 @@ const CheckoutScreen = ({ navigation, route }) => {
                     amount={c.bill.grandTotal}
                     isCod={c.selectedPayment === 'cod'}
                     onConfirm={onConfirm}
+                    closedLabel={closedLine}
                     bottomPad={barBottomPad}
                     isHi={isHi}
                 />

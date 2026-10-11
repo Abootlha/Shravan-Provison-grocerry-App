@@ -25,7 +25,7 @@ const IconCircle = ({ name, tone = 'tint' }) => {
  * dock on the Cart tab so nothing shows through below it.
  */
 const PlaceOrderBarBase = forwardRef(function PlaceOrderBar(
-    { address, onChangeAddress, paymentOption, onChangePayment, amount, isCod, onConfirm, bottomPad = 0, isHi },
+    { address, onChangeAddress, paymentOption, onChangePayment, amount, isCod, onConfirm, bottomPad = 0, closedLabel = null, isHi },
     sliderRef,
 ) {
     const styles = useStyles();
@@ -84,9 +84,10 @@ const PlaceOrderBarBase = forwardRef(function PlaceOrderBar(
             {address ? (
                 <SlideToConfirm
                     ref={sliderRef}
-                    label={isCod
+                    disabled={!!closedLabel}
+                    label={closedLabel || (isCod
                         ? (isHi ? `ऑर्डर के लिए स्लाइड करें · ₹${amount}` : `Slide to place order · ₹${amount}`)
-                        : (isHi ? `₹${amount} भुगतान के लिए स्लाइड करें` : `Slide to pay ₹${amount}`)}
+                        : (isHi ? `₹${amount} भुगतान के लिए स्लाइड करें` : `Slide to pay ₹${amount}`))}
                     confirmedLabel={isCod
                         ? (isHi ? 'ऑर्डर दिया जा रहा है…' : 'Placing your order…')
                         : (isHi ? 'भुगतान शुरू हो रहा है…' : 'Starting secure payment…')}

@@ -1,9 +1,14 @@
-import { useServiceArea } from '../../screens/address/useServiceArea';
+import { useStoreStatus } from '../../hooks/useStoreSettings';
 
 /**
- * Delivery ETA in minutes from store settings (estimatedDeliveryMinutes), 10 until it loads.
- * Backed by useServiceArea's module cache, so every card shares one GET /settings/store.
+ * What a product card's delivery chip should say, from the store settings (one shared request):
+ *   { minutes, closedLabel }
+ *   - open with a known estimatedDeliveryMinutes → minutes = N
+ *   - closed → closedLabel = "Opens 8 AM"
+ *   - unknown → both null (render no chip; never a guessed "10 mins")
  */
-export function useDeliveryEta() {
-    return useServiceArea().etaMinutes || 10;
+export function useDeliveryEta(isHi = false) {
+    const status = useStoreStatus();
+    if (!status.isOpen) return { minutes: null, closedLabel: status.opensLabel(isHi) };
+    return { minutes: status.etaMinutes, closedLabel: null };
 }

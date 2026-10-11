@@ -30,6 +30,16 @@ import { toast, haptic } from '../../components/ui';
 import { computeBill } from './bill';
 import { findPaymentOption } from './paymentMethods';
 import { resolveCoords, toClientAddresses } from '../address/addressUtils';
+import { markStoreClosed, useStoreStatus } from '../../hooks/useStoreSettings';
+import { describeError, friendlyError } from '../../services/normalize';
+
+/** POST /orders answers 409 { code: 'STORE_CLOSED', nextOpenAt } outside opening hours. */
+const storeClosedError = (error) => {
+    const data = error?.response?.data;
+    if (error?.response?.status !== 409) return null;
+    const code = data?.code || data?.error?.code;
+    return code === 'STORE_CLOSED' ? { nextOpenAt: data?.nextOpenAt ?? data?.error?.nextOpenAt ?? null } : null;
+};
 
 /** Overlay steps. 0-3 are the existing flow; 4 is the failure screen. */
 export const PAYMENT_STEP = {
@@ -49,9 +59,17 @@ export const getInstructionOptions = (isHi) => [
 
 const mongoIdPattern = /^[a-f\d]{24}$/i;
 
+// A 4xx message the server wrote for people (e.g. "Item out of stock"); never 5xx internals.
+const serverMessage = (error) => {
+    const status = error?.response?.status;
+    const msg = error?.response?.data?.message;
+    return status && status < 500 && typeof msg === 'string' ? msg : null;
+};
+
 export function useCheckout({ navigation, route }) {
     const dispatch = useDispatch();
     const { isHi } = useTranslation();
+    const store = useStoreStatus();
 
     const { totalAmount, totalItems, items: cartItems } = useSelector((state) => state.cart);
     const { savedAddresses, selectedAddress } = useSelector((state) => state.location);
@@ -74,7 +92,7 @@ export function useCheckout({ navigation, route }) {
     const isMountedRef = useRef(true);
 
     const hasItems = !!cartItems && cartItems.length > 0;
-    const bill = useMemo(() => computeBill(hasItems ? totalAmount : 0), [hasItems, totalAmount]);
+    const bill = useMemo(() => computeBill(hasItems ? totalAmount : 0, hasItems ? cartItems : []), [hasItems, totalAmount, cartItems]);
     const paymentOption = findPaymentOption(selectedPayment, isHi);
 
     useEffect(() => {
@@ -236,6 +254,19 @@ export function useCheckout({ navigation, route }) {
         });
     };
 
+    // 409 STORE_CLOSED: flip the app to "closed" everywhere and say when it opens. Returns true when handled.
+    const handleStoreClosed = (error) => {
+        const closed = storeClosedError(error);
+        if (!closed) return false;
+        markStoreClosed(closed.nextOpenAt);
+        haptic.warning();
+        toast.info(isHi ? 'स्टोर अभी बंद है' : 'The store is closed', {
+            description: isHi ? 'आपका ऑर्डर नहीं दिया गया। खुलने पर फिर से कोशिश करें।' : 'Your order wasn’t placed. Try again when it opens.',
+            duration: 6000,
+        });
+        return true;
+    };
+
     const dismissFailure = () => {
         setIsProcessingPayment(false);
         setPaymentStep(PAYMENT_STEP.CONNECTING);
@@ -246,6 +277,11 @@ export function useCheckout({ navigation, route }) {
      * so the slide-to-pay control can spring back.
      */
     const handleInitiatePayment = async () => {
+        if (!store.isOpen) {
+            toast.info(isHi ? 'स्टोर अभी बंद है' : 'The store is closed', { description: store.closedLine(isHi) });
+            return false;
+        }
+
         if (!cartItems || cartItems.length === 0) {
             toast.error(isHi ? 'कार्ट खाली है' : 'Your cart is empty', {
                 description: isHi ? 'ऑर्डर करने से पहले कार्ट में आइटम जोड़ें।' : 'Add items to your cart before placing an order.',
@@ -327,10 +363,11 @@ export function useCheckout({ navigation, route }) {
             setIsProcessingPayment(false);
             setPayuRequest(request);
         } catch (error) {
-            console.error('Payment initiation failed:', error?.response?.status, error?.response?.data?.message || error.message);
+            if (__DEV__) console.error('[checkout] payment start failed', describeError(error), error?.response?.data);
             setIsProcessingPayment(false);
+            if (handleStoreClosed(error)) return false;
             toast.error(isHi ? 'भुगतान त्रुटि' : 'Payment error', {
-                description: error?.response?.data?.message || (isHi ? 'पेमेंट गेटवे शुरू नहीं हो सका।' : 'Failed to initialize payment gateway.'),
+                description: serverMessage(error) || (error?.response ? (isHi ? 'पेमेंट गेटवे शुरू नहीं हो सका।' : 'Couldn’t start the payment. Try again.') : friendlyError(error, isHi)),
             });
         } finally {
             setIsPlacing(false);
@@ -404,11 +441,12 @@ export function useCheckout({ navigation, route }) {
             setIsProcessingPayment(false);
             navigation.replace('OrderTracking', { orderId });
         } catch (error) {
-            console.error('Order creation API error details:', error?.response?.status, error?.response?.data?.message || error.message);
+            if (__DEV__) console.error('[checkout] create order failed', describeError(error), error?.response?.data);
             setIsProcessingPayment(false);
             setPaymentStep(PAYMENT_STEP.CONNECTING);
+            if (handleStoreClosed(error)) return;
             toast.error(isHi ? 'ऑर्डर विफल' : 'Order failed', {
-                description: error?.response?.data?.message || (isHi ? 'ऑर्डर नहीं दिया जा सका। कृपया फिर से प्रयास करें।' : 'Your order could not be placed. Please try again.'),
+                description: serverMessage(error) || (error?.response ? (isHi ? 'ऑर्डर नहीं दिया जा सका। कृपया फिर से प्रयास करें।' : 'Your order could not be placed. Please try again.') : friendlyError(error, isHi)),
             });
         } finally {
             setIsPlacing(false);
@@ -419,6 +457,7 @@ export function useCheckout({ navigation, route }) {
 
     return {
         isHi,
+        store,
         cartItems: cartItems || [],
         hasItems,
         totalItems,

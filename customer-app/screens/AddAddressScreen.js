@@ -196,8 +196,11 @@ const AddAddressScreen = ({ navigation, route }) => {
             await reverseGeocode(latitude, longitude);
             await checkServiceability(latitude, longitude);
         } catch (error) {
-            console.log('Error getting location:', error);
-            // Fallback default coordinates
+            if (__DEV__) console.log('Error getting location:', error);
+            toast.info(isHi ? 'आपका स्थान नहीं मिला' : 'Couldn’t get your location', {
+                description: isHi ? 'पिन को अपने पते पर खिसकाएँ।' : 'Move the pin to your address.',
+            });
+            // Start the map near the store; the pin is only a starting point the customer moves
             const fallbackLat = 26.6926;
             const fallbackLng = 83.4687;
             setSelectedLocation({ latitude: fallbackLat, longitude: fallbackLng });
@@ -250,9 +253,10 @@ const AddAddressScreen = ({ navigation, route }) => {
                 }
             }
 
-            // 3. Final clean fallback formatting
+            // 3. Nothing found: never invent an address. Clear the area/pincode and ask for it.
             if (!addressStr || addressStr.toLowerCase().includes('undefined')) {
-                addressStr = 'Medical Road, Gorakhpur, Uttar Pradesh';
+                geocodeFailed();
+                return;
             }
 
             setAddressDetails({
@@ -261,13 +265,19 @@ const AddAddressScreen = ({ navigation, route }) => {
                 pincode: pincodeStr,
             });
         } catch (error) {
-            console.log('Reverse geocode error:', error);
-            setAddressDetails({
-                address: 'Medical Road, Gorakhpur, Uttar Pradesh',
-                city: 'Gorakhpur',
-                pincode: '273010',
-            });
+            if (__DEV__) console.log('Reverse geocode error:', error);
+            geocodeFailed();
         }
+    };
+
+    const geocodeFailed = () => {
+        setAddressDetails((prev) => ({ ...prev, address: '', pincode: '' }));
+        setErrors((prev) => ({
+            ...prev,
+            address: isHi
+                ? 'इस जगह का पता नहीं मिला। पता लिखें या पिन खिसकाएँ।'
+                : 'We couldn’t find the address for this spot. Type it in or move the pin.',
+        }));
     };
 
     const checkServiceability = (latitude, longitude) => {
@@ -549,9 +559,17 @@ const AddAddressScreen = ({ navigation, route }) => {
                                 <View style={styles.serviceable}>
                                     <MaterialCommunityIcons name="moped" size={18} color={colors.inkSecondary} />
                                     <Text variant="label" weight="medium" color="secondary" style={styles.flex}>
-                                        {isHi ? 'डिलीवरी ' : 'Delivery in '}
-                                        <Text variant="label" weight="bold" color="ink">{isHi ? `${serviceArea.etaMinutes} मिनट में` : `${serviceArea.etaMinutes} mins`}</Text>
-                                        {distanceKm != null ? (isHi ? ` · स्टोर से ${distanceKm} किमी` : ` · ${distanceKm} km from store`) : ''}
+                                        {serviceArea.etaMinutes ? (
+                                            <>
+                                                {isHi ? 'डिलीवरी ' : 'Delivery in '}
+                                                <Text variant="label" weight="bold" color="ink">{isHi ? `${serviceArea.etaMinutes} मिनट में` : `${serviceArea.etaMinutes} mins`}</Text>
+                                                {distanceKm != null ? (isHi ? ` · स्टोर से ${distanceKm} किमी` : ` · ${distanceKm} km from store`) : ''}
+                                            </>
+                                        ) : distanceKm != null ? (
+                                            isHi ? `हम यहाँ डिलीवर करते हैं · स्टोर से ${distanceKm} किमी` : `We deliver here · ${distanceKm} km from store`
+                                        ) : (
+                                            isHi ? 'हम यहाँ डिलीवर करते हैं' : 'We deliver here'
+                                        )}
                                     </Text>
                                 </View>
                             ) : (

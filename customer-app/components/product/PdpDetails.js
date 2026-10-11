@@ -1,13 +1,10 @@
 /**
- * PDP detail blocks: description text, highlight pairs, nutrition table, info rows and the
- * trust strip. Pure presentational pieces used by ProductDetailScreen.
+ * PDP detail blocks: description text, highlight pairs, nutrition table and info rows.
  */
 import React, { memo } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Text } from '../ui';
-import { radii, space } from '../../constants/theme';
-import { useTheme } from '../../theme';
+import { space } from '../../constants/theme';
 import { InfoRow } from './AccordionSection';
 
 /** Short lines without trailing punctuation read as sub-headings (legacy CMS format). */
@@ -83,40 +80,8 @@ export const productInfoRows = (p) =>
         p.attributes?.dietary?.length ? ['Dietary', p.attributes.dietary.join(', ')] : null,
     ].filter(Boolean);
 
-const TRUST = [
-    ['leaf', 'Fresh & quality assured', 'ताज़ा और गुणवत्ता की गारंटी'],
-    ['clock-outline', 'Delivered in 10 minutes', '10 मिनट में डिलीवरी'],
-    ['refresh', 'Easy returns & refunds', 'आसान रिटर्न और रिफ़ंड'],
-];
-
-export const TrustStrip = memo(function TrustStrip({ isHi }) {
-    const { colors } = useTheme();
-    return (
-    <View style={styles.trust}>
-        {TRUST.map(([icon, en, hi]) => (
-            <View key={icon} style={[styles.trustTile, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
-                <MaterialCommunityIcons name={icon} size={20} color={colors.inkSecondary} />
-                <Text variant="caption" color="secondary" align="center" numberOfLines={2}>
-                    {isHi ? hi : en}
-                </Text>
-            </View>
-        ))}
-    </View>
-    );
-});
-
 const styles = StyleSheet.create({
     gap: { height: space.sm },
     subhead: { marginTop: space.md, marginBottom: space.xs },
     note: { marginTop: space.sm },
-    trust: { flexDirection: 'row', gap: space.sm },
-    trustTile: {
-        flex: 1,
-        borderRadius: radii.card,
-        borderWidth: StyleSheet.hairlineWidth * 2,
-        paddingVertical: space.md,
-        paddingHorizontal: space.sm,
-        alignItems: 'center',
-        gap: space.xs + 2,
-    },
 });

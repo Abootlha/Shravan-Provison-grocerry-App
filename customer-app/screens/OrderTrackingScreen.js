@@ -26,7 +26,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radii, space } from '../constants/theme';
 import { makeStyles, useTheme } from '../theme';
 import { springs, durations, easings } from '../theme/motion';
-import { AnimatedScreen, ContentSwap, Screen, Text, haptic, toast } from '../components/ui';
+import { AnimatedScreen, ContentSwap, EmptyState, IconButton, Screen, Text, haptic, toast } from '../components/ui';
+import { describeError, friendlyError, UnexpectedResponseError } from '../services/normalize';
 import { OrderService, SettingsService } from '../services';
 import socketService from '../services/socketService';
 import OrderTrackingMap from '../components/OrderTrackingMap';
@@ -79,6 +80,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
     const { isHi } = useTranslation();
     const [expanded, setExpanded] = useState(false);
     const [storePhone, setStorePhone] = useState(null);
+    const [loadError, setLoadError] = useState(null);
     const [socketOrderId, setSocketOrderId] = useState(orderId || null);
     const lastRouteRefreshRef = useRef(0);
     const latestRiderLocationRef = useRef(null);
@@ -264,6 +266,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
     }, []);
 
     const fetchOrderDetails = async () => {
+        setLoadError(null);
         dispatch(setLoading(true));
         try {
             const data = await OrderService.getOrderById(orderId);
@@ -294,48 +297,11 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
                 dispatch(setLoading(false));
                 return;
             }
-            throw new Error('Order data empty or invalid');
+            throw new UnexpectedResponseError(`GET /orders/${orderId}`, data);
         } catch (err) {
-            console.log('Order fetch failed or demo order used, creating robust fallback tracking order:', err);
-            const fallbackOrder = {
-                _id: orderId || `ORD-${Date.now()}`,
-                orderId: orderId || `ORD-${Date.now()}`,
-                orderStatus: 'CONFIRMED',
-                paymentStatus: 'PAID',
-                paymentMethod: 'UPI',
-                totalAmount: 243,
-                createdAt: new Date().toISOString(),
-                estimatedDeliveryTime: '10-12 mins',
-                deliveryAddress: {
-                    type: 'Home',
-                    title: 'Home',
-                    addressLine: 'Medical Road, Near Gorakhpur University',
-                    address: 'Medical Road, Near Gorakhpur University',
-                    city: 'Gorakhpur',
-                    pincode: '273009',
-                    coordinates: { coordinates: [83.3731, 26.7606] }
-                },
-                items: [
-                    { name: 'Amul Taaza Toned Fresh Milk 1L', quantity: 2, price: 54 },
-                    { name: 'Fortune Sunlite Sunflower Oil 1L', quantity: 1, price: 135 }
-                ],
-                timeline: [
-                    { status: 'CONFIRMED', title: 'Order Confirmed', time: 'Just now', completed: true },
-                    { status: 'PACKED', title: 'Packing Items', time: 'In progress', completed: false },
-                    { status: 'OUT_FOR_DELIVERY', title: 'Out for Delivery', time: 'Pending', completed: false },
-                    { status: 'DELIVERED', title: 'Delivered', time: 'Pending', completed: false }
-                ],
-                rider: {
-                    name: 'Rahul Sharma',
-                    phone: '+919876543210',
-                    vehicleNumber: 'UP 53 AB 1234'
-                },
-                store: {
-                    name: 'Shravan Kirana Main Store',
-                    address: 'Golghar, Gorakhpur'
-                }
-            };
-            dispatch(setCurrentOrder(fallbackOrder));
+            // Never invent an order: show what failed and let the customer retry.
+            if (__DEV__) console.warn('[tracking] order fetch failed', describeError(err));
+            setLoadError(err);
             dispatch(setLoading(false));
         }
     };
@@ -429,6 +395,28 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
             });
         }
     }, [storePhone, isHi]);
+
+    if (loadError && !currentOrder) {
+        return (
+            <Screen edges={['top']} wash={false}>
+                <View style={styles.errorBar}>
+                    <IconButton name="arrow-left" variant="surface" accessibilityLabel={isHi ? 'वापस जाएँ' : 'Go back'} onPress={handleSafeBack} />
+                </View>
+                <AnimatedScreen>
+                    <EmptyState
+                        mood="sad"
+                        title={isHi ? 'ऑर्डर की जानकारी लोड नहीं हुई' : 'Couldn’t load this order'}
+                        subtitle={friendlyError(loadError, isHi)}
+                        actionLabel={isHi ? 'फिर से कोशिश करें' : 'Try again'}
+                        onAction={fetchOrderDetails}
+                        secondaryLabel={isHi ? 'मेरे ऑर्डर' : 'My orders'}
+                        onSecondary={() => navigation.navigate('OrdersHistory')}
+                        style={styles.errorState}
+                    />
+                </AnimatedScreen>
+            </Screen>
+        );
+    }
 
     if (isLoading || !currentOrder) {
         return (
@@ -605,6 +593,8 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
 
 const useStyles = makeStyles((t) => ({
     flex: { flex: 1 },
+    errorBar: { paddingHorizontal: space.gutter, paddingTop: space.sm },
+    errorState: { paddingTop: space['3xl'], paddingHorizontal: space.lg },
     body: { flex: 1, overflow: 'hidden', backgroundColor: t.colors.canvas },
     mapLayer: { position: 'absolute', top: 0, left: 0, right: 0 },
     mapHit: { position: 'absolute', left: 0, right: 0, justifyContent: 'flex-end', alignItems: 'flex-end', padding: space.md },

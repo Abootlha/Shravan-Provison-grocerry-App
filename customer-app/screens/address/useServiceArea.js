@@ -1,49 +1,33 @@
-import { useCallback, useEffect, useState } from 'react';
-import { SettingsService } from '../../services';
+import { useCallback, useMemo } from 'react';
+import { useStoreSettings } from '../../hooks/useStoreSettings';
 import { haversineKm } from './addressUtils';
 
-// Used until GET /settings/store answers (or if it fails).
+// Geometry used until GET /settings/store answers (or if it fails): the pin check stays usable and
+// the server re-validates the address. The delivery time has NO fallback: it is shown only when the
+// store settings provide it.
 const FALLBACK = {
     store: { latitude: 26.7588, longitude: 83.37 },
     radiusKm: 10,
-    etaMinutes: 10,
-};
-
-let cached = null;
-let inflight = null;
-
-const load = () => {
-    if (cached) return Promise.resolve(cached);
-    if (!inflight) {
-        inflight = SettingsService.getStoreSettings()
-            .then((s) => {
-                const lat = Number(s?.location?.latitude);
-                const lng = Number(s?.location?.longitude);
-                cached = {
-                    store: Number.isFinite(lat) && Number.isFinite(lng) ? { latitude: lat, longitude: lng } : FALLBACK.store,
-                    radiusKm: Number(s?.serviceRadiusKm) || FALLBACK.radiusKm,
-                    etaMinutes: Number(s?.estimatedDeliveryMinutes) || FALLBACK.etaMinutes,
-                };
-                return cached;
-            })
-            .catch(() => FALLBACK)
-            .finally(() => { inflight = null; });
-    }
-    return inflight;
 };
 
 /**
  * Store location + delivery radius from the store settings, with distance and
  * serviceability helpers. `distanceKm(point)` is null when the point has no coords.
+ * `etaMinutes` is the store's estimatedDeliveryMinutes, or null while unknown.
  */
 export function useServiceArea() {
-    const [area, setArea] = useState(cached || FALLBACK);
-
-    useEffect(() => {
-        let alive = true;
-        load().then((a) => { if (alive) setArea(a); });
-        return () => { alive = false; };
-    }, []);
+    const { settings } = useStoreSettings();
+    const area = useMemo(() => {
+        const lat = Number(settings?.location?.latitude);
+        const lng = Number(settings?.location?.longitude);
+        const eta = Number(settings?.estimatedDeliveryMinutes);
+        return {
+            store: Number.isFinite(lat) && Number.isFinite(lng) ? { latitude: lat, longitude: lng } : FALLBACK.store,
+            radiusKm: Number(settings?.serviceRadiusKm) || FALLBACK.radiusKm,
+            etaMinutes: Number.isFinite(eta) && eta > 0 ? eta : null,
+            isOpen: settings?.isOpen !== false,
+        };
+    }, [settings]);
 
     const distanceKm = useCallback((point) => {
         const lat = point?.latitude ?? point?.coords?.latitude;

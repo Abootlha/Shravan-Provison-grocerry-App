@@ -2,7 +2,7 @@
  * HomeHeader — the solid surface header at the top of Home (DESIGN.md "Home header").
  *
  *   ┌ GradientHeader (solid surface, hairline) ────────────────┐
- *   │ Delivery in 10 minutes                           (avatar) │  ← collapsible block (the one
+ *   │ Delivery in 10 minutes  (or: Closed · opens at 8 AM)  (avatar) │  ← collapsible block (the one
  *   │ Home · 12 MG Road, Indiranagar ▾                         │    mixed-weight headline)
  *   │ [Free delivery above ₹200]  ● Open till 11 PM            │
  *   │ [ Search for 'milk'                             |  mic ] │  ← sticks
@@ -42,7 +42,7 @@ const showApiDiagnostics = () => {
 const HomeHeader = ({
     theme,
     scrollY,
-    etaMinutes,
+    headline,
     storeBadge,
     offerLabel,
     addressType,
@@ -111,11 +111,11 @@ const HomeHeader = ({
                                 <Headline
                                     variant="h1"
                                     color={theme.ink}
-                                    lead={labels.deliveryIn}
-                                    emphasis={`${etaMinutes} ${labels.minutes}`}
+                                    lead={headline.lead}
+                                    emphasis={headline.emphasis}
                                     numberOfLines={1}
                                     accessibilityRole="header"
-                                    accessibilityLabel={`${labels.deliveryIn} ${etaMinutes} ${labels.minutes}`}
+                                    accessibilityLabel={headline.accessibilityLabel || `${headline.lead} ${headline.emphasis}`}
                                 />
                                 <PressableScale
                                     onPress={onAddressPress}
