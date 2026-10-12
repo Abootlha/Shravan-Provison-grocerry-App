@@ -2,6 +2,12 @@
  * All checkout state and the order/payment flow. The UI in CheckoutScreen and
  * screens/checkout/* only renders what this hook returns.
  *
+ * Bill: settings.fees give an instant estimate; POST /orders/quote (useOrderQuote) is the
+ * bill the customer pays. Payment is blocked until a fresh quote for this exact cart exists.
+ *
+ * COD: POST /orders, then "Order placed" only once the server has created it, then the
+ * tracking screen (GET /orders/:id + socket updates) shows the real status.
+ *
  * Online payment (unchanged, see services/paymentService.js):
  *   createOrder (server sets paymentStatus PENDING) -> POST /payments/seamless-hash
  *   -> PayU (web: auto-submitted form, native: WebView) -> poll GET /orders/:id
@@ -24,12 +30,23 @@ import {
     checkOrderPayment,
 } from '../../services/paymentService';
 import { setSavedAddresses, setSelectedAddress } from '../../store/slices/locationSlice';
-import { clearCart } from '../../store/slices/cartSlice';
+import { clearCart, removeFromCart } from '../../store/slices/cartSlice';
 import { useTranslation } from '../../hooks/useTranslation';
 import { toast, haptic } from '../../components/ui';
-import { computeBill } from './bill';
+import { billFromQuote, estimateBill } from './bill';
+import { useOrderQuote } from './useOrderQuote';
 import { findPaymentOption } from './paymentMethods';
 import { resolveCoords, toClientAddresses } from '../address/addressUtils';
+import { markStoreClosed, useStoreFees, useStoreStatus } from '../../hooks/useStoreSettings';
+import { describeError, friendlyError } from '../../services/normalize';
+
+/** POST /orders answers 409 { code: 'STORE_CLOSED', nextOpenAt } outside opening hours. */
+const storeClosedError = (error) => {
+    const data = error?.response?.data;
+    if (error?.response?.status !== 409) return null;
+    const code = data?.code || data?.error?.code;
+    return code === 'STORE_CLOSED' ? { nextOpenAt: data?.nextOpenAt ?? data?.error?.nextOpenAt ?? null } : null;
+};
 
 /** Overlay steps. 0-3 are the existing flow; 4 is the failure screen. */
 export const PAYMENT_STEP = {
@@ -49,11 +66,20 @@ export const getInstructionOptions = (isHi) => [
 
 const mongoIdPattern = /^[a-f\d]{24}$/i;
 
+// A 4xx message the server wrote for people (e.g. "Item out of stock"); never 5xx internals.
+const serverMessage = (error) => {
+    const status = error?.response?.status;
+    const msg = error?.response?.data?.message;
+    return status && status < 500 && typeof msg === 'string' ? msg : null;
+};
+
 export function useCheckout({ navigation, route }) {
     const dispatch = useDispatch();
     const { isHi } = useTranslation();
+    const store = useStoreStatus();
 
-    const { totalAmount, totalItems, items: cartItems } = useSelector((state) => state.cart);
+    const { totalItems, items: cartItems } = useSelector((state) => state.cart);
+    const fees = useStoreFees();
     const { savedAddresses, selectedAddress } = useSelector((state) => state.location);
 
     const [selectedPayment, setSelectedPayment] = useState('phonepe');
@@ -74,7 +100,28 @@ export function useCheckout({ navigation, route }) {
     const isMountedRef = useRef(true);
 
     const hasItems = !!cartItems && cartItems.length > 0;
-    const bill = useMemo(() => computeBill(hasItems ? totalAmount : 0), [hasItems, totalAmount]);
+    const quote = useOrderQuote(cartItems, { enabled: hasItems });
+    // Lines the server will sell (refused ones are listed separately and block payment).
+    const payableItems = useMemo(() => {
+        if (!hasItems) return [];
+        const bad = new Set(quote.refused.map((r) => r.id));
+        return bad.size ? cartItems.filter((i) => !bad.has(i.id)) : cartItems;
+    }, [hasItems, cartItems, quote.refused]);
+    const bill = useMemo(() => {
+        if (quote.quote) return billFromQuote(quote.quote, payableItems, fees);
+        const itemTotal = payableItems.reduce((sum, i) => sum + (Number(i.price) || 0) * (Number(i.quantity) || 0), 0);
+        return estimateBill(itemTotal, payableItems, fees);
+    }, [quote.quote, payableItems, fees]);
+    // 'ready' | 'updating' | 'error' | 'refused'
+    const billState = quote.refused.length
+        ? 'refused'
+        : quote.status === 'ready' && quote.quote
+          ? 'ready'
+          : quote.status === 'error'
+            ? 'error'
+            : 'updating';
+    // The amount on the slide-to-pay: the quote's totalAmount, or null (never a guess).
+    const payableAmount = billState === 'ready' ? Number(quote.quote.totalAmount) : null;
     const paymentOption = findPaymentOption(selectedPayment, isHi);
 
     useEffect(() => {
@@ -159,11 +206,12 @@ export function useCheckout({ navigation, route }) {
                 price: item.price,
                 image: item.image || undefined,
             })),
-            itemTotal: bill.itemTotal,
-            deliveryFee: bill.deliveryFee,
-            packagingFee: bill.packagingFee,
-            discount: bill.discount,
-            totalAmount: bill.grandTotal,
+            // Informational: the server prices the order itself, with the same calculation as the quote.
+            itemTotal: quote.quote.itemTotal,
+            deliveryFee: quote.quote.deliveryFee,
+            packagingFee: quote.quote.packagingFee,
+            discount: quote.quote.discount,
+            totalAmount: quote.quote.totalAmount,
             deliveryAddress: {
                 type: addrToUse.type || 'Home',
                 address: addrToUse.address || addrToUse.addressLine,
@@ -236,6 +284,19 @@ export function useCheckout({ navigation, route }) {
         });
     };
 
+    // 409 STORE_CLOSED: flip the app to "closed" everywhere and say when it opens. Returns true when handled.
+    const handleStoreClosed = (error) => {
+        const closed = storeClosedError(error);
+        if (!closed) return false;
+        markStoreClosed(closed.nextOpenAt);
+        haptic.warning();
+        toast.info(isHi ? 'स्टोर अभी बंद है' : 'The store is closed', {
+            description: isHi ? 'आपका ऑर्डर नहीं दिया गया। खुलने पर फिर से कोशिश करें।' : 'Your order wasn’t placed. Try again when it opens.',
+            duration: 6000,
+        });
+        return true;
+    };
+
     const dismissFailure = () => {
         setIsProcessingPayment(false);
         setPaymentStep(PAYMENT_STEP.CONNECTING);
@@ -246,6 +307,11 @@ export function useCheckout({ navigation, route }) {
      * so the slide-to-pay control can spring back.
      */
     const handleInitiatePayment = async () => {
+        if (!store.isOpen) {
+            toast.info(isHi ? 'स्टोर अभी बंद है' : 'The store is closed', { description: store.closedLine(isHi) });
+            return false;
+        }
+
         if (!cartItems || cartItems.length === 0) {
             toast.error(isHi ? 'कार्ट खाली है' : 'Your cart is empty', {
                 description: isHi ? 'ऑर्डर करने से पहले कार्ट में आइटम जोड़ें।' : 'Add items to your cart before placing an order.',
@@ -269,6 +335,23 @@ export function useCheckout({ navigation, route }) {
             return false;
         }
 
+        if (billState !== 'ready') {
+            if (billState === 'refused') {
+                toast.error(isHi ? 'कुछ सामान उपलब्ध नहीं हैं' : 'Some items aren’t available', {
+                    description: isHi ? 'ऑर्डर करने से पहले उन्हें हटाएं।' : 'Remove them from your cart before placing the order.',
+                });
+            } else if (billState === 'error') {
+                toast.error(isHi ? 'कुल राशि की पुष्टि नहीं हुई' : 'Couldn’t confirm your total', {
+                    description: isHi ? 'फिर से प्रयास करें।' : 'Tap Retry on the bill and try again.',
+                });
+            } else {
+                toast.info(isHi ? 'कुल राशि अपडेट हो रही है' : 'Updating your total', {
+                    description: isHi ? 'एक पल रुकें।' : 'One moment, then slide again.',
+                });
+            }
+            return false;
+        }
+
         const invalidCartItem = cartItems.find((item) => {
             const productId = item.productId || item._id || item.id;
             return !productId || !mongoIdPattern.test(String(productId));
@@ -284,24 +367,7 @@ export function useCheckout({ navigation, route }) {
         clearPaymentTimers();
 
         if (selectedPayment === 'cod') {
-            setIsProcessingPayment(true);
-            setPaymentStep(PAYMENT_STEP.CONNECTING);
-
-            // Step 1 after 1.2 seconds: preparing the order
-            const t1 = setTimeout(() => {
-                setPaymentStep(PAYMENT_STEP.VERIFYING);
-            }, 1200);
-
-            // Step 2 after 2.5 seconds: confirmed -> place the order
-            const t2 = setTimeout(() => {
-                setPaymentStep(PAYMENT_STEP.APPROVED);
-                const t3 = setTimeout(async () => {
-                    await placeCodOrder();
-                }, 900);
-                paymentTimersRef.current.push(t3);
-            }, 2500);
-
-            paymentTimersRef.current.push(t1, t2);
+            placeCodOrder();
             return true;
         }
 
@@ -327,10 +393,12 @@ export function useCheckout({ navigation, route }) {
             setIsProcessingPayment(false);
             setPayuRequest(request);
         } catch (error) {
-            console.error('Payment initiation failed:', error?.response?.status, error?.response?.data?.message || error.message);
+            if (__DEV__) console.error('[checkout] payment start failed', describeError(error), error?.response?.data);
             setIsProcessingPayment(false);
+            if (handleStoreClosed(error)) return false;
+            if (error?.response?.status === 400) quote.retry(); // re-check which lines the server refuses
             toast.error(isHi ? 'भुगतान त्रुटि' : 'Payment error', {
-                description: error?.response?.data?.message || (isHi ? 'पेमेंट गेटवे शुरू नहीं हो सका।' : 'Failed to initialize payment gateway.'),
+                description: serverMessage(error) || (error?.response ? (isHi ? 'पेमेंट गेटवे शुरू नहीं हो सका।' : 'Couldn’t start the payment. Try again.') : friendlyError(error, isHi)),
             });
         } finally {
             setIsPlacing(false);
@@ -396,19 +464,23 @@ export function useCheckout({ navigation, route }) {
         });
     };
 
+    // COD: one real request. "Placing your order…" (no cancel: the request can't be recalled)
+    // until the server answers; "Order placed" only once it has created the order.
     const placeCodOrder = async () => {
         setIsPlacing(true);
+        setIsProcessingPayment(true);
+        setPaymentStep(PAYMENT_STEP.VERIFYING);
         try {
             const { orderId } = await createOrder(buildOrderData());
-            dispatch(clearCart());
-            setIsProcessingPayment(false);
-            navigation.replace('OrderTracking', { orderId });
+            finishPaidOrder(orderId);
         } catch (error) {
-            console.error('Order creation API error details:', error?.response?.status, error?.response?.data?.message || error.message);
+            if (__DEV__) console.error('[checkout] create order failed', describeError(error), error?.response?.data);
             setIsProcessingPayment(false);
             setPaymentStep(PAYMENT_STEP.CONNECTING);
+            if (handleStoreClosed(error)) return;
+            if (error?.response?.status === 400) quote.retry(); // re-check which lines the server refuses
             toast.error(isHi ? 'ऑर्डर विफल' : 'Order failed', {
-                description: error?.response?.data?.message || (isHi ? 'ऑर्डर नहीं दिया जा सका। कृपया फिर से प्रयास करें।' : 'Your order could not be placed. Please try again.'),
+                description: serverMessage(error) || (error?.response ? (isHi ? 'ऑर्डर नहीं दिया जा सका। कृपया फिर से प्रयास करें।' : 'Your order could not be placed. Please try again.') : friendlyError(error, isHi)),
             });
         } finally {
             setIsPlacing(false);
@@ -417,12 +489,24 @@ export function useCheckout({ navigation, route }) {
 
     const clearCartItems = () => dispatch(clearCart());
 
+    // Removes the lines the server refused; the screen has listed them by name first.
+    const removeRefusedItems = () => {
+        quote.refused.forEach((r) => dispatch(removeFromCart(r.id)));
+        haptic.light();
+    };
+
     return {
         isHi,
+        store,
         cartItems: cartItems || [],
         hasItems,
         totalItems,
         bill,
+        billState,
+        payableAmount,
+        refusedItems: quote.refused,
+        retryQuote: quote.retry,
+        removeRefusedItems,
         tip,
         setTip,
         savedAddresses: savedAddresses || [],

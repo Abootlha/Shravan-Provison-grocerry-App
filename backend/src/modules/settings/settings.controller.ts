@@ -3,6 +3,7 @@ import { SettingsService } from './settings.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { UpdateStoreSettingsDto } from './dto/update-store-settings.dto';
+import { AuditAction } from '../audit/audit.interceptor';
 
 @Controller('settings')
 export class SettingsController {
@@ -10,16 +11,7 @@ export class SettingsController {
 
   @Get('store')
   async getStoreSettings() {
-    const settings = await this.settingsService.getStoreSettings();
-    return {
-      storeName: settings.storeName,
-      location: settings.location,
-      storeTimings: settings.storeTimings,
-      contactPhone: settings.contactPhone,
-      serviceRadiusKm: settings.serviceRadiusKm,
-      estimatedDeliveryMinutes: settings.estimatedDeliveryMinutes,
-      isActive: settings.isActive,
-    };
+    return this.settingsService.getPublicStoreSettings();
   }
 
   @Get('check-serviceability')
@@ -45,21 +37,15 @@ export class SettingsController {
     return this.settingsService.checkServiceability(lat, lon);
   }
 
+  // Admin only (managers cannot change settings or fees).
   @Post('store')
   @UseGuards(JwtAuthGuard, AdminGuard)
+  @AuditAction('settings.update')
   async updateStoreSettings(@Body() updateData: UpdateStoreSettingsDto) {
     const settings = await this.settingsService.updateStoreSettings(updateData);
     return {
       message: 'Settings updated successfully',
-      settings: {
-        storeName: settings.storeName,
-        location: settings.location,
-        storeTimings: settings.storeTimings,
-        contactPhone: settings.contactPhone,
-        serviceRadiusKm: settings.serviceRadiusKm,
-        estimatedDeliveryMinutes: settings.estimatedDeliveryMinutes,
-        isActive: settings.isActive,
-      },
+      settings: SettingsService.toPublicView(settings),
     };
   }
 }

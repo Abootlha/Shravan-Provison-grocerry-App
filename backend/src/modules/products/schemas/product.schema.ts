@@ -39,6 +39,46 @@ export enum ReturnPolicyTemplate {
   NO_RETURN = 'NO_RETURN',
 }
 
+/**
+ * Catalogue lifecycle. Documents created before this field existed have no
+ * status and are treated as active (no migration needed).
+ */
+export enum ProductStatus {
+  DRAFT = 'draft',
+  ACTIVE = 'active',
+  ARCHIVED = 'archived',
+}
+
+/** Low stock = 0 < stock <= reorderLevel; out of stock = stock <= 0. */
+export const DEFAULT_REORDER_LEVEL = 10;
+
+/** Mongo filter matching active products, including legacy ones without status. */
+export const ACTIVE_STATUS_FILTER = {
+  status: { $in: [ProductStatus.ACTIVE, null] },
+};
+
+export const productStatusOf = (product: {
+  status?: ProductStatus | string | null;
+}): ProductStatus => (product?.status as ProductStatus) || ProductStatus.ACTIVE;
+
+/** Price used at checkout (legacy `price`, else pricing.sellingPrice). */
+export const checkoutPriceOf = (product: {
+  price?: number | null;
+  pricing?: { sellingPrice?: number | null } | null;
+}): number | null => {
+  const price = product?.price ?? product?.pricing?.sellingPrice;
+  return typeof price === 'number' && Number.isFinite(price) && price > 0
+    ? price
+    : null;
+};
+
+/** Can this product be bought right now (ignoring stock)? */
+export const isProductSellable = (product: any): boolean =>
+  !!product &&
+  product.isAvailable !== false &&
+  productStatusOf(product) === ProductStatus.ACTIVE &&
+  checkoutPriceOf(product) !== null;
+
 // Sub-schemas
 class Pricing {
   @Prop({ required: true })
@@ -251,6 +291,17 @@ export class Product {
   @Prop({ default: true, index: true })
   isAvailable!: boolean;
 
+  @Prop({
+    type: String,
+    enum: ProductStatus,
+    default: ProductStatus.ACTIVE,
+  })
+  status!: ProductStatus;
+
+  /** Stock at or below this (and above 0) counts as low stock. */
+  @Prop({ default: DEFAULT_REORDER_LEVEL, min: 0 })
+  reorderLevel!: number;
+
   // Analytics
   @Prop({ default: 0 })
   rating!: number;
@@ -273,6 +324,12 @@ ProductSchema.index({ name: 'text', brand: 'text' });
 ProductSchema.index({ isAvailable: 1, soldCount: -1 }); // For popular products
 ProductSchema.index({ isAvailable: 1, createdAt: -1 }); // For new products
 ProductSchema.index({ brand: 1, categoryId: 1 }); // For brand filtering
+// Admin product list: status filter + hierarchy filters + recent edits first.
+ProductSchema.index({ status: 1, categoryId: 1, updatedAt: -1 });
+ProductSchema.index({ status: 1, subcategoryId: 1, updatedAt: -1 });
+ProductSchema.index({ status: 1, updatedAt: -1 });
+// Inventory views (low / out of stock) and analytics counts.
+ProductSchema.index({ status: 1, stock: 1 });
 
 // Virtual for backward compatibility - price from pricing.sellingPrice
 ProductSchema.virtual('displayPrice').get(function () {

@@ -15,7 +15,7 @@
  * All copy arrives translated from collections.js; nothing here hard-codes a string.
  */
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useDispatch, useSelector } from 'react-redux';
@@ -28,6 +28,7 @@ import { makeStyles, useTheme } from '../../theme';
 import { press } from '../../theme/motion';
 import { HomeSectionHeader, RailList } from './HomeSections';
 import { fmt } from './collections';
+import { useContentWidth } from '../../hooks/useContentWidth';
 
 // ---------------------------------------------------------------------------
 // Reveal — entrance on first view only
@@ -89,7 +90,7 @@ const CardHead = memo(({ section }) => {
 
 export const MomentSection = memo(({ section, language, onProductPress }) => {
     const styles = useStyles();
-    const { width } = useWindowDimensions();
+    const width = useContentWidth();
     // three equal wells across the card's inner width
     const inner = width - space.gutter * 2 - space.lg * 2;
     const well = Math.floor((inner - space.sm * (ROW_COUNT - 1)) / ROW_COUNT);
@@ -220,7 +221,7 @@ const FreshTile = memo(({ item, width, language, labels, addLabel, soldOutLabel,
 
 export const FreshSection = memo(({ section, language, labels, addLabel, soldOutLabel, actionLabel, onProductPress, onSeeAll }) => {
     const styles = useStyles();
-    const { width } = useWindowDimensions();
+    const width = useContentWidth();
     const tileW = Math.floor((width - space.gutter * 2 - space.md) / 2);
     return (
         <View style={styles.editorialSection}>

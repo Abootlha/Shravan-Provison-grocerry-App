@@ -1,6 +1,10 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import {
+  redisConnectionOptions,
+  scopedPubSubChannel,
+} from '../../config/redis-options';
 
 @Injectable()
 export class RedisService implements OnModuleDestroy {
@@ -8,9 +12,7 @@ export class RedisService implements OnModuleDestroy {
 
   constructor(private configService: ConfigService) {
     this.client = new Redis({
-      host: this.configService.get<string>('redis.host') || 'localhost',
-      port: this.configService.get<number>('redis.port') || 6379,
-      password: this.configService.get<string>('redis.password'),
+      ...redisConnectionOptions(this.configService),
       maxRetriesPerRequest: 3,
     });
   }
@@ -39,11 +41,25 @@ export class RedisService implements OnModuleDestroy {
     await this.client.del(key);
   }
 
+  /**
+   * Deletes keys matching a pattern with incremental SCAN (never KEYS, which
+   * blocks Redis). Prefer versioned keys (CatalogCacheService) for caches.
+   */
   async delPattern(pattern: string): Promise<void> {
-    const keys = await this.client.keys(pattern);
-    if (keys.length > 0) {
-      await this.client.del(...keys);
-    }
+    let cursor = '0';
+    do {
+      const [next, keys] = await this.client.scan(
+        cursor,
+        'MATCH',
+        pattern,
+        'COUNT',
+        200,
+      );
+      cursor = next;
+      if (keys.length > 0) {
+        await this.client.unlink(...keys);
+      }
+    } while (cursor !== '0');
   }
 
   async getJSON<T>(key: string): Promise<T | null> {
@@ -55,8 +71,15 @@ export class RedisService implements OnModuleDestroy {
     await this.set(key, JSON.stringify(value), ttlSeconds);
   }
 
+  /**
+   * Publishes on the environment-scoped channel (see scopedPubSubChannel);
+   * subscribers must scope their channel names the same way.
+   */
   async publish(channel: string, message: string): Promise<void> {
-    await this.client.publish(channel, message);
+    await this.client.publish(
+      scopedPubSubChannel(this.configService, channel),
+      message,
+    );
   }
 
   static Keys = {

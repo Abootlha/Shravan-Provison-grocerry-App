@@ -8,7 +8,12 @@ import {
 } from '@nestjs/common';
 import { Types } from 'mongoose';
 import * as fc from 'fast-check';
-import { OrdersService, MAX_DELIVERY_OTP_ATTEMPTS } from './orders.service';
+import {
+  OrdersService,
+  MAX_DELIVERY_OTP_ATTEMPTS,
+  StoreClosedException,
+  ADMIN_ORDER_EVENTS_CHANNEL,
+} from './orders.service';
 import {
   Order,
   OrderStatus,
@@ -788,6 +793,267 @@ describe('OrdersService - Property-Based Tests', () => {
         }),
       ).rejects.toThrow('Some items are out of stock');
     });
+
+    it('charges the default fees when settings have none (same as before)', async () => {
+      // 2 x 30 = 60: below the free-delivery threshold.
+      const order: any = await service.createOrder(userId, {
+        ...baseData,
+        paymentMethod: PaymentMethod.COD,
+      });
+      expect(order).toMatchObject({
+        itemTotal: 60,
+        deliveryFee: 25,
+        packagingFee: 5,
+        discount: 3,
+        totalAmount: 87,
+      });
+    });
+
+    it('reads fees from store settings', async () => {
+      mockSettingsService.getStoreSettings.mockResolvedValue({
+        ...fakeStoreSettings,
+        fees: {
+          deliveryFee: 40,
+          freeDeliveryThreshold: 50,
+          packagingFee: 2,
+          discountRate: 0.1,
+        },
+      });
+      const order: any = await service.createOrder(userId, {
+        ...baseData,
+        paymentMethod: PaymentMethod.COD,
+      });
+      expect(order).toMatchObject({
+        itemTotal: 60,
+        deliveryFee: 0,
+        packagingFee: 2,
+        discount: 6,
+        totalAmount: 56,
+      });
+    });
+
+    it('quote returns exactly the totals the created order charges', async () => {
+      for (const fees of [
+        undefined,
+        {
+          deliveryFee: 15,
+          freeDeliveryThreshold: 500,
+          packagingFee: 4,
+          discountRate: 0.02,
+        },
+      ]) {
+        mockSettingsService.getStoreSettings.mockResolvedValue({
+          ...fakeStoreSettings,
+          fees,
+        });
+        const quote = await service.quoteOrder(userId, baseData.items);
+        const order: any = await service.createOrder(userId, {
+          ...baseData,
+          paymentMethod: PaymentMethod.COD,
+        });
+        for (const key of [
+          'itemTotal',
+          'deliveryFee',
+          'packagingFee',
+          'discount',
+          'totalAmount',
+        ] as const) {
+          expect(quote[key]).toBe(order[key]);
+        }
+        expect(quote.isOpen).toBe(true);
+        expect(quote.items).toEqual([
+          expect.objectContaining({ quantity: 2, price: 30, lineTotal: 60 }),
+        ]);
+      }
+      // Quoting never reserves stock.
+      expect(mockProductsService.checkAndLockStock).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects with 409 STORE_CLOSED when the store is closed, before locking stock', async () => {
+      mockSettingsService.getStoreSettings.mockResolvedValue({
+        ...fakeStoreSettings,
+        isActive: false,
+      });
+      const attempt = service.createOrder(userId, {
+        ...baseData,
+        paymentMethod: PaymentMethod.COD,
+      });
+      await expect(attempt).rejects.toBeInstanceOf(StoreClosedException);
+      await attempt.catch((error: any) => {
+        expect(error.getStatus()).toBe(409);
+        expect(error.getResponse()).toMatchObject({
+          code: 'STORE_CLOSED',
+          nextOpenAt: null,
+        });
+      });
+      expect(mockProductsService.checkAndLockStock).not.toHaveBeenCalled();
+
+      const quote = await service.quoteOrder(userId, baseData.items);
+      expect(quote.isOpen).toBe(false);
+    });
+
+    it('includes nextOpenAt when closed outside store timings', async () => {
+      // A one-minute window that is never "now" unless the clock lands on it.
+      const now = new Date();
+      const hh = String((now.getUTCHours() + 12) % 24).padStart(2, '0');
+      mockSettingsService.getStoreSettings.mockResolvedValue({
+        ...fakeStoreSettings,
+        timezone: 'UTC',
+        storeTimings: { openTime: `${hh}:00`, closeTime: `${hh}:01` },
+      });
+      await expect(
+        service.createOrder(userId, {
+          ...baseData,
+          paymentMethod: PaymentMethod.COD,
+        }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'STORE_CLOSED',
+          nextOpenAt: expect.any(String),
+        }),
+      });
+    });
+
+    it('does not sell draft/archived or unpriced products', async () => {
+      for (const product of [
+        { status: 'draft', price: 30 },
+        { status: 'archived', price: 30 },
+        { price: 0 },
+      ]) {
+        mockProductsService.findById.mockResolvedValue({
+          _id: productId,
+          name: 'Milk',
+          stock: 10,
+          isAvailable: true,
+          ...product,
+        });
+        await expect(
+          service.createOrder(userId, {
+            ...baseData,
+            paymentMethod: PaymentMethod.COD,
+          }),
+        ).rejects.toThrow('no longer available');
+      }
+    });
+
+    it('publishes order:new for admin dashboards', async () => {
+      await service.createOrder(userId, {
+        ...baseData,
+        paymentMethod: PaymentMethod.COD,
+      });
+      const call = mockRedisService.publish.mock.calls.find(
+        ([channel]: [string]) => channel === ADMIN_ORDER_EVENTS_CHANNEL,
+      );
+      expect(call).toBeDefined();
+      expect(JSON.parse(call[1])).toMatchObject({
+        event: 'order:new',
+        order: { orderStatus: 'PENDING', totalAmount: 87 },
+      });
+    });
+  });
+
+  describe('Admin order list and detail', () => {
+    const chain = (value: any) => {
+      const q: any = {
+        select: () => q,
+        limit: () => q,
+        lean: () => q,
+        sort: () => q,
+        exec: () => Promise.resolve(value),
+      };
+      return q;
+    };
+
+    it('builds filters for status list, payment, rider and dates', async () => {
+      const riderId = new Types.ObjectId().toString();
+      const result = await service.adminListOrders({
+        page: 2,
+        limit: 10,
+        status: [OrderStatus.PENDING, OrderStatus.CONFIRMED],
+        paymentStatus: PaymentStatus.PENDING,
+        paymentMethod: PaymentMethod.UPI,
+        riderId,
+        dateFrom: '2026-10-01',
+        dateTo: '2026-10-02',
+        sort: '-totalAmount',
+      });
+
+      const [filter] = mockOrderModel.find.mock.calls.at(-1);
+      expect(filter).toMatchObject({
+        orderStatus: { $in: ['PENDING', 'CONFIRMED'] },
+        paymentStatus: 'PENDING',
+        paymentMethod: 'UPI',
+        createdAt: {
+          $gte: new Date('2026-10-01'),
+          // A bare end date includes that whole day.
+          $lt: new Date('2026-10-03'),
+        },
+      });
+      expect(filter.riderId.toString()).toBe(riderId);
+      expect(result).toMatchObject({ page: 2, limit: 10, total: 0 });
+    });
+
+    it('searches orderId and customer name/phone with escaped input', async () => {
+      const customerId = new Types.ObjectId();
+      (mockUserModel as any).find = jest.fn(() => chain([{ _id: customerId }]));
+
+      await service.adminListOrders({ page: 1, limit: 20, q: 'ram (9' });
+
+      const [userFilter] = (mockUserModel as any).find.mock.calls[0];
+      expect(userFilter.$or[0].name.source).toBe('ram \\(9');
+      const [filter] = mockOrderModel.find.mock.calls.at(-1);
+      expect(filter.$or).toEqual([
+        { orderId: { $regex: 'RAM \\(9' } },
+        { userId: { $in: [customerId] } },
+      ]);
+
+      await service.adminListOrders({ page: 1, limit: 20, q: 'ord-2026' });
+      const [prefix] = mockOrderModel.find.mock.calls.at(-1);
+      expect(prefix.$or[0]).toEqual({ orderId: { $regex: '^ORD-2026' } });
+    });
+
+    it('detail adds the status timeline with actor names', async () => {
+      const order = seedOrder({ orderId: 'ORD-DETAIL-1' });
+      const adminObjectId = new Types.ObjectId();
+      mockOrderStatusLogModel.find.mockReturnValue(
+        chain([
+          {
+            previousStatus: null,
+            newStatus: 'PENDING',
+            changedBy: order.userId,
+            createdAt: new Date('2026-10-12T10:00:00Z'),
+          },
+          {
+            previousStatus: 'PENDING',
+            newStatus: 'CONFIRMED',
+            changedBy: adminObjectId,
+            note: 'ok',
+            createdAt: new Date('2026-10-12T10:01:00Z'),
+          },
+        ]),
+      );
+      (mockUserModel as any).find = jest.fn(() =>
+        chain([
+          { _id: order.userId, name: 'Ravi', role: 'customer' },
+          { _id: adminObjectId, name: 'Asha', role: 'admin' },
+        ]),
+      );
+
+      const detail = await service.adminGetOrderDetail('ORD-DETAIL-1');
+
+      expect(detail.orderId).toBe('ORD-DETAIL-1');
+      expect(detail).not.toHaveProperty('deliveryOtp');
+      expect(detail.statusTimeline).toEqual([
+        expect.objectContaining({ status: 'PENDING', changedByName: 'Ravi' }),
+        expect.objectContaining({
+          previousStatus: 'PENDING',
+          status: 'CONFIRMED',
+          changedByName: 'Asha',
+          changedByRole: 'admin',
+          note: 'ok',
+        }),
+      ]);
+    });
   });
 
   describe('Payment status updates', () => {
@@ -839,6 +1105,69 @@ describe('OrdersService - Property-Based Tests', () => {
   });
 
   describe('Rider assignment', () => {
+    it('never assigns a deactivated rider', async () => {
+      const order = seedOrder({ orderStatus: OrderStatus.CONFIRMED });
+      const rider = seedRider({ isActive: false });
+
+      await expect(
+        service.assignRider(order._id.toString(), rider._id.toString()),
+      ).rejects.toThrow('Rider is deactivated');
+      expect(mockRiderModel.get(rider._id).status).toBe(RiderStatus.AVAILABLE);
+      expect(mockOrderModel.get(order._id).riderId).toBeUndefined();
+    });
+
+    it('admin assignment claims the rider and notifies admin dashboards', async () => {
+      const order = seedOrder({ orderStatus: OrderStatus.CONFIRMED });
+      const rider = seedRider();
+
+      await service.assignRider(order._id.toString(), rider._id.toString());
+
+      expect(mockRiderModel.get(rider._id).status).toBe(RiderStatus.BUSY);
+      expect(mockOrderModel.get(order._id).riderId.toString()).toBe(
+        rider._id.toString(),
+      );
+      expect(mockRedisService.publish).toHaveBeenCalledWith(
+        'admin-order-events',
+        expect.stringContaining('"event":"order:updated"'),
+      );
+    });
+
+    it('unassigning is only allowed before the rider accepts and frees the rider', async () => {
+      const rider = seedRider({ status: RiderStatus.BUSY });
+      const confirmed = seedOrder({
+        orderStatus: OrderStatus.CONFIRMED,
+        riderId: rider._id,
+      });
+      await service.unassignRider(confirmed._id.toString());
+      expect(mockOrderModel.get(confirmed._id).riderId).toBeUndefined();
+      expect(mockRiderModel.get(rider._id).status).toBe(RiderStatus.AVAILABLE);
+
+      const accepted = seedOrder({
+        orderStatus: OrderStatus.ASSIGNED,
+        riderId: rider._id,
+      });
+      await expect(
+        service.unassignRider(accepted._id.toString()),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('managers can cancel after pickup like admins', async () => {
+      const rider = seedRider({ status: RiderStatus.BUSY });
+      const order = seedOrder({
+        orderStatus: OrderStatus.PICKED_UP,
+        riderId: rider._id,
+      });
+      await service.updateStatus(
+        order._id.toString(),
+        OrderStatus.CANCELLED,
+        ADMIN_ID,
+        { actorRole: UserRole.MANAGER, reason: 'customer unreachable' },
+      );
+      expect(mockOrderModel.get(order._id).orderStatus).toBe(
+        OrderStatus.CANCELLED,
+      );
+    });
+
     it('confirming with no available rider keeps the order CONFIRMED and reports pending assignment', async () => {
       const order = seedOrder();
 

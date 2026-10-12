@@ -14,8 +14,8 @@ export class Subcategory {
   @Prop({ required: true })
   icon!: string;
 
-  @Prop({ required: true })
-  color!: string;
+  @Prop()
+  color?: string;
 
   @Prop()
   image?: string;

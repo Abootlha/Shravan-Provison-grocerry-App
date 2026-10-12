@@ -76,3 +76,11 @@ export const RiderSchema = SchemaFactory.createForClass(Rider);
 
 RiderSchema.index({ currentLocation: '2dsphere' });
 RiderSchema.index({ status: 1, isActive: 1 });
+
+// Never serialise the password hash (documents returned from controllers).
+RiderSchema.set('toJSON', {
+  transform: (_doc, ret: Record<string, any>) => {
+    delete ret.password;
+    return ret;
+  },
+});

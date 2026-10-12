@@ -149,3 +149,27 @@ export const describeError = (err) => {
     const url = err.config ? `${err.config.baseURL || ''}${err.config.url || ''}` : '';
     return [status ? `HTTP ${status}` : err.code || err.name, err.message, url].filter(Boolean).join(' · ');
 };
+
+/**
+ * Customer-facing copy for a failed request. Never shows codes, URLs or stack text; the
+ * technical detail belongs in the __DEV__ console (describeError).
+ */
+export const friendlyError = (err, isHi = false) => {
+    const status = err?.response?.status;
+    const code = err?.code;
+    if (code === 'ECONNABORTED' || code === 'ETIMEDOUT') {
+        return isHi ? 'स्टोर जवाब देने में समय ले रहा है। फिर से कोशिश करें।' : 'The store is taking too long to answer. Try again.';
+    }
+    if (!status && (code === 'ERR_NETWORK' || err?.isAxiosError || err?.request)) {
+        return isHi
+            ? 'अभी स्टोर तक नहीं पहुँच पा रहे हैं। अपना इंटरनेट कनेक्शन जाँचें।'
+            : 'Can’t reach the store right now. Check your connection.';
+    }
+    if (!status) return isHi ? 'कुछ गड़बड़ हो गई। फिर से कोशिश करें।' : 'Something went wrong. Try again.';
+    if (status === 404) return isHi ? 'यह अब उपलब्ध नहीं है।' : 'This isn’t available any more.';
+    if (status === 429) return isHi ? 'बहुत सारे अनुरोध। थोड़ी देर बाद कोशिश करें।' : 'Too many tries. Wait a moment and try again.';
+    if (status >= 500) {
+        return isHi ? 'हमारी तरफ़ से कुछ गड़बड़ हुई। थोड़ी देर में फिर कोशिश करें।' : 'Something went wrong on our side. Try again in a moment.';
+    }
+    return isHi ? 'कुछ गड़बड़ हो गई। फिर से कोशिश करें।' : 'Something went wrong. Try again.';
+};

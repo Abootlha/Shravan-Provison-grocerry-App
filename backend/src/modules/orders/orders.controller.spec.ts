@@ -1062,3 +1062,51 @@ describe('AdminOrdersController', () => {
     ).rejects.toThrow(ForbiddenException);
   });
 });
+
+describe('OrdersController quote + staff access', () => {
+  const mockOrdersService = {
+    quoteOrder: jest.fn(),
+    findByUserId: jest.fn().mockResolvedValue([]),
+  };
+  let controller: OrdersController;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [OrdersController],
+      providers: [{ provide: OrdersService, useValue: mockOrdersService }],
+    }).compile();
+    controller = module.get(OrdersController);
+    jest.clearAllMocks();
+  });
+
+  it('quotes for the signed-in user', async () => {
+    const quote = { totalAmount: 87, isOpen: true };
+    mockOrdersService.quoteOrder.mockResolvedValue(quote);
+    const items = [{ productId: new Types.ObjectId().toString(), quantity: 2 }];
+
+    await expect(
+      controller.quoteOrder(
+        { user: { userId: 'u1', role: 'customer' } },
+        {
+          items,
+        },
+      ),
+    ).resolves.toBe(quote);
+    expect(mockOrdersService.quoteOrder).toHaveBeenCalledWith('u1', items);
+  });
+
+  it('lets managers read any customer order list; customers only their own', async () => {
+    await expect(
+      controller.getOrdersByUserId(
+        { user: { userId: 'm1', role: UserRole.MANAGER } },
+        'someone',
+      ),
+    ).resolves.toEqual({ orders: [] });
+    await expect(
+      controller.getOrdersByUserId(
+        { user: { userId: 'c1', role: UserRole.CUSTOMER } },
+        'someone',
+      ),
+    ).rejects.toThrow(ForbiddenException);
+  });
+});

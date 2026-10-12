@@ -65,7 +65,7 @@ function PaymentMethodSheetBase({ visible, onClose, selected, onSelect, amount, 
             visible={visible}
             onClose={onClose}
             title={isHi ? 'भुगतान का तरीका चुनें' : 'Choose payment method'}
-            subtitle={isHi ? `कुल देय ₹${amount}` : `To pay ₹${amount}`}
+            subtitle={amount != null ? (isHi ? `कुल देय ₹${amount}` : `To pay ₹${amount}`) : undefined}
             scrollable
         >
             <View style={styles.list}>

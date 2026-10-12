@@ -16,7 +16,7 @@ import { easings, springs } from '../../theme/motion';
 import { GROUP_RADIUS } from './layout';
 
 /** Scooter tile. Trigger-based only: when the shipment changes (`pulseKey`) the scooter hops once, then rests. */
-const Scooter = ({ pulseKey }) => {
+const Scooter = ({ pulseKey, icon = 'moped' }) => {
     const styles = useStyles();
     const { colors } = useTheme();
     const reduce = useReducedMotion();
@@ -34,25 +34,44 @@ const Scooter = ({ pulseKey }) => {
     return (
         <View style={styles.tile}>
             <Animated.View style={bikeStyle}>
-                <MaterialCommunityIcons name="moped" size={22} color={colors.ink} />
+                <MaterialCommunityIcons name={icon} size={22} color={colors.ink} />
             </Animated.View>
         </View>
     );
 };
 
-function DeliveryEtaCardBase({ minutes = 10, itemCount = 0, isHi, children }) {
+/**
+ * minutes     store settings estimatedDeliveryMinutes, or null (then no time is promised)
+ * closedLine  "Closed · opens at 8 AM" when the store is closed (replaces the delivery line)
+ */
+function DeliveryEtaCardBase({ minutes = null, closedLine = null, itemCount = 0, isHi, children }) {
     const styles = useStyles();
+    const shipment = isHi ? `${itemCount} सामान की शिपमेंट` : `Shipment of ${itemCount} item${itemCount === 1 ? '' : 's'}`;
+    let title;
+    if (closedLine) {
+        title = <Text variant="title" accessibilityRole="header">{closedLine}</Text>;
+    } else if (minutes) {
+        title = (
+            <Text variant="title" weight="medium" accessibilityRole="header">
+                {isHi ? 'डिलीवरी ' : 'Delivering in '}
+                <Text variant="title">{isHi ? `${minutes} मिनट में` : `${minutes} mins`}</Text>
+            </Text>
+        );
+    } else {
+        title = <Text variant="title" accessibilityRole="header">{isHi ? 'आपकी डिलीवरी' : 'Your delivery'}</Text>;
+    }
     return (
         <Card padding={0} radius={GROUP_RADIUS} style={styles.card}>
-            <View style={styles.row}>
-                <Scooter pulseKey={itemCount} />
+            <View style={styles.row} accessibilityLiveRegion={closedLine ? 'polite' : undefined}>
+                <Scooter pulseKey={itemCount} icon={closedLine ? 'store-clock-outline' : 'moped'} />
                 <View style={styles.texts}>
-                    <Text variant="title" weight="medium" accessibilityRole="header">
-                        {isHi ? 'डिलीवरी ' : 'Delivering in '}
-                        <Text variant="title">{isHi ? `${minutes} मिनट में` : `${minutes} mins`}</Text>
-                    </Text>
+                    {title}
                     <Text variant="caption" color="muted">
-                        {isHi ? `${itemCount} सामान की शिपमेंट` : `Shipment of ${itemCount} item${itemCount === 1 ? '' : 's'}`}
+                        {closedLine
+                            ? isHi
+                                ? 'आपकी कार्ट सहेजी हुई है। स्टोर खुलने पर ऑर्डर करें।'
+                                : 'Your cart is saved. You can order when the store opens.'
+                            : shipment}
                     </Text>
                 </View>
             </View>

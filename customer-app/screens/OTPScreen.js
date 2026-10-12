@@ -1,8 +1,9 @@
 /**
- * OTPScreen — 4-digit code on the flat auth canvas: AuthBar, a plain "Enter the 4-digit code" headline
+ * OTPScreen — N-digit code on the flat auth canvas: AuthBar, a plain "Enter the N-digit code" headline
  * with the number it went to, and one surface card with the boxes, the resend countdown and Verify.
- * One hidden input feeds the boxes (typing, SMS autofill and paste all work), the 4th digit
- * auto-submits, a wrong code shakes the row with an error haptic. Verify/token/session logic unchanged.
+ * N is the `otpLength` the server returned from send-otp (route param, 4 when missing; a resend may
+ * change it). One hidden input feeds the boxes (typing, SMS autofill and paste all work), the last
+ * digit auto-submits, a wrong code shakes the row with an error haptic. Verify/token/session logic unchanged.
  * Motion: the bar stays fixed (fade transition) while the content slides in from the right;
  * boxes pop in staggered; on success the boxes turn green, then the app opens (~0.45 s later).
  */
@@ -24,14 +25,21 @@ import { OtpBoxes } from './auth/OtpBoxes';
 import { ResendRing } from './auth/ResendRing';
 import { useSheetSlide } from './auth/authMotion';
 
-const OTP_LENGTH = 4;
+const DEFAULT_OTP_LENGTH = 4;
 const RESEND_SECONDS = 30;
 const SUCCESS_HOLD_MS = 450; // boxes turn green, then the app opens
+
+// Server-provided OTP length (4-6), else the default.
+const normalizeOtpLength = (value) => {
+    const n = Number(value);
+    return Number.isInteger(n) && n >= 4 && n <= 6 ? n : DEFAULT_OTP_LENGTH;
+};
 
 const OTPScreen = ({ navigation, route }) => {
     const styles = useStyles();
     const slide = useSheetSlide({ from: 1 });
     const { phoneNumber } = route.params;
+    const [otpLength, setOtpLength] = useState(() => normalizeOtpLength(route.params?.otpLength));
     const { t, isHi } = useTranslation();
     const dispatch = useDispatch();
     const insets = useSafeAreaInsets();
@@ -66,7 +74,7 @@ const OTPScreen = ({ navigation, route }) => {
     const handleOtpChange = (digits) => {
         setOtp(digits);
         if (error) setError(null);
-        if (digits.length === OTP_LENGTH) {
+        if (digits.length === otpLength) {
             handleVerify(digits);
         }
     };
@@ -126,7 +134,8 @@ const OTPScreen = ({ navigation, route }) => {
         if (!canResend) return;
         setIsResending(true);
         try {
-            await AuthService.sendOtp(phoneNumber);
+            const response = await AuthService.sendOtp(phoneNumber);
+            setOtpLength(normalizeOtpLength(response?.otpLength));
             setTimer(RESEND_SECONDS);
             setCanResend(false);
             setOtp('');
@@ -142,7 +151,7 @@ const OTPScreen = ({ navigation, route }) => {
         }
     };
 
-    const isComplete = otp.length === OTP_LENGTH;
+    const isComplete = otp.length === otpLength;
     const prettyPhone = `+91 ${phoneNumber.slice(0, 5)} ${phoneNumber.slice(5)}`;
 
     return (
@@ -157,7 +166,7 @@ const OTPScreen = ({ navigation, route }) => {
                 >
                     <Animated.View style={[styles.body, slide.style]}>
                         <AuthHeading
-                            title={isHi ? `${OTP_LENGTH} अंकों का कोड डालें` : `Enter the ${OTP_LENGTH}-digit code`}
+                            title={isHi ? `${otpLength} अंकों का कोड डालें` : `Enter the ${otpLength}-digit code`}
                             subtitle={`${t('otpSentTo')} ${prettyPhone}`}
                         />
 
@@ -166,13 +175,13 @@ const OTPScreen = ({ navigation, route }) => {
                                 <OtpBoxes
                                     value={otp}
                                     onChange={handleOtpChange}
-                                    length={OTP_LENGTH}
+                                    length={otpLength}
                                     error={Boolean(error)}
                                     success={verified}
                                     shakeKey={shakeKey}
                                     inputRef={inputRef}
                                     disabled={isVerifying || verified}
-                                    accessibilityLabel={isHi ? `${OTP_LENGTH} अंकों का OTP` : `${OTP_LENGTH}-digit code`}
+                                    accessibilityLabel={isHi ? `${otpLength} अंकों का OTP` : `${otpLength}-digit code`}
                                 />
                                 <View style={styles.errorSlot} accessibilityLiveRegion="assertive">
                                     {error ? <Text variant="label" color="error" align="center" accessibilityRole="alert">{error}</Text> : null}

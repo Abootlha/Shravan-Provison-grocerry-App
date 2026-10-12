@@ -1,5 +1,5 @@
 import React, { createContext, forwardRef, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import Animated from 'react-native-reanimated';
 import { useSelector } from 'react-redux';
@@ -14,7 +14,8 @@ import { translateToHindi } from '../services/translationService';
 import SubcategoryRail, { RAIL_WIDTH } from './categories/SubcategoryRail';
 import { discountOf, headerThemeFor, nameOf, toCardProduct } from './home/catalog';
 import { getPrice, isInStock } from '../components/product/productUtils';
-import { describeError } from '../services/normalize';
+import { describeError, friendlyError } from '../services/normalize';
+import { contentColumn, useContentWidth } from '../hooks/useContentWidth';
 
 const GRID_PAD = space.md;
 const GRID_GAP = space.sm + space.xxs; // 10 — Part C #7 (8–10)
@@ -58,7 +59,7 @@ const CategoryScreen = ({ route, navigation }) => {
     const styles = useStyles();
     const themeT = useTheme();
     const { gradients } = themeT;
-    const { width } = useWindowDimensions();
+    const width = useContentWidth();
     const listRef = useRef(null);
     const [reorder, setReorder] = useState(false);
     const reorderTimer = useRef(null);
@@ -73,22 +74,21 @@ const CategoryScreen = ({ route, navigation }) => {
     // Get cart from Redux
     const cartItems = useSelector((state) => state.cart.totalItems);
 
+    const categoryId = category?._id || category?.id;
+    const productsGen = useRef(0);
+
+    // One load per category / language (the language re-fetch brings translated names).
     useEffect(() => {
-        fetchData();
-    }, [category]);
+        if (categoryId) fetchData();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [categoryId, currentLanguage]);
 
     useEffect(() => {
-        if (selectedSubcategory) {
+        if (selectedSubcategory?._id) {
             fetchProducts(selectedSubcategory._id);
         }
-    }, [selectedSubcategory]);
-
-    // Re-fetch data when language changes to get translated content
-    useEffect(() => {
-        if (category) {
-            fetchData();
-        }
-    }, [currentLanguage]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedSubcategory?._id, currentLanguage]);
 
     const fetchData = async () => {
         try {
@@ -96,7 +96,6 @@ const CategoryScreen = ({ route, navigation }) => {
             setError(null);
 
             // Fetch subcategories for this category
-            const categoryId = category._id || category.id;
             const response = await ProductService.getSubcategories({ parentId: categoryId });
             let subcats = response.subcategories || [];
 
@@ -117,21 +116,22 @@ const CategoryScreen = ({ route, navigation }) => {
 
             setSubcategories(subcats);
 
-            // Auto-select first subcategory
+            // Keep the open subcategory across a language switch; otherwise start with the first
             if (subcats.length > 0) {
-                setSelectedSubcategory(subcats[0]);
+                setSelectedSubcategory((prev) => subcats.find((x) => x._id === prev?._id) || subcats[0]);
             } else {
                 // If no subcategories, fetch all products for this category
                 fetchProducts(categoryId, true);
             }
         } catch (err) {
-            console.error('Error fetching data:', err);
-            setError(describeError(err) || 'Failed to load data');
+            if (__DEV__) console.error('[category] subcategories failed', describeError(err));
+            setError(err || new Error('load failed'));
             setLoading(false);
         }
     };
 
     const fetchProducts = async (subcategoryId, isCategory = false) => {
+        const gen = ++productsGen.current; // drop answers for a subcategory the user already left
         try {
             setLoading(true);
 
@@ -156,13 +156,15 @@ const CategoryScreen = ({ route, navigation }) => {
                 }
             }
 
+            if (gen !== productsGen.current) return;
             setProducts(finalProducts);
         } catch (err) {
-            console.error('Error fetching products:', err);
+            if (gen !== productsGen.current) return;
+            if (__DEV__) console.error('[category] products failed', describeError(err));
             setProducts([]);
-            setError(describeError(err) || 'Failed to load products');
+            setError(err || new Error('load failed'));
         } finally {
-            setLoading(false);
+            if (gen === productsGen.current) setLoading(false);
         }
     };
 
@@ -259,23 +261,26 @@ const CategoryScreen = ({ route, navigation }) => {
     if (error) {
         return (
             <Screen edges={[]} statusBar={theme.statusBar} topInsetColor={theme.bg}>
+                <View style={contentColumn}>
                 {header}
                 <AnimatedScreen>
                     <EmptyState
                         mood="sad"
                         title={isHi ? 'यह श्रेणी लोड नहीं हुई' : 'Couldn’t load this aisle'}
-                        subtitle={__DEV__ ? error : isHi ? 'इंटरनेट जाँचें और फिर कोशिश करें।' : 'Check your connection and try again.'}
+                        subtitle={friendlyError(error, isHi)}
                         actionLabel={t('retry')}
                         onAction={fetchData}
                         style={styles.state}
                     />
                 </AnimatedScreen>
+                </View>
             </Screen>
         );
     }
 
     return (
         <Screen edges={[]} statusBar={theme.statusBar} topInsetColor={theme.bg}>
+            <View style={contentColumn}>
             {header}
             <AnimatedScreen style={styles.content}>
                 {subcategories.length ? (
@@ -347,6 +352,7 @@ const CategoryScreen = ({ route, navigation }) => {
 
             {/* Floating cart bar (owned by the cart flow) */}
             <FloatingCartBar onPress={handleCartPress} />
+            </View>
         </Screen>
     );
 };

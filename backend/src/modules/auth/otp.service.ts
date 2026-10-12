@@ -16,6 +16,13 @@ export const OTP_MAX_ATTEMPTS = 5;
 export const OTP_RESEND_COOLDOWN_SECONDS = 30;
 export const OTP_MAX_SENDS_PER_HOUR = 5;
 
+export interface SendOtpResult {
+  message: string;
+  sessionId?: string;
+  /** Number of OTP digits, so the apps render the right number of boxes. */
+  otpLength: number;
+}
+
 @Injectable()
 export class OtpService {
   private readonly logger = new Logger(OtpService.name);
@@ -25,6 +32,12 @@ export class OtpService {
   private readonly otpLength: number;
   /** Dev-mode OTP (no SMS provider, OTP printed to the local log) is only allowed in development. */
   private readonly allowDevOtp: boolean;
+  /**
+   * OTP_FIXED_CODE (development only): this code is stored and accepted
+   * instead of a random one, and no SMS is sent. Configuration refuses to
+   * boot in production with it set; it is also ignored here as a second guard.
+   */
+  private readonly fixedCode: string | undefined;
 
   constructor(
     private configService: ConfigService,
@@ -38,6 +51,22 @@ export class OtpService {
     this.otpLength = this.configService.get<number>('twofactor.otpLength') || 4;
     this.allowDevOtp =
       !process.env.NODE_ENV || process.env.NODE_ENV === 'development';
+
+    const fixedCode = this.configService.get<string>('twofactor.fixedCode');
+    this.fixedCode =
+      fixedCode && process.env.NODE_ENV !== 'production'
+        ? fixedCode
+        : undefined;
+    if (this.fixedCode) {
+      this.logger.warn(
+        'Fixed OTP mode enabled — SMS disabled. Every phone number logs in with OTP_FIXED_CODE. Never use this in production.',
+      );
+    }
+  }
+
+  /** Number of OTP digits clients must render. */
+  getOtpLength(): number {
+    return this.otpLength;
   }
 
   private maskPhone(phone: string): string {
@@ -47,6 +76,7 @@ export class OtpService {
   }
 
   private generateOtp(): string {
+    if (this.fixedCode) return this.fixedCode;
     const max = 10 ** this.otpLength;
     return randomInt(0, max).toString().padStart(this.otpLength, '0');
   }
@@ -87,10 +117,8 @@ export class OtpService {
   /**
    * Send OTP via 2Factor.in using OTP Template
    */
-  async sendOtp(
-    phone: string,
-  ): Promise<{ message: string; sessionId?: string }> {
-    if (!this.apiKey && !this.allowDevOtp) {
+  async sendOtp(phone: string): Promise<SendOtpResult> {
+    if (!this.apiKey && !this.allowDevOtp && !this.fixedCode) {
       this.logger.error('TWOFACTOR_API_KEY is not configured');
       throw new ServiceUnavailableException(
         'OTP service unavailable. Please try again later.',
@@ -119,6 +147,18 @@ export class OtpService {
       throw new BadRequestException('Service unavailable. Please try again.');
     }
 
+    if (this.fixedCode) {
+      // Fixed OTP mode (never production): no SMS, the code is known.
+      this.logger.log(
+        `Fixed OTP stored for ${this.maskPhone(phone)} (SMS disabled)`,
+      );
+      return {
+        message: 'OTP sent successfully (fixed development code)',
+        sessionId: `fixed-${Date.now()}`,
+        otpLength: this.otpLength,
+      };
+    }
+
     if (!this.apiKey) {
       // Development only (other environments fail above): there is no SMS provider,
       // so the OTP is only obtainable from the local server log.
@@ -128,6 +168,7 @@ export class OtpService {
       return {
         message: 'OTP sent successfully (dev mode)',
         sessionId: `dev-${Date.now()}`,
+        otpLength: this.otpLength,
       };
     }
 
@@ -143,6 +184,7 @@ export class OtpService {
         return {
           message: 'OTP sent successfully',
           sessionId: response.data.Details,
+          otpLength: this.otpLength,
         };
       }
 
@@ -220,9 +262,7 @@ export class OtpService {
   /**
    * Resend OTP (rate limited by sendOtp).
    */
-  async resendOtp(
-    phone: string,
-  ): Promise<{ message: string; sessionId?: string }> {
+  async resendOtp(phone: string): Promise<SendOtpResult> {
     return this.sendOtp(phone);
   }
 }

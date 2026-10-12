@@ -9,7 +9,7 @@ import { stagger } from '../theme/motion';
 import { useTheme } from '../theme';
 import { useCartBarOffset, useTabBarHeight } from '../components/BottomTabsIcons';
 import { CATEGORY_GROUPS } from '../constants';
-import { describeError } from '../services/normalize';
+import { describeError, friendlyError } from '../services/normalize';
 import { ProductService } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
 import { translateToHindi } from '../services/translationService';
@@ -79,9 +79,9 @@ const CategoriesScreen = ({ navigation }) => {
                 setTranslatedGroups(CATEGORY_GROUPS);
             }
         } catch (err) {
-            console.error('Error loading categories:', err);
+            if (__DEV__) console.error('[categories] load failed', describeError(err));
             setCategories([]);
-            setError(describeError(err) || 'Failed to load categories');
+            setError(err || new Error('load failed'));
         } finally {
             setLoading(false);
         }
@@ -176,11 +176,7 @@ const CategoriesScreen = ({ navigation }) => {
                                 title={error ? (isHi ? 'श्रेणियाँ लोड नहीं हुईं' : 'Couldn’t load categories') : isHi ? 'अभी कोई श्रेणी नहीं' : 'No categories yet'}
                                 subtitle={
                                     error
-                                        ? __DEV__
-                                            ? error
-                                            : isHi
-                                              ? 'इंटरनेट जाँचें और फिर कोशिश करें।'
-                                              : 'Check your connection and try again.'
+                                        ? friendlyError(error, isHi)
                                         : isHi
                                           ? 'दुकान जल्द ही सामान जोड़ेगी।'
                                           : 'The store hasn’t added any aisles yet. Check back soon.'

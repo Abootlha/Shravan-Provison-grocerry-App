@@ -4,7 +4,8 @@ import type { Order } from './order';
 export type RootStackParamList = {
   Splash: undefined;
   Login: undefined;
-  OTP: { phone: string; name?: string; isNewAccount?: boolean };
+  // otpLength: digits reported by POST /auth/send-otp (4-6, default 4).
+  OTP: { phone: string; name?: string; isNewAccount?: boolean; otpLength?: number };
   Home: undefined;
   AvailableOrders: undefined;
   OrderDetail: { orderId: string; order?: Order };

@@ -39,7 +39,15 @@ const RailItem = memo(({ item, selected, language, onSelect }) => {
         >
             <View style={[styles.thumb, selected && styles.thumbOn]}>
                 {uri ? (
-                    <Image source={{ uri }} style={styles.img} contentFit="cover" transition={150} accessible={false} />
+                    <Image
+                        source={{ uri }}
+                        style={styles.img}
+                        contentFit="cover"
+                        transition={150}
+                        cachePolicy="memory-disk"
+                        recyclingKey={String(item._id || item.id || uri)}
+                        accessible={false}
+                    />
                 ) : (
                     <Icon3D name={icon3dFor(item)} size={selected ? 34 : 30} />
                 )}

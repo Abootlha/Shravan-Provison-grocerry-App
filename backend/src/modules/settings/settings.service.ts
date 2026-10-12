@@ -6,6 +6,8 @@ import {
   StoreSettingsDocument,
 } from './schemas/store-settings.schema';
 import { UpdateStoreSettingsDto } from './dto/update-store-settings.dto';
+import { resolveFees } from './fees';
+import { computeStoreOpenState, DEFAULT_TIMEZONE } from './store-hours';
 
 @Injectable()
 export class SettingsService {
@@ -65,16 +67,63 @@ export class SettingsService {
       update.estimatedDeliveryMinutes = updateData.estimatedDeliveryMinutes;
     if (updateData.isActive !== undefined)
       update.isActive = updateData.isActive;
+    if (updateData.contactEmail !== undefined)
+      update.contactEmail = (updateData.contactEmail ?? '').trim();
+    if (updateData.address !== undefined)
+      update.address = (updateData.address ?? '').trim();
+    if (updateData.gstin !== undefined)
+      update.gstin = (updateData.gstin ?? '').trim().toUpperCase();
+    if (updateData.timezone != null) update.timezone = updateData.timezone;
+
+    // Fees are merged field by field so a partial update keeps the others.
+    const $set: Record<string, unknown> = { ...update };
+    if (updateData.fees) {
+      for (const key of [
+        'deliveryFee',
+        'freeDeliveryThreshold',
+        'packagingFee',
+        'discountRate',
+      ] as const) {
+        const value = updateData.fees[key];
+        if (value !== undefined) $set[`fees.${key}`] = value;
+      }
+    }
 
     const settings = await this.settingsModel
       .findOneAndUpdate(
         { storeId: 'main' },
-        { $set: update },
-        { new: true, upsert: true },
+        { $set },
+        { new: true, upsert: true, runValidators: true },
       )
       .exec();
 
     return settings;
+  }
+
+  /** Store settings with fees resolved and the open/closed state computed now. */
+  async getPublicStoreSettings(now: Date = new Date()) {
+    const settings = await this.getStoreSettings();
+    return SettingsService.toPublicView(settings, now);
+  }
+
+  static toPublicView(settings: StoreSettingsDocument, now: Date = new Date()) {
+    const { isOpen, nextOpenAt } = computeStoreOpenState(settings, now);
+    return {
+      storeName: settings.storeName,
+      location: settings.location,
+      storeTimings: settings.storeTimings,
+      contactPhone: settings.contactPhone || null,
+      contactEmail: settings.contactEmail || null,
+      address: settings.address || null,
+      gstin: settings.gstin || null,
+      timezone: settings.timezone || DEFAULT_TIMEZONE,
+      fees: resolveFees(settings.fees),
+      serviceRadiusKm: settings.serviceRadiusKm,
+      estimatedDeliveryMinutes: settings.estimatedDeliveryMinutes,
+      isActive: settings.isActive,
+      isOpen,
+      nextOpenAt,
+    };
   }
 
   async checkServiceability(

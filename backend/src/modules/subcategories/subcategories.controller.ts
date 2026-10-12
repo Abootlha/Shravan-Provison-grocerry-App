@@ -16,6 +16,25 @@ import {
   CreateSubcategoryDto,
   UpdateSubcategoryDto,
 } from './dto/subcategory.dto';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../users/schemas/user.schema';
+import { AdminCatalogListQueryDto } from '../../common/dto/admin-catalog-query.dto';
+
+@Controller('admin/subcategories')
+@UseGuards(JwtAuthGuard, AdminGuard)
+@Roles(UserRole.ADMIN, UserRole.MANAGER)
+export class AdminSubcategoriesController {
+  constructor(private readonly subcategoriesService: SubcategoriesService) {}
+
+  @Get()
+  async findAll(@Query() query: AdminCatalogListQueryDto) {
+    const subcategories = await this.subcategoriesService.adminFindAll({
+      includeInactive: query.includeInactive,
+      parentId: query.parentId,
+    });
+    return { subcategories };
+  }
+}
 
 @Controller('subcategories')
 export class SubcategoriesController {

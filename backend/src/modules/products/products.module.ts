@@ -1,6 +1,12 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Product, ProductSchema } from './schemas/product.schema';
+import {
+  StockAdjustment,
+  StockAdjustmentSchema,
+} from './schemas/stock-adjustment.schema';
+import { AdminProductsService } from './admin-products.service';
+import { AdminProductsController } from './admin-products.controller';
 import { ProductsService } from './products.service';
 import { ProductsController } from './products.controller';
 import { BarcodeService } from './barcode.service';
@@ -23,17 +29,19 @@ import {
   imports: [
     MongooseModule.forFeature([
       { name: Product.name, schema: ProductSchema },
+      { name: StockAdjustment.name, schema: StockAdjustmentSchema },
       { name: Category.name, schema: CategorySchema },
       { name: Subcategory.name, schema: SubcategorySchema },
       { name: ItemGroup.name, schema: ItemGroupSchema },
     ]),
   ],
-  controllers: [ProductsController],
+  controllers: [ProductsController, AdminProductsController],
   providers: [
     ProductsService,
     BarcodeService,
     HierarchyValidator,
     ImageProcessingService,
+    AdminProductsService,
   ],
   exports: [ProductsService, BarcodeService, ImageProcessingService],
 })

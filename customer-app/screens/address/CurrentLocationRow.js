@@ -8,7 +8,7 @@ import { makeStyles, useTheme } from '../../theme';
 const SIZE = 44;
 
 /** "Use my current location" row. While locating, the GPS glyph swaps for a spinner (work in progress, not an idle loop). */
-function CurrentLocationRowBase({ loading, onPress, etaMinutes = 10, isHi }) {
+function CurrentLocationRowBase({ loading, onPress, etaMinutes = null, isHi }) {
     const styles = useStyles();
     const { colors } = useTheme();
     return (
@@ -33,7 +33,9 @@ function CurrentLocationRowBase({ loading, onPress, etaMinutes = 10, isHi }) {
                         : (isHi ? 'वर्तमान स्थान का उपयोग करें' : 'Use my current location')}
                 </Text>
                 <Text variant="caption" color="muted">
-                    {isHi ? `GPS से · ${etaMinutes} मिनट में डिलीवरी` : `Using GPS · delivery in ${etaMinutes} mins`}
+                    {etaMinutes
+                        ? isHi ? `GPS से · ${etaMinutes} मिनट में डिलीवरी` : `Using GPS · delivery in ${etaMinutes} mins`
+                        : isHi ? 'GPS से' : 'Using GPS'}
                 </Text>
             </View>
             <MaterialCommunityIcons name="chevron-right" size={20} color={colors.inkMuted} />

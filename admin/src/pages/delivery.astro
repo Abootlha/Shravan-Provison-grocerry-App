@@ -1,12 +1,21 @@
 ---
-import AdminLayout from "../layouts/AdminLayout.astro";
-import DeliveryManager from "../components/DeliveryManager";
+// Delivery settings now live in the "Delivery area" section of Store & delivery.
+const target = "/settings#delivery";
 ---
 
-<AdminLayout title="Delivery & Stores">
-    <div class="dashboard-bg min-h-screen">
-        <div class="relative z-10 p-6 lg:p-8">
-            <DeliveryManager client:load />
-        </div>
-    </div>
-</AdminLayout>
+<!doctype html>
+<html lang="en-IN">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="robots" content="noindex, nofollow" />
+        <meta http-equiv="refresh" content={`0; url=${target}`} />
+        <link rel="canonical" href={target} />
+        <title>Store & delivery · Shravan Kirana Admin</title>
+        <script is:inline define:vars={{ target }}>
+            window.location.replace(target);
+        </script>
+    </head>
+    <body>
+        <p>Delivery settings moved to <a href={target}>Store &amp; delivery</a>.</p>
+    </body>
+</html>

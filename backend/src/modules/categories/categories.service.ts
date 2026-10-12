@@ -7,13 +7,34 @@ import {
   CategoryType,
 } from './schemas/category.schema';
 import { RedisService } from '../../common/utils/redis.service';
+import { CatalogCacheService } from '../../common/utils/catalog-cache.service';
 
 @Injectable()
 export class CategoriesService {
   constructor(
     @InjectModel(Category.name) private categoryModel: Model<CategoryDocument>,
     private redisService: RedisService,
+    private catalogCache: CatalogCacheService,
   ) {}
+
+  /**
+   * Admin list: never cached, optionally includes deactivated categories so
+   * they can be re-enabled.
+   */
+  async adminFindAll(options: {
+    includeInactive?: boolean;
+    type?: CategoryType;
+  }): Promise<any[]> {
+    const query: Record<string, any> = {
+      type: options.type || CategoryType.CATEGORY,
+    };
+    if (!options.includeInactive) query.isActive = true;
+    return this.categoryModel
+      .find(query)
+      .sort({ sortOrder: 1, name: 1 })
+      .lean()
+      .exec();
+  }
 
   // Get all main categories (type = 'category')
   async findAll(type?: CategoryType): Promise<CategoryDocument[]> {
@@ -140,6 +161,8 @@ export class CategoriesService {
   }
 
   private async invalidateCache(parentId?: string): Promise<void> {
+    // Product lists embed category names: bump the catalogue version too.
+    await this.catalogCache.bump();
     await this.redisService.del('categories:all');
     await this.redisService.del('categories:category');
     await this.redisService.del('categories:subcategory');

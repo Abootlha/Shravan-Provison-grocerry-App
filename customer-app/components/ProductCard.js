@@ -110,7 +110,8 @@ function ProductCardBase({ product: raw, onPress, variant = 'default', style, ti
     const off = isHi ? 'छूट' : 'off';
     const offLabel = saved > 0 ? `₹${formatINR(saved)} ${off}` : discount > 0 ? `${discount}% ${off}` : null;
     const inCart = quantity > 0;
-    const eta = useDeliveryEta();
+    const eta = useDeliveryEta(isHi);
+    const etaText = eta.closedLabel || (eta.minutes ? (isHi ? `${eta.minutes} मिनट` : `${eta.minutes} mins`) : null);
 
     return (
         <PressableScale
@@ -173,12 +174,12 @@ function ProductCardBase({ product: raw, onPress, variant = 'default', style, ti
                     <Text variant="caption" color="muted" numberOfLines={1} style={styles.unit}>
                         {unit}
                     </Text>
-                    {inStock ? (
+                    {inStock && etaText ? (
                         <View style={styles.eta}>
                             {unit ? <View style={styles.dot} /> : null}
-                            <MaterialCommunityIcons name="clock-outline" size={12} color={colors.inkMuted} />
+                            <MaterialCommunityIcons name={eta.closedLabel ? 'store-clock-outline' : 'clock-outline'} size={12} color={colors.inkMuted} />
                             <Text variant="caption" color="muted" numberOfLines={1}>
-                                {isHi ? `${eta} मिनट` : `${eta} mins`}
+                                {etaText}
                             </Text>
                         </View>
                     ) : null}

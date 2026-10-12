@@ -48,7 +48,8 @@ const useTranslatedName = (item) => {
     return name;
 };
 
-function CheckoutItemRowBase({ item, index = 0, showDivider = false, onRemove, isHi }) {
+/** `refusedReason` ('unavailable' | 'stock'): the server won't sell this line as it is; the row says so. */
+function CheckoutItemRowBase({ item, index = 0, showDivider = false, refusedReason, onRemove, isHi }) {
     const styles = useStyles();
     const dispatch = useDispatch();
     const name = useTranslatedName(item);
@@ -71,13 +72,21 @@ function CheckoutItemRowBase({ item, index = 0, showDivider = false, onRemove, i
                 onAction={() => onRemove && onRemove(item, index)}
             >
                 <View style={styles.row}>
-                    <ProductImage uri={item.image} variant="thumb" size={THUMB} recyclingKey={item.id} />
+                    <ProductImage uri={item.image} variant="thumb" size={THUMB} recyclingKey={item.id} dimmed={refusedReason === 'unavailable'} />
 
                     <View style={styles.info}>
                         <Text variant="label" numberOfLines={2}>{name}</Text>
-                        <Text variant="caption" color="muted" numberOfLines={1}>
-                            {item.unit ? `${item.unit} · ₹${formatINR(price)}` : `₹${formatINR(price)} each`}
-                        </Text>
+                        {refusedReason ? (
+                            <Text variant="caption" color="error" numberOfLines={2}>
+                                {refusedReason === 'stock'
+                                    ? (isHi ? 'इतना स्टॉक नहीं है, मात्रा कम करें' : 'Not enough stock, reduce the quantity')
+                                    : (isHi ? 'अब उपलब्ध नहीं है' : 'No longer available')}
+                            </Text>
+                        ) : (
+                            <Text variant="caption" color="muted" numberOfLines={1}>
+                                {item.unit ? `${item.unit} · ₹${formatINR(price)}` : `₹${formatINR(price)} each`}
+                            </Text>
+                        )}
                     </View>
 
                     <View style={styles.side}>

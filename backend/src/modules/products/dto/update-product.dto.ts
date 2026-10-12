@@ -10,7 +10,10 @@ import {
   MaxLength,
   Max,
   ValidateNested,
+  IsEnum,
+  IsInt,
 } from 'class-validator';
+import { ProductStatus } from '../schemas/product.schema';
 import { Type } from 'class-transformer';
 import { IsImageSource } from './image-source.validator';
 import { NutritionDto } from './nutrition.dto';
@@ -111,6 +114,18 @@ export class UpdateProductDto {
   @IsOptional()
   @IsBoolean()
   isAvailable?: boolean;
+
+  /** draft | active | archived. Defaults to active on create. */
+  @IsOptional()
+  @IsEnum(ProductStatus)
+  status?: ProductStatus;
+
+  /** Low-stock threshold for this product (default 10). */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100_000)
+  reorderLevel?: number;
 
   /**
    * Run uploaded (data URI) images through background removal + pack-shot

@@ -135,8 +135,6 @@ const ProfileScreen = ({ navigation }) => {
         toast.info(isHi ? 'सहायता जल्द उपलब्ध होगी' : 'Support will be available shortly');
     };
 
-    const soon = () => toast.info(isHi ? 'जल्द आ रहा है' : 'Coming soon');
-
     const userName = isAuthenticated && user?.name ? user.name : isHi ? 'मेहमान' : 'Guest';
     const photo = user?.profilePicture || user?.avatar || user?.photo;
     const phone = formatPhone(user?.phone || user?.mobile || user?.phoneNumber);
@@ -163,7 +161,7 @@ const ProfileScreen = ({ navigation }) => {
                     <Card padding="lg" style={styles.identity}>
                         <View style={styles.avatar}>
                             {photo ? (
-                                <Image source={{ uri: photo }} style={styles.avatarImg} contentFit="cover" transition={150} />
+                                <Image source={{ uri: photo }} style={styles.avatarImg} contentFit="cover" transition={150} cachePolicy="memory-disk" />
                             ) : (
                                 <Text variant="h2" color={colors.brandStrong}>{initialsOf(userName)}</Text>
                             )}
@@ -231,12 +229,6 @@ const ProfileScreen = ({ navigation }) => {
                                 />
                             </View>
                         </SettingsBlock>
-                        <SettingsRow
-                            icon="bell-outline"
-                            title={isHi ? 'सूचनाएँ' : 'Notifications'}
-                            subtitle={isHi ? 'जल्द आ रहा है' : 'Coming soon'}
-                            onPress={soon}
-                        />
                     </SettingsGroup>
 
                     <SettingsGroup title={isHi ? 'सहायता' : 'Support'}>

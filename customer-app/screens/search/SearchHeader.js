@@ -115,10 +115,13 @@ const SearchHeader = forwardRef(function SearchHeader({ value, onChangeText, onS
     const motion = useFromRect(fromRect, fieldRef);
 
     return (
-        <View style={styles.row}>
-            <Animated.View style={motion.back}>
-                <IconButton name="arrow-left" variant="ghost" onPress={onBack} accessibilityLabel="Go back" />
-            </Animated.View>
+        <View style={[styles.row, !onBack && styles.rowRoot]}>
+            {/* no back arrow on the Search tab root (onBack omitted) */}
+            {onBack ? (
+                <Animated.View style={motion.back}>
+                    <IconButton name="arrow-left" variant="ghost" onPress={onBack} accessibilityLabel={isHi ? 'वापस जाएँ' : 'Go back'} />
+                </Animated.View>
+            ) : null}
             <View ref={fieldRef} collapsable={false} style={styles.field}>
                 <Animated.View style={[styles.surface, motion.surface, { pointerEvents: 'none' }]} />
                 <Animated.View style={[styles.content, motion.content]}>
@@ -173,6 +176,9 @@ const useStyles = makeStyles((t) => ({
         paddingVertical: space.sm,
         gap: space.xs,
         zIndex: 1, // the flight starts below the header row; keep it above the list
+    },
+    rowRoot: {
+        paddingLeft: space.lg,
     },
     field: {
         flex: 1,

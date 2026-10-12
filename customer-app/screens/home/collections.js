@@ -254,7 +254,7 @@ const topAisles = (available, categories, count, min) => {
  * Each descriptor carries its data plus translated, mixed-weight title parts. Renderers live in
  * HomeScreen / EditorialSections; this stays pure so it is easy to test and reorder.
  */
-export function buildHomeSections({ products = [], categories = [], orders = [], now = new Date(), language = 'en', t, eta = 10 }) {
+export function buildHomeSections({ products = [], categories = [], orders = [], now = new Date(), language = 'en', t, eta = null }) {
     const tr = (key, vars) => fmt(t(key), vars);
     const title = (key, vars) => ({ lead: tr(`${key}.lead`, vars), emphasis: tr(`${key}.emphasis`, vars), trail: optional(t, `${key}.trail`, vars) });
     const count = (n) => tr(n === 1 ? 'homeFeed.itemOne' : 'homeFeed.items', { n });
@@ -277,7 +277,8 @@ export function buildHomeSections({ products = [], categories = [], orders = [],
                     type: 'moment',
                     moment: moment.id,
                     eyebrow: t(moment.eyebrowKey),
-                    ...title(moment.titleKey, { eta }),
+                    // "Breakfast in N mins" only with a real ETA from the store settings
+                    ...title(eta == null && moment.titleKey === 'homeFeed.moment.breakfast' ? 'homeFeed.moment.breakfastNoEta' : moment.titleKey, { eta }),
                     subtitle: tr('homeFeed.momentCount', { n: list.length }),
                     products: list,
                 });

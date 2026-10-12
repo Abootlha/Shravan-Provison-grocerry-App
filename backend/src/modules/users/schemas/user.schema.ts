@@ -6,8 +6,19 @@ export type UserDocument = User & Document;
 export enum UserRole {
   CUSTOMER = 'customer',
   ADMIN = 'admin',
+  /** Store staff: orders, riders, inventory; read-only catalogue. */
+  MANAGER = 'manager',
   RIDER = 'rider',
 }
+
+/** Roles that may sign in to the admin panel. */
+export const STAFF_ROLES: readonly string[] = [
+  UserRole.ADMIN,
+  UserRole.MANAGER,
+];
+
+export const isStaffRole = (role: unknown): boolean =>
+  typeof role === 'string' && STAFF_ROLES.includes(role);
 
 @Schema({ _id: false })
 export class Address {
@@ -97,5 +108,7 @@ export const UserSchema = SchemaFactory.createForClass(User);
 
 // Indexes
 UserSchema.index({ role: 1 });
+// Admin customer list (role filter + newest first) and team list.
+UserSchema.index({ role: 1, createdAt: -1 });
 UserSchema.index({ currentLocation: '2dsphere' });
 UserSchema.index({ isOnline: 1, isAvailable: 1 });

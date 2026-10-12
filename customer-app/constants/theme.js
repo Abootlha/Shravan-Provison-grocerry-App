@@ -402,6 +402,12 @@ export const space = {
     gutter: 16,
 };
 
+/**
+ * Widest a phone-shaped content column gets on tablets / desktop web (Home, Category, PDP).
+ * Wider windows centre the column; it never stretches edge to edge.
+ */
+export const CONTENT_MAX_WIDTH = 560;
+
 /** Multiply the 4pt base: s(3) === 12. */
 export const s = (n) => n * 4;
 

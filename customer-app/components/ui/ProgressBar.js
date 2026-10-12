@@ -13,7 +13,7 @@
  *   accessibilityLabel  e.g. "Free delivery progress"
  *
  * Example
- *   <ProgressBar value={subtotal / FREE_DELIVERY_AT} accessibilityLabel="Free delivery progress" />
+ *   <ProgressBar value={subtotal / fees.freeDeliveryThreshold} accessibilityLabel="Free delivery progress" />
  */
 import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';

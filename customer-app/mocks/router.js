@@ -74,6 +74,62 @@ const listProducts = (q) => {
 
 // ---------- orders ----------
 
+// products/schemas/product.schema.ts checkoutPriceOf + isProductSellable
+const checkoutPriceOf = (p) => {
+    const price = p?.price ?? p?.pricing?.sellingPrice;
+    return typeof price === 'number' && Number.isFinite(price) && price > 0 ? price : null;
+};
+const isSellable = (p) => !!p && p.isAvailable !== false && (p.status || 'active') === 'active' && checkoutPriceOf(p) !== null;
+
+const round2 = (v) => Math.round(v * 100) / 100;
+
+// orders/pricing.ts calculateBill
+const calculateBill = (itemTotal, fees) => {
+    const total = round2(itemTotal);
+    const deliveryFee = total >= fees.freeDeliveryThreshold ? 0 : fees.deliveryFee;
+    const discount = Math.round(total * fees.discountRate);
+    return {
+        itemTotal: total,
+        deliveryFee,
+        packagingFee: fees.packagingFee,
+        discount,
+        totalAmount: round2(total + deliveryFee + fees.packagingFee - discount),
+        freeDeliveryThreshold: fees.freeDeliveryThreshold,
+    };
+};
+
+/** OrdersService.buildOrderLines: prices lines from the catalogue; 400 for refused / short lines. */
+const buildOrderLines = (items) => {
+    if (!Array.isArray(items) || items.length === 0) return { error: fail(400, 'Cart is empty') };
+    const lines = [];
+    let itemTotal = 0;
+    for (const it of items) {
+        const p = products.find((x) => x._id === it.productId);
+        if (!isSellable(p)) return { error: fail(400, `Product ${it.name || it.productId} is no longer available`) };
+        const quantity = Number(it.quantity) || 1;
+        if (typeof p.stock === 'number' && p.stock < quantity) return { error: fail(400, `Insufficient stock for ${p.name}`) };
+        const price = checkoutPriceOf(p);
+        lines.push({ productId: p._id, name: p.name, quantity, price, image: p.image });
+        itemTotal += price * quantity;
+    }
+    return { lines, itemTotal };
+};
+
+// Web preview of the "couldn't confirm your total" state: open the app with ?mockQuote=fail.
+const QUOTE_FAILS = typeof window !== 'undefined' && /[?&]mockQuote=fail(&|$)/.test(window.location?.search || '');
+
+const quoteOrder = (body) => {
+    if (QUOTE_FAILS) return { status: 503, body: { statusCode: 503, message: 'Service Unavailable' } };
+    const { lines, itemTotal, error } = buildOrderLines(body?.items);
+    if (error) return error;
+    return ok({
+        ...calculateBill(itemTotal, db.settings.fees),
+        isOpen: db.settings.isOpen !== false,
+        nextOpenAt: db.settings.nextOpenAt ?? null,
+        items: lines.map((l) => ({ ...l, lineTotal: round2(l.price * l.quantity) })),
+    });
+};
+
 const stripMock = ({ _mock, deliveryOtp, ...rest }) => rest;
 
 const riderView = (location) => ({
@@ -128,6 +184,13 @@ export const trackingOrderView = (order, { includeDeliveryOtp = true } = {}) => 
 
 const createOrder = (body) => {
     if (!Array.isArray(body?.items) || body.items.length === 0) return fail(400, 'Order must contain at least one item');
+    if (db.settings.isOpen === false) {
+        return { status: 409, body: { statusCode: 409, code: 'STORE_CLOSED', error: 'Conflict', message: 'The store is closed right now. Please order once it opens.', nextOpenAt: db.settings.nextOpenAt ?? null } };
+    }
+    // The server prices the order itself (same calculation as /orders/quote); client totals are ignored.
+    const priced = buildOrderLines(body.items);
+    if (priced.error) return priced.error;
+    const bill = calculateBill(priced.itemTotal, db.settings.fees);
     const addr = body.deliveryAddress || {};
     if (!addr.address || !addr.city || !addr.pincode) return fail(400, 'deliveryAddress.address, city and pincode are required');
 
@@ -139,24 +202,17 @@ const createOrder = (body) => {
 
     const now = Date.now();
     const n = db.orders.filter((o) => o._mock?.created).length + 100;
-    const items = body.items.map((it) => ({
-        productId: it.productId,
-        name: it.name,
-        quantity: Number(it.quantity) || 1,
-        price: Number(it.price) || 0,
-        image: it.image,
-    }));
-    const itemTotal = Number(body.itemTotal) || items.reduce((s, it) => s + it.price * it.quantity, 0);
+    const items = priced.lines;
     const order = {
         _id: oid(KIND.order, 0x1000 + n),
         orderId: orderNumber(now, 2000 + n),
         userId: db.profile.id,
         items,
-        itemTotal,
-        deliveryFee: Number(body.deliveryFee) || 0,
-        packagingFee: Number(body.packagingFee) || 0,
-        discount: Number(body.discount) || 0,
-        totalAmount: Number(body.totalAmount) || itemTotal,
+        itemTotal: bill.itemTotal,
+        deliveryFee: bill.deliveryFee,
+        packagingFee: bill.packagingFee,
+        discount: bill.discount,
+        totalAmount: bill.totalAmount,
         deliveryAddress: {
             type: addr.type || 'Home',
             address: addr.address,
@@ -315,13 +371,20 @@ const cartView = () => {
 
 // ---------- route table ----------
 
+const MOCK_OTP_LENGTH = (() => {
+    const n = Number(process.env.EXPO_PUBLIC_MOCK_OTP_LENGTH);
+    return Number.isInteger(n) && n >= 4 && n <= 6 ? n : 4;
+})();
+
 const PUBLIC = [/^\/auth\/(send-otp|verify-otp|refresh)$/, /^\/(products|categories|subcategories|item-groups|brands|settings|maps|banners)(\/|$)/];
 
 const routes = [
     // auth
     ['POST', /^\/auth\/send-otp$/, ({ body }) => {
         if (!/^\+?\d{10,13}$/.test(String(body?.phone || '').replace(/\s/g, ''))) return fail(400, 'Please enter a valid phone number');
-        return ok({ message: 'OTP sent successfully (mock mode: any 4-digit OTP works)', sessionId: `mock-${Date.now()}` });
+        // Same shape as the backend: otpLength tells the app how many boxes to show.
+        // EXPO_PUBLIC_MOCK_OTP_LENGTH=6 previews the 6-digit flow (default 4). Any code works.
+        return ok({ message: `OTP sent successfully (mock mode: any ${MOCK_OTP_LENGTH}-digit OTP works)`, sessionId: `mock-${Date.now()}`, otpLength: MOCK_OTP_LENGTH });
     }],
     ['POST', /^\/auth\/verify-otp$/, ({ body }) => {
         if (!/^\d{4,6}$/.test(String(body?.otp || ''))) return fail(400, 'Invalid OTP');
@@ -459,6 +522,7 @@ const routes = [
 
     // orders
     ['POST', /^\/orders$/, ({ body }) => createOrder(body)],
+    ['POST', /^\/orders\/quote$/, ({ body }) => quoteOrder(body)],
     ['GET', /^\/orders$/, ({ query }) => {
         const all = userOrders();
         const page = toInt(query.page, 1);

@@ -4,7 +4,7 @@
  * FlashLists so long rails recycle. Rails show ~2.5 cards so the next one peeks.
  */
 import React, { memo, useCallback, useMemo } from 'react';
-import { StyleSheet, View, useWindowDimensions } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { icon3dFor, PressableScale, Skeleton, SkeletonGroup, SkeletonProductTile, Text } from '../../components/ui';
@@ -13,6 +13,7 @@ import CategoryCard from '../../components/CategoryCard';
 import { space } from '../../constants/theme';
 import { useTheme } from '../../theme';
 import { glyphOf, idOf, imageOf, nameOf, toCardProduct } from './catalog';
+import { useContentWidth } from '../../hooks/useContentWidth';
 
 const GRID_COLUMNS = 4;
 const GRID_GAP = space.md;
@@ -20,7 +21,7 @@ const RAIL_GAP = space.md;
 
 /** The ProductCard variant whose width is closest to "2.5 cards visible" on this screen. */
 export function useRailVariant() {
-    const { width } = useWindowDimensions();
+    const width = useContentWidth();
     return useMemo(() => {
         const ideal = (width - space.gutter - RAIL_GAP * 2) / 2.5;
         const sizes = PRODUCT_CARD_SIZES || {};
@@ -127,7 +128,7 @@ const keyOf = (item) => String(item._id || item.id);
 const gridTile = (width) => Math.floor((width - space.gutter * 2 - GRID_GAP * (GRID_COLUMNS - 1)) / GRID_COLUMNS);
 
 export const CategoryGrid = memo(({ lead, emphasis, title, actionLabel, categories, language, onCategoryPress, onSeeAll }) => {
-    const { width } = useWindowDimensions();
+    const width = useContentWidth();
     const tile = gridTile(width);
     return (
         <View style={styles.gridSection}>
@@ -171,7 +172,7 @@ export const RailSkeleton = memo(() => {
 });
 
 export const HomeSkeleton = memo(({ showBanner = true }) => {
-    const { width } = useWindowDimensions();
+    const width = useContentWidth();
     const bannerW = width - space.gutter * 2;
     const tile = gridTile(width);
     return (
