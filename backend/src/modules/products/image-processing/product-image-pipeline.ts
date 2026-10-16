@@ -178,7 +178,7 @@ export function isPrivateAddress(address: string): boolean {
   return true;
 }
 
-async function assertPublicUrl(
+export async function assertPublicUrl(
   raw: string,
   lookup: NonNullable<PipelineDeps['lookup']>,
 ): Promise<URL> {

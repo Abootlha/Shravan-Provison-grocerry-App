@@ -218,6 +218,32 @@ export default () => {
       maxDeliveryKm: parseFloat(process.env.STORE_MAX_DELIVERY_KM || '15'),
     },
 
+    // Cloudflare R2 (S3 API). Optional: scraped product images are stored
+    // inline in MongoDB when it is not configured.
+    r2: {
+      accountId: process.env.R2_ACCOUNT_ID || undefined,
+      accessKeyId: process.env.R2_ACCESS_KEY_ID || undefined,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || undefined,
+      bucket: process.env.R2_BUCKET || undefined,
+      publicBaseUrl: process.env.R2_PUBLIC_BASE_URL || undefined,
+      endpoint: process.env.R2_ENDPOINT || undefined,
+    },
+
+    // Product scraper (admin > Product scraper).
+    scraper: {
+      // Replaces competitor support e-mails found in scraped copy.
+      storeEmail:
+        process.env.SCRAPER_STORE_EMAIL || 'support@shravanprovision.com',
+      timeoutMs:
+        parseNonNegativeInt(process.env.SCRAPER_TIMEOUT_MS, 30000) || 30000,
+      maxImages: Math.min(
+        parseNonNegativeInt(process.env.SCRAPER_MAX_IMAGES, 8) || 8,
+        15,
+      ),
+      // auto: use Playwright when installed and a plain fetch is not enough.
+      browser: process.env.SCRAPER_BROWSER === 'off' ? 'off' : 'auto',
+    },
+
     // PayU credentials: no defaults. They must come from the environment.
     payu: {
       clientId: process.env.PAYU_CLIENT_ID,
