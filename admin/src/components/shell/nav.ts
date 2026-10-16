@@ -12,6 +12,7 @@ import {
     type LucideIcon,
     Package,
     Radio,
+    ScanSearch,
     Store,
     Tags,
     UserCog,
@@ -53,6 +54,7 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Catalog',
         items: [
             { title: 'Products', href: '/products', icon: Package, keywords: ['items', 'sku', 'catalogue'] },
+            { title: 'Product scraper', href: '/scraper', icon: ScanSearch, keywords: ['import', 'scrape', 'blinkit', 'bigbasket', 'links', 'review', 'approve'] },
             { title: 'Categories', href: '/categories', icon: FolderTree },
             { title: 'Subcategories', href: '/subcategories', icon: Tags },
             { title: 'Item groups', href: '/item-groups', icon: Layers },

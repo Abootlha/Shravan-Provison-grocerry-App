@@ -23,6 +23,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { BannersModule } from './modules/banners/banners.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { TeamModule } from './modules/team/team.module';
+import { ScraperModule } from './modules/scraper/scraper.module';
 import { RedisModule } from './common/utils/redis.module';
 import { HttpThrottlerGuard } from './modules/auth/guards/http-throttler.guard';
 import { AppController } from './app.controller';
@@ -106,6 +107,7 @@ import { redisConnectionOptions } from './config/redis-options';
     BannersModule,
     TeamModule,
     AuditModule,
+    ScraperModule,
   ],
   // Root routes: GET /api/v1 and the GET /api/v1/health probe used by deploys.
   controllers: [AppController],

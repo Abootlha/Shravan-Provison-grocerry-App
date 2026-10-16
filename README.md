@@ -11,7 +11,7 @@ and one NestJS backend that all three talk to.
 | `customer-app/`   | Customer mobile app (Android/iOS/web)                          | Expo / React Native, Redux Toolkit                       |
 | `apps/rider-app/` | Delivery rider app                                             | Expo / React Native, TypeScript                          |
 | `admin/`          | Admin dashboard (products, orders, riders, inventory)          | Astro (static) + React, Tailwind                         |
-| `tools/scraper/`  | Ad-hoc product data scraper (dev tool, not deployed)           | Node, Playwright, Cheerio                                |
+| `tools/scraper/`  | Legacy CSV scraper (dev tool). Superseded by Admin > Product scraper (`backend/src/modules/scraper`) | Node, Playwright, Cheerio |
 | `infrastructure/` | Production Docker Compose + nginx for the backend              | Docker, nginx                                            |
 | `services/`, `shared/` | **Archived** microservices prototype. Not deployed, not maintained. See `services/README.md` | |
 

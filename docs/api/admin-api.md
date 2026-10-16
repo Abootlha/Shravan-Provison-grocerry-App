@@ -250,6 +250,34 @@ Sorted by `sortOrder`, then `name`. Re-enable with the existing `PUT /categories
 
 ---
 
+## Product scraper
+
+Staff paste product page links; a BullMQ queue (`product-scrape`, 2 at a time) scrapes each into a preview. Images are normalised to 800px pack shots and stored in Cloudflare R2 (`catalog/scraped/<id>/…`), or inline as data URIs (max 4) when R2 is not configured. Nothing reaches the catalogue until an admin approves it.
+
+Sources: Blinkit (embedded page state: price, MRP, unit, category path, nutrition, shelf life, veg flag, gallery), BigBasket (`__NEXT_DATA__`), and any page with schema.org JSON-LD or OpenGraph tags. Sites that block bots fail with a clear message ("The site blocked the scraper (HTTP 403)"). Set `SCRAPER_BROWSER=off` to never try a headless browser; with `auto` (default) Playwright is used only if it is installed on the server.
+
+Status flow: `queued` → `scraping` → `ready` (to review) → `approved` | `declined`; `scraping` → `failed` → (retry) `queued`. A link that is open (anything but `declined`) is not scraped twice.
+
+Categorisation: the source's category path and the product name are matched against the store's categories, subcategories and item groups (including item-group `tags`). The result is stored in `suggestion { categoryId, subcategoryId, itemGroupId, confidence: high|medium|low, matched[] }`; `high`/`medium` suggestions pre-fill `categoryId`/`subcategoryId`/`itemGroupId`, `low` ones are only shown. A category chosen at submit time wins over the suggestion.
+
+| endpoint | roles | body / query | response |
+|---|---|---|---|
+| `GET /admin/scraper/status` | admin, manager | | `{ r2Configured, browser, maxImages }` |
+| `GET /admin/scraper/counts` | admin, manager | | `{ ready, in_progress, failed, approved, declined, all }` |
+| `GET /admin/scraper/items` | admin, manager | `?status=ready\|in_progress\|failed\|approved\|declined&q&batchId&page&limit` | `{ items: [... images: [cover only], imageCount], total, page, limit, totalPages }` |
+| `GET /admin/scraper/items/:id` | admin, manager | | `{ item }` |
+| `POST /admin/scraper/items` | admin | `{ urls: string[] (1-100), categoryId?, subcategoryId?, itemGroupId? }` | `{ batchId, queued, skipped: [{ url, reason }] }` |
+| `PATCH /admin/scraper/items/:id` | admin | `{ name?, brand?, description?, highlights?, price?, mrp?, unit?, barcode?, stock?, categoryId?, subcategoryId?, itemGroupId? (null clears), imageUrls? (kept images, in order) }` | `{ item }`; only while `ready`; removed images are deleted from R2 |
+| `POST /admin/scraper/items/:id/approve` | admin | same edits + `publishAs: "active" (default) \| "draft"` | `{ item, product }`; needs name, price > 0, unit and category; 409 if already reviewed |
+| `POST /admin/scraper/items/:id/decline` | admin | `{ reason? }` | `{ item }`; works on `ready` and `failed`; deletes the R2 images |
+| `POST /admin/scraper/items/:id/retry` | admin | | `{ item }`; `failed` only |
+| `POST /admin/scraper/items/bulk-approve` | admin | `{ ids (≤100), publishAs? }` | `{ results: [{ id, ok, message?, productId? }], approved }` |
+| `POST /admin/scraper/items/bulk-decline` | admin | `{ ids (≤100), reason? }` | `{ results, declined }` |
+
+An approved preview becomes a normal product (`images` = the R2 URLs, `pricing`, `pack.unit`, `shelfLife`, `attributes.storage/dietary`, `nutrition`). Approvals and declines are recorded in the audit log like other staff writes.
+
+---
+
 ## Banners
 
 Schema: `{ _id, title, titleHi, image (https), target: { type: "category" | "product" | "url", id?, url? }, sortOrder, startsAt, endsAt, isActive, createdAt, updatedAt }`.
