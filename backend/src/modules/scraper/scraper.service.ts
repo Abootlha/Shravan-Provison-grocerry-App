@@ -821,6 +821,10 @@ export class ScraperService implements OnModuleInit {
         idOf(doc.itemGroupId),
       );
 
+      if (this.storage.isConfigured && doc.images?.length) {
+        await this.syncImagesToR2(doc);
+      }
+
       const product = await this.productsService.create(
         this.toProduct(doc, publishAs),
       );
@@ -842,6 +846,45 @@ export class ScraperService implements OnModuleInit {
         );
       }
       throw error;
+    }
+  }
+
+  private async syncImagesToR2(doc: ScrapedProductDocument): Promise<void> {
+    const updatedImages: ScrapedImage[] = [];
+    let changed = false;
+
+    for (let index = 0; index < doc.images.length; index++) {
+      const img = doc.images[index];
+      // If already stored in R2, keep it
+      if (img.key && img.url && !img.url.startsWith('data:')) {
+        updatedImages.push(img);
+        continue;
+      }
+
+      const sourceUrl = img.sourceUrl || img.url;
+      try {
+        const processed = await this.imageProcessing.processImage(sourceUrl, {
+          removeBackground: false,
+        });
+        const hash = createHash('sha1')
+          .update(processed.buffer)
+          .digest('hex')
+          .slice(0, 12);
+        const key = `catalog/scraped/${doc._id}/${index}-${hash}.png`;
+        const url = await this.storage.put(key, processed.buffer, 'image/png');
+        updatedImages.push({ url, key, sourceUrl });
+        changed = true;
+      } catch (err: any) {
+        this.logger.warn(
+          `Image ${sourceUrl} skipped for R2 sync on approve: ${err.message}`,
+        );
+        updatedImages.push(img);
+      }
+    }
+
+    if (changed) {
+      doc.images = updatedImages;
+      doc.imagesInR2 = true;
     }
   }
 
