@@ -175,6 +175,50 @@ describe('extractProduct', () => {
       extractProduct('<html><body></body></html>', 'https://x.test/'),
     ).toThrow(ScrapeParseError);
   });
+
+  it('reads Zepto product data with paise conversion', () => {
+    const html = `
+      <html>
+        <head>
+          <title>Diet Coke - Zepto</title>
+          <script type="application/ld+json">
+            {
+              "@context": "https://schema.org",
+              "@type": "Product",
+              "name": "Diet Coke Can",
+              "image": ["https://cdn.zeptonow.com/coke.jpg"]
+            }
+          </script>
+        </head>
+        <body>
+          <p>Net Qty: 300 ml</p>
+          <script>
+            self.__next_f.push([1, '{"mrp":4500,"discountedSellingPrice":4000}']);
+          </script>
+        </body>
+      </html>
+    `;
+    const res = extractProduct(html, 'https://www.zepto.com/pn/diet-coke/pvid/123');
+    expect(res.name).toBe('Diet Coke Can');
+    expect(res.price).toBe(40);
+    expect(res.mrp).toBe(45);
+    expect(res.unit).toBe('300 ml');
+    expect(res.images).toEqual(['https://cdn.zeptonow.com/coke.jpg']);
+  });
+
+  it('detects Zepto 404 page and fails with parse error', () => {
+    const html = `<html><head><title>404 - Page Not Found</title></head><body>an egg-sit</body></html>`;
+    expect(() =>
+      extractProduct(html, 'https://www.zepto.com/pn/broken/pvid/404'),
+    ).toThrow(ScrapeParseError);
+  });
+
+  it('detects AWS WAF challenge as blocked', () => {
+    const html = `<html><head><script src="https://token.awswaf.com/challenge.js"></script></head><body>AwsWafIntegration</body></html>`;
+    expect(() =>
+      extractProduct(html, 'https://www.zepto.com/pn/waf/pvid/123'),
+    ).toThrow(ScrapeBlockedError);
+  });
 });
 
 describe('helpers', () => {

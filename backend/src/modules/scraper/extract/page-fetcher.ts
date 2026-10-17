@@ -6,7 +6,11 @@ import {
   assertPublicUrl,
   isPrivateAddress,
 } from '../../products/image-processing/product-image-pipeline';
-import { looksBlocked, ScrapeBlockedError } from './product-extractor';
+import {
+  detectSite,
+  looksBlocked,
+  ScrapeBlockedError,
+} from './product-extractor';
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
@@ -34,25 +38,43 @@ export async function fetchPage(
   const lookup =
     options.lookup ?? ((host: string) => nodeLookup(host, { all: true }));
 
-  // 1. ScraperAPI integration: automatically routes via residential IPs & bypasses Cloudflare/Akamai
+  // 1. ScraperAPI integration: automatically routes via residential IPs & bypasses Cloudflare/Akamai/AWS WAF
   if (options.apiKey) {
     await assertPublicUrl(raw, lookup);
-    const scraperUrl = `https://api.scraperapi.com?api_key=${encodeURIComponent(
-      options.apiKey,
-    )}&url=${encodeURIComponent(raw)}&country_code=in`;
+    const site = detectSite(raw);
+    const isZepto = site === 'zepto';
     const doFetch = options.fetch ?? fetch;
-    const res = await doFetch(scraperUrl, {
-      signal: AbortSignal.timeout(Math.max(options.timeoutMs, 45000)),
-    });
-    if (!res.ok) {
-      if (res.status === 403 || res.status === 429) {
-        throw new ScrapeBlockedError(
-          `Scraper proxy service blocked or rate-limited (HTTP ${res.status}).`,
-        );
+
+    const fetchViaScraperApi = async (renderJs: boolean) => {
+      const scraperUrl = `https://api.scraperapi.com?api_key=${encodeURIComponent(
+        options.apiKey!,
+      )}&url=${encodeURIComponent(raw)}&country_code=in${renderJs ? '&render=true' : ''}`;
+      const res = await doFetch(scraperUrl, {
+        signal: AbortSignal.timeout(Math.max(options.timeoutMs, 60000)),
+      });
+      if (!res.ok) {
+        if (res.status === 403 || res.status === 429) {
+          throw new ScrapeBlockedError(
+            `Scraper proxy service blocked or rate-limited (HTTP ${res.status}).`,
+          );
+        }
+        throw new Error(`Scraper proxy service failed (HTTP ${res.status}).`);
       }
-      throw new Error(`Scraper proxy service failed (HTTP ${res.status}).`);
+      return res.text();
+    };
+
+    // Zepto always requires JS rendering due to AWS WAF challenge & client-side hydration
+    let html = await fetchViaScraperApi(isZepto);
+    if (!isZepto && looksBlocked(html)) {
+      // Retry once with render=true to solve JS challenge (e.g. Cloudflare / WAF)
+      try {
+        const rendered = await fetchViaScraperApi(true);
+        if (!looksBlocked(rendered)) html = rendered;
+      } catch {
+        // Fall back to original result or throw below
+      }
     }
-    const html = await res.text();
+
     if (html.length > MAX_PAGE_BYTES) throw new Error('The page is too large.');
     if (looksBlocked(html)) {
       throw new ScrapeBlockedError(

@@ -94,6 +94,12 @@ export function extractProduct(
     );
   }
 
+  if (looksNotFound(html)) {
+    throw new ScrapeParseError(
+      'This product link is no longer available or was removed on the source store (404 Not Found).',
+    );
+  }
+
   const site = detectSite(pageUrl);
   const ld = parseJsonLd(html);
   const meta = parseMeta(html);
@@ -101,6 +107,7 @@ export function extractProduct(
   let draft: Partial<ExtractedProduct> = {};
   if (site === 'blinkit') draft = fromBlinkitState(html) ?? {};
   else if (site === 'bigbasket') draft = fromBigBasketNextData(html) ?? {};
+  else if (site === 'zepto') draft = fromZepto(html) ?? {};
 
   const merged: ExtractedProduct = {
     site,
@@ -308,6 +315,40 @@ function fromBigBasketNextData(html: string): Partial<ExtractedProduct> | null {
 }
 
 // ---------------------------------------------------------------------------
+// Zepto
+
+function fromZepto(html: string): Partial<ExtractedProduct> | null {
+  let mrp: number | undefined;
+  const mrpMatch = html.match(/\\?"mrp\\?"\s*:\s*(\d+)/);
+  if (mrpMatch) {
+    const rawVal = Number.parseInt(mrpMatch[1], 10);
+    // Zepto stores currency in paise (e.g. 15300 = ₹153.00)
+    mrp = rawVal > 1000 ? Math.round(rawVal / 100) : rawVal;
+  }
+  if (!mrp) {
+    const htmlMrp = html.match(/MRP[^₹0-9]*₹\s*(\d+(?:\.\d+)?)/i);
+    if (htmlMrp) mrp = Number.parseFloat(htmlMrp[1]);
+  }
+
+  let price: number | undefined;
+  const priceMatch = html.match(/\\?"discountedSellingPrice\\?"\s*:\s*(\d+)/);
+  if (priceMatch) {
+    const rawPrice = Number.parseInt(priceMatch[1], 10);
+    price = rawPrice > 1000 ? Math.round(rawPrice / 100) : rawPrice;
+  }
+
+  let unit: string | undefined;
+  const netQty = html.match(/Net\s*Qty:?\s*([^\n<]+)/i);
+  if (netQty) unit = netQty[1].trim();
+
+  return {
+    mrp,
+    price,
+    unit,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Generic: JSON-LD and meta tags
 
 interface LdResult {
@@ -402,13 +443,29 @@ function parseMeta(html: string) {
 // ---------------------------------------------------------------------------
 // Helpers
 
+export function looksNotFound(html: string): boolean {
+  if (!html) return false;
+  return (
+    /an egg-sit/i.test(html) ||
+    /<title>\s*(404|Page Not Found)/i.test(html) ||
+    /The page you're looking for.*doesn't exist/i.test(html)
+  );
+}
+
 export function looksBlocked(html: string): boolean {
+  if (!html) return false;
   const head = html.slice(0, 5000);
   return (
     /<title>\s*(Access Denied|Just a moment\.\.\.|Attention Required)/i.test(
       head,
     ) ||
-    (html.length < 3000 && /captcha|are you a robot|access denied/i.test(html))
+    /token\.awswaf\.com|AwsWafIntegration|cf-browser-verification|challenge-running/i.test(
+      html,
+    ) ||
+    (html.length < 3000 &&
+      /captcha|are you a robot|access denied|verify that you're not a robot/i.test(
+        html,
+      ))
   );
 }
 
