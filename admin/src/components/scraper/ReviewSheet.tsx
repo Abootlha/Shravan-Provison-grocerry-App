@@ -230,7 +230,7 @@ export function ReviewSheet({
                                             <h3 className="text-sm font-semibold">Photos</h3>
                                             <span className="text-xs text-muted-foreground">
                                                 {form.imageUrls.length} kept
-                                                {item.imagesInR2 === false && item.images.length ? ' · stored in the database (R2 not set up)' : ''}
+                                                {item.imagesInR2 === false && item.images.some((img) => img.url?.startsWith('data:')) ? ' · stored in the database (R2 not set up)' : ''}
                                             </span>
                                         </div>
                                         {form.imageUrls.length ? (

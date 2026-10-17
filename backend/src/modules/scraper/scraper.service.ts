@@ -385,7 +385,7 @@ export class ScraperService implements OnModuleInit {
         barcode,
         stock: Number.isFinite(stock) && stock >= 0 ? stock : 50,
         images,
-        imagesInR2: false,
+        imagesInR2: this.storage.isConfigured,
         sourceCategoryPath: categoryPath,
         suggestion: suggestion
           ? {
