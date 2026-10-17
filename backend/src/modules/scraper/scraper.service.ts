@@ -76,6 +76,8 @@ interface ScraperConfig {
   timeoutMs: number;
   maxImages: number;
   browser: 'auto' | 'off';
+  proxyUrl?: string;
+  apiKey?: string;
 }
 
 export interface BulkResult {
@@ -356,21 +358,34 @@ export class ScraperService implements OnModuleInit {
   private async scrapePage(url: string): Promise<ExtractedProduct> {
     let firstError: Error | null = null;
     try {
-      const html = await fetchPage(url, { timeoutMs: this.config.timeoutMs });
+      const html = await fetchPage(url, {
+        timeoutMs: this.config.timeoutMs,
+        proxyUrl: this.config.proxyUrl,
+        apiKey: this.config.apiKey,
+      });
       return extractProduct(html, url, this.config.storeEmail);
     } catch (error) {
       firstError = error as Error;
     }
     if (this.config.browser !== 'off') {
-      const html = await renderWithBrowser(url, this.config.timeoutMs).catch(
-        (error: Error) => {
-          this.logger.warn(
-            `Browser render failed for ${url}: ${error.message}`,
-          );
-          return null;
-        },
-      );
+      const html = await renderWithBrowser(
+        url,
+        this.config.timeoutMs,
+        this.config.proxyUrl,
+      ).catch((error: Error) => {
+        this.logger.warn(`Browser render failed for ${url}: ${error.message}`);
+        return null;
+      });
       if (html) return extractProduct(html, url, this.config.storeEmail);
+    }
+    if (
+      !this.config.apiKey &&
+      !this.config.proxyUrl &&
+      firstError?.message?.includes('403')
+    ) {
+      throw new ScrapeBlockedError(
+        'The site blocked the scraper (HTTP 403). Set SCRAPER_API_KEY (from scraperapi.com) or SCRAPER_PROXY_URL in backend .env to route requests via residential IPs.',
+      );
     }
     throw firstError;
   }

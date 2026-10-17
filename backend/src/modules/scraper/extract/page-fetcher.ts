@@ -1,13 +1,15 @@
 import { lookup as nodeLookup } from 'dns/promises';
 import { isIP } from 'net';
+import axios from 'axios';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import {
   assertPublicUrl,
   isPrivateAddress,
 } from '../../products/image-processing/product-image-pipeline';
-import { ScrapeBlockedError } from './product-extractor';
+import { looksBlocked, ScrapeBlockedError } from './product-extractor';
 
 const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
 const MAX_REDIRECTS = 5;
 export const MAX_PAGE_BYTES = 8 * 1024 * 1024;
 
@@ -15,19 +17,91 @@ export interface FetchPageOptions {
   timeoutMs: number;
   fetch?: typeof fetch;
   lookup?: (host: string) => Promise<{ address: string }[]>;
+  proxyUrl?: string;
+  apiKey?: string;
 }
 
 /**
- * Downloads a product page as HTML. Same SSRF guard as product images:
- * http(s) only and every redirect hop must resolve to a public address.
+ * Downloads a product page as HTML. Supports:
+ * 1. Direct fetch with stealth headers.
+ * 2. ScraperAPI (if apiKey provided) for rotating Indian residential IPs.
+ * 3. HTTP/HTTPS proxy (if proxyUrl provided).
  */
 export async function fetchPage(
   raw: string,
   options: FetchPageOptions,
 ): Promise<string> {
-  const doFetch = options.fetch ?? fetch;
   const lookup =
     options.lookup ?? ((host: string) => nodeLookup(host, { all: true }));
+
+  // 1. ScraperAPI integration: automatically routes via residential IPs & bypasses Cloudflare/Akamai
+  if (options.apiKey) {
+    await assertPublicUrl(raw, lookup);
+    const scraperUrl = `https://api.scraperapi.com?api_key=${encodeURIComponent(
+      options.apiKey,
+    )}&url=${encodeURIComponent(raw)}&country_code=in`;
+    const doFetch = options.fetch ?? fetch;
+    const res = await doFetch(scraperUrl, {
+      signal: AbortSignal.timeout(Math.max(options.timeoutMs, 45000)),
+    });
+    if (!res.ok) {
+      if (res.status === 403 || res.status === 429) {
+        throw new ScrapeBlockedError(
+          `Scraper proxy service blocked or rate-limited (HTTP ${res.status}).`,
+        );
+      }
+      throw new Error(`Scraper proxy service failed (HTTP ${res.status}).`);
+    }
+    const html = await res.text();
+    if (html.length > MAX_PAGE_BYTES) throw new Error('The page is too large.');
+    if (looksBlocked(html)) {
+      throw new ScrapeBlockedError(
+        'The site blocked the scraper (bot protection challenge).',
+      );
+    }
+    return html;
+  }
+
+  // 2. Custom HTTP/HTTPS/SOCKS Proxy integration
+  if (options.proxyUrl) {
+    const url = await assertPublicUrl(raw, lookup);
+    const agent = new HttpsProxyAgent(options.proxyUrl);
+    try {
+      const response = await axios.get(url.toString(), {
+        httpsAgent: agent,
+        httpAgent: agent,
+        timeout: options.timeoutMs,
+        maxRedirects: MAX_REDIRECTS,
+        headers: {
+          'User-Agent': USER_AGENT,
+          Accept:
+            'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-IN,en-US;q=0.9,en;q=0.8',
+        },
+        responseType: 'text',
+        validateStatus: (status) => status < 400,
+      });
+      const html = String(response.data);
+      if (html.length > MAX_PAGE_BYTES) throw new Error('The page is too large.');
+      if (looksBlocked(html)) {
+        throw new ScrapeBlockedError(
+          'The site blocked the scraper (bot protection challenge).',
+        );
+      }
+      return html;
+    } catch (err: any) {
+      const status = err.response?.status;
+      if (status === 403 || status === 429 || status === 202) {
+        throw new ScrapeBlockedError(
+          `The site blocked the scraper (HTTP ${status}). Try again later or add this product by hand.`,
+        );
+      }
+      throw err;
+    }
+  }
+
+  // 3. Direct fetch with realistic browser headers & SSRF guard
+  const doFetch = options.fetch ?? fetch;
   let current = raw;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     const url = await assertPublicUrl(current, lookup);
@@ -36,8 +110,18 @@ export async function fetchPage(
       signal: AbortSignal.timeout(options.timeoutMs),
       headers: {
         'User-Agent': USER_AGENT,
-        Accept: 'text/html,application/xhtml+xml',
-        'Accept-Language': 'en-IN,en;q=0.9',
+        Accept:
+          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-IN,en-US;q=0.9,en;q=0.8',
+        'Sec-Ch-Ua':
+          '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
       },
     });
     if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
@@ -62,30 +146,69 @@ export async function fetchPage(
 }
 
 /**
- * Optional headless-browser loader for pages that only render client side.
- * `playwright` is not a dependency: install it on the server
- * (`npm i playwright && npx playwright install chromium`) to enable this.
- * Returns null when it is not installed.
+ * Headless-browser loader with anti-automation suppression and proxy support.
  */
 export async function renderWithBrowser(
   url: string,
   timeoutMs: number,
+  proxyUrl?: string,
 ): Promise<string | null> {
   let playwright: any;
   try {
-    // A variable specifier keeps TypeScript from requiring the types.
     const moduleName = 'playwright';
     playwright = await import(moduleName);
   } catch {
     return null;
   }
-  const browser = await playwright.chromium.launch({ headless: true });
+
+  let proxyConfig:
+    | { server: string; username?: string; password?: string }
+    | undefined;
+  if (proxyUrl) {
+    try {
+      const parsed = new URL(proxyUrl);
+      proxyConfig = {
+        server: `${parsed.protocol}//${parsed.host}`,
+        username: parsed.username
+          ? decodeURIComponent(parsed.username)
+          : undefined,
+        password: parsed.password
+          ? decodeURIComponent(parsed.password)
+          : undefined,
+      };
+    } catch {
+      proxyConfig = { server: proxyUrl };
+    }
+  }
+
+  const launchArgs = [
+    '--disable-blink-features=AutomationControlled',
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-infobars',
+    '--window-size=1920,1080',
+  ];
+
+  const browser = await playwright.chromium.launch({
+    headless: true,
+    args: launchArgs,
+    proxy: proxyConfig,
+  });
   try {
     const context = await browser.newContext({
       userAgent: USER_AGENT,
       locale: 'en-IN',
+      viewport: { width: 1280, height: 800 },
+      extraHTTPHeaders: {
+        'Accept-Language': 'en-IN,en-US;q=0.9,en;q=0.8',
+      },
     });
     const page = await context.newPage();
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
+
     // Never let the page reach loopback/private hosts (by literal address).
     await page.route('**/*', (route: any) => {
       try {
@@ -106,18 +229,20 @@ export async function renderWithBrowser(
       }
       return route.continue();
     });
+
     const response = await page.goto(url, {
       waitUntil: 'domcontentloaded',
       timeout: timeoutMs,
     });
+    await page.waitForTimeout(3000);
+    const content = await page.content();
     const status = response?.status() ?? 0;
-    if (status === 403 || status === 429) {
+    if (looksBlocked(content) || (status === 403 && content.length < 1000)) {
       throw new ScrapeBlockedError(
-        `The site blocked the scraper (HTTP ${status}). Try again later or add this product by hand.`,
+        `The site blocked the scraper (HTTP ${status || 403}). Try again later or add this product by hand.`,
       );
     }
-    await page.waitForTimeout(2500);
-    return await page.content();
+    return content;
   } finally {
     await browser.close().catch(() => undefined);
   }

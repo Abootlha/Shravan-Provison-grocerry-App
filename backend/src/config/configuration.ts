@@ -242,6 +242,10 @@ export default () => {
       ),
       // auto: use Playwright when installed and a plain fetch is not enough.
       browser: process.env.SCRAPER_BROWSER === 'off' ? 'off' : 'auto',
+      // HTTP/HTTPS/SOCKS proxy to route requests through residential IPs.
+      proxyUrl: process.env.SCRAPER_PROXY_URL?.trim() || undefined,
+      // Optional ScraperAPI key (https://www.scraperapi.com) for automatic IP rotation and anti-bot bypass.
+      apiKey: process.env.SCRAPER_API_KEY?.trim() || undefined,
     },
 
     // PayU credentials: no defaults. They must come from the environment.

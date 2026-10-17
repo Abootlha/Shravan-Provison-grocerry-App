@@ -402,7 +402,7 @@ function parseMeta(html: string) {
 // ---------------------------------------------------------------------------
 // Helpers
 
-function looksBlocked(html: string): boolean {
+export function looksBlocked(html: string): boolean {
   const head = html.slice(0, 5000);
   return (
     /<title>\s*(Access Denied|Just a moment\.\.\.|Attention Required)/i.test(
