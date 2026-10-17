@@ -281,27 +281,28 @@ async function extractProductData(page, url) {
             if (!result.unit) result.unit = '1pc';
 
             // 7. Collect High-Res Images
-            // If JSON-LD or og:image already provided product images, use their filenames/slugs to filter DOM matches
-            const htmlSource = document.documentElement.innerHTML;
-            const urlRegex = /https?:\/\/[^"'\s>]+?\.(?:jpg|jpeg|png|webp)(?:\?[^"'\s>]+)?/gi;
-            const matches = htmlSource.match(urlRegex) || [];
+            // If JSON-LD or og:image already provided product images (e.g. Zepto provides full gallery),
+            // do NOT scan the whole HTML for other products' images (avoids recommendations/similar products).
+            if (result.images.length < 2) {
+                const prefixes = [];
+                for (const imgUrl of result.images) {
+                    try {
+                        let filename = imgUrl.split('?')[0].split('/').pop().split('.')[0];
+                        if (filename.includes('rc-upload')) {
+                            filename = filename.replace(/-\d+$/, ''); // e.g. rc-upload-1234-91 -> rc-upload-1234
+                        }
+                        if (filename.length > 5) prefixes.push(filename);
+                    } catch (e) {}
+                }
 
-            // Extract primary slug keywords from product name (excluding brand names)
-            const commonBrands = ['britannia', 'amul', 'nestle', 'cadbury', 'parle', 'tata', 'haldiram', 'itc', 'sunfeast', 'dabur', 'marico'];
-            const nameKeywords = (result.name || '')
-                .toLowerCase()
-                .replace(/[^a-z0-9]+/g, ' ')
-                .split(' ')
-                .filter(w => w.length > 3 && !commonBrands.includes(w));
-            
-            for (const m of matches) {
-                const lowerM = m.toLowerCase();
-                if (m.includes('cms-assets/cms/product/')) {
-                    result.images.push(m);
-                } else if (m.includes('product_variant') || m.includes('cms/product/')) {
-                    // Only include if it contains at least one product-specific keyword
-                    if (nameKeywords.length === 0 || nameKeywords.some(kw => lowerM.includes(kw))) {
-                        result.images.push(m);
+                if (prefixes.length > 0) {
+                    const htmlSource = document.documentElement.innerHTML;
+                    const urlRegex = /https?:\/\/[^"'\s>]+?\.(?:jpg|jpeg|png|webp)(?:\?[^"'\s>]+)?/gi;
+                    const matches = htmlSource.match(urlRegex) || [];
+                    for (const m of matches) {
+                        if (prefixes.some((p) => m.includes(p))) {
+                            result.images.push(m);
+                        }
                     }
                 }
             }
