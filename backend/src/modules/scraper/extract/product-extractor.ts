@@ -615,7 +615,7 @@ function decodeEntities(s: string) {
     .replace(/&nbsp;/g, ' ');
 }
 
-function unitFromText(text: string) {
+export function unitFromText(text: string) {
   const m = text.match(
     /(\d+(?:\.\d+)?\s*(?:kg|g|gm|mg|l|ltr|ml|pc|pcs|pieces|pack)\b(?:\s*[x×]\s*\d+)?)/i,
   );

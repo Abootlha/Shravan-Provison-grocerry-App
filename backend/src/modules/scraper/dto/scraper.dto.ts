@@ -157,3 +157,21 @@ export class BulkScrapeIdsDto {
   @MaxLength(500)
   reason?: string;
 }
+
+export class ImportCsvDto {
+  @IsArray()
+  rows!: Record<string, any>[];
+
+  @IsOptional()
+  @IsMongoId()
+  categoryId?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  subcategoryId?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  itemGroupId?: string;
+}
+

@@ -49,11 +49,13 @@ import {
   detectSite,
   extractProduct,
   normalizeSourceUrl,
+  unitFromText,
 } from './extract/product-extractor';
 import { fetchPage, renderWithBrowser } from './extract/page-fetcher';
 import { Taxonomy, suggestCategory } from './categorizer';
 import {
   ApproveScrapedProductDto,
+  ImportCsvDto,
   ScrapeListQueryDto,
   SubmitScrapeDto,
   UpdateScrapedProductDto,
@@ -238,6 +240,179 @@ export class ScraperService implements OnModuleInit {
     for (const doc of docs) await this.enqueue(doc);
 
     return { batchId, queued: docs.length, skipped };
+  }
+
+  async importCsv(dto: ImportCsvDto, userId?: string) {
+    if (dto.categoryId || dto.subcategoryId || dto.itemGroupId) {
+      await this.assertHierarchy(
+        dto.categoryId,
+        dto.subcategoryId,
+        dto.itemGroupId,
+      );
+    }
+
+    const batchId = randomUUID().slice(0, 8);
+    const taxonomy = await this.loadTaxonomy();
+    let imported = 0;
+    let skipped = 0;
+
+    const toInsert: any[] = [];
+
+    for (let index = 0; index < dto.rows.length; index++) {
+      const row = dto.rows[index];
+      const name = (
+        row.Name ??
+        row.name ??
+        row.Title ??
+        row.title
+      )?.toString().trim();
+      if (!name) {
+        skipped++;
+        continue;
+      }
+
+      const price = parseFloat(row.Price ?? row.price ?? 0) || 0;
+      const mrp =
+        parseFloat(
+          row.OriginalPrice ?? row.originalPrice ?? row.MRP ?? row.mrp,
+        ) || price;
+      const stock = parseInt(row.Stock ?? row.stock, 10);
+      const unit = (
+        row.Unit ??
+        row.unit ??
+        unitFromText(name) ??
+        '1pc'
+      )
+        .toString()
+        .trim();
+      const brand = (row.Brand ?? row.brand)?.toString().trim() || undefined;
+      const barcode =
+        (row.Barcode ?? row.barcode)?.toString().trim() || undefined;
+      const description =
+        (row.Description ?? row.description)?.toString().trim() || undefined;
+      const highlights =
+        (row.Highlights ?? row.highlights)?.toString().trim() || undefined;
+
+      // Extract image URLs from pipe-separated Images column or ImageURL1..15
+      const rawImages: string[] = [];
+      const imagesField = row.Images ?? row.images;
+      if (typeof imagesField === 'string' && imagesField.trim()) {
+        const splitUrls = imagesField
+          .split(/[|\n,]/)
+          .map((u: string) => u.trim())
+          .filter((u: string) => /^https?:\/\//i.test(u));
+        rawImages.push(...splitUrls);
+      }
+      for (let i = 1; i <= 15; i++) {
+        const u = (
+          row[`ImageURL${i}`] ??
+          row[`imageURL${i}`] ??
+          row[`imageUrl${i}`]
+        )?.toString().trim();
+        if (u && /^https?:\/\//i.test(u)) rawImages.push(u);
+      }
+      const uniqueImages = [...new Set(rawImages)].slice(0, 15);
+      const images: ScrapedImage[] = uniqueImages.map((url) => ({
+        url,
+        sourceUrl: url,
+      }));
+
+      // Detect source site
+      let sourceSite: string = 'csv';
+      const firstImg = uniqueImages[0] || '';
+      if (/grofers|blinkit/i.test(firstImg)) sourceSite = 'blinkit';
+      else if (/zepto/i.test(firstImg)) sourceSite = 'zepto';
+      else if (/bigbasket|bbassets/i.test(firstImg)) sourceSite = 'bigbasket';
+
+      const sourceUrl =
+        row.SourceURL ??
+        row.sourceUrl ??
+        row.Link ??
+        row.link ??
+        `csv://${batchId}/${index + 1}`;
+
+      // Suggest taxonomy
+      const categoryPath = [
+        row.Category ?? row.category,
+        row.Subcategory ?? row.subcategory,
+        row.ItemGroup ?? row.itemGroup,
+      ]
+        .filter((c: any) => typeof c === 'string' && c.trim())
+        .map(String);
+
+      const suggestion = suggestCategory(taxonomy, {
+        categoryPath,
+        name,
+        brand,
+      });
+
+      const chosenCategoryId =
+        dto.categoryId ||
+        (suggestion && suggestion.confidence !== 'low'
+          ? suggestion.categoryId
+          : undefined);
+      const chosenSubcategoryId =
+        dto.subcategoryId ||
+        (suggestion && suggestion.confidence !== 'low'
+          ? suggestion.subcategoryId
+          : undefined);
+      const chosenItemGroupId =
+        dto.itemGroupId ||
+        (suggestion && suggestion.confidence !== 'low'
+          ? suggestion.itemGroupId
+          : undefined);
+
+      const duplicate = await this.productModel
+        .findOne({
+          name: { $regex: `^${escapeRegex(name)}$`, $options: 'i' },
+        })
+        .select('_id')
+        .lean();
+
+      toInsert.push({
+        sourceUrl,
+        sourceSite,
+        sourceId: barcode || undefined,
+        status: ScrapeStatus.READY,
+        batchId,
+        name,
+        brand,
+        description,
+        highlights,
+        price,
+        mrp: mrp < price ? price : mrp,
+        unit,
+        barcode,
+        stock: Number.isFinite(stock) && stock >= 0 ? stock : 50,
+        images,
+        imagesInR2: false,
+        sourceCategoryPath: categoryPath,
+        suggestion: suggestion
+          ? {
+              categoryId: oid(suggestion.categoryId),
+              subcategoryId: oid(suggestion.subcategoryId),
+              itemGroupId: oid(suggestion.itemGroupId),
+              confidence: suggestion.confidence,
+              score: suggestion.score,
+              matched: suggestion.matched,
+            }
+          : undefined,
+        categoryId: oid(chosenCategoryId),
+        subcategoryId: oid(chosenSubcategoryId),
+        itemGroupId: oid(chosenItemGroupId),
+        duplicateOf: duplicate?._id,
+        requestedBy: oid(userId),
+        warnings:
+          images.length === 0 ? ['No product images provided in CSV'] : [],
+      });
+      imported++;
+    }
+
+    if (toInsert.length > 0) {
+      await this.scrapedModel.insertMany(toInsert);
+    }
+
+    return { batchId, imported, skipped };
   }
 
   async retry(id: string) {

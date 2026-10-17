@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { toast } from 'sonner';
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, ImageOff, Link2, Loader2, RotateCw, ScanSearch, Search, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, FileSpreadsheet, ImageOff, Link2, Loader2, RotateCw, ScanSearch, Search, Trash2 } from 'lucide-react';
 import { EmptyState, ErrorState, Money, PageContainer, PageHeader, confirm, withProviders } from '@/components/shared';
 import { useCanEditCatalog } from '@/components/catalog/api';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +13,7 @@ import { errorMessage } from '@/lib/http';
 import { formatNumber } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useHierarchyLabel } from './HierarchyPicker';
+import { ImportCsvDialog } from './ImportCsvDialog';
 import { ReviewSheet } from './ReviewSheet';
 import { ScrapeStatusBadge } from './ScrapeStatusBadge';
 import { SubmitLinksDialog } from './SubmitLinksDialog';
@@ -47,6 +48,7 @@ function ScraperPage() {
     const [selected, setSelected] = React.useState<Set<string>>(new Set());
     const [openId, setOpenId] = React.useState<string | null>(null);
     const [submitOpen, setSubmitOpen] = React.useState(false);
+    const [importCsvOpen, setImportCsvOpen] = React.useState(false);
     const [bulkBusy, setBulkBusy] = React.useState<null | 'approve' | 'draft' | 'decline' | 'retry'>(null);
 
     const counts = useScrapeCounts();
@@ -136,9 +138,14 @@ function ScraperPage() {
                 description="Paste product links from other stores. Each one is scraped into a preview with photos, prices and a suggested category. Approve a preview to add it to your catalogue, or decline it."
                 actions={
                     canEdit ? (
-                        <Button onClick={() => setSubmitOpen(true)}>
-                            <Link2 aria-hidden /> Scrape links
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            <Button variant="outline" onClick={() => setImportCsvOpen(true)}>
+                                <FileSpreadsheet aria-hidden /> Import CSV
+                            </Button>
+                            <Button onClick={() => setSubmitOpen(true)}>
+                                <Link2 aria-hidden /> Scrape links
+                            </Button>
+                        </div>
                     ) : null
                 }
             >
@@ -237,9 +244,14 @@ function ScraperPage() {
                         description={q ? 'Try a different search.' : current.hint}
                         action={
                             !q && canEdit && (tab === 'ready' || tab === 'in_progress') ? (
-                                <Button onClick={() => setSubmitOpen(true)}>
-                                    <Link2 aria-hidden /> Scrape links
-                                </Button>
+                                <div className="flex flex-wrap items-center justify-center gap-2">
+                                    <Button variant="outline" onClick={() => setImportCsvOpen(true)}>
+                                        <FileSpreadsheet aria-hidden /> Import CSV
+                                    </Button>
+                                    <Button onClick={() => setSubmitOpen(true)}>
+                                        <Link2 aria-hidden /> Scrape links
+                                    </Button>
+                                </div>
                             ) : null
                         }
                     />
@@ -282,6 +294,7 @@ function ScraperPage() {
             ) : null}
 
             <SubmitLinksDialog open={submitOpen} onOpenChange={setSubmitOpen} onSubmitted={() => setTab('in_progress')} />
+            <ImportCsvDialog open={importCsvOpen} onOpenChange={setImportCsvOpen} onImported={() => { setTab('ready'); setPage(1); }} />
             <ReviewSheet id={openId} onOpenChange={(open) => !open && setOpenId(null)} canEdit={canEdit} onNext={openNext} />
         </PageContainer>
     );

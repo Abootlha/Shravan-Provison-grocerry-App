@@ -84,6 +84,12 @@ export const scraperApi = {
         return result;
     },
     bulkDecline: (ids: string[], reason?: string) => http.post<BulkResult>('/admin/scraper/items/bulk-decline', { ids, reason }),
+    importCsv: (body: {
+        rows: Record<string, any>[];
+        categoryId?: string;
+        subcategoryId?: string;
+        itemGroupId?: string;
+    }) => http.post<{ batchId: string; imported: number; skipped: number }>('/admin/scraper/import-csv', body),
 };
 
 /** Splits pasted text into candidate links (one per line, or space/comma separated). */

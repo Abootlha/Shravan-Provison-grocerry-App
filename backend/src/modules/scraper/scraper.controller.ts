@@ -20,6 +20,7 @@ import {
   ApproveScrapedProductDto,
   BulkScrapeIdsDto,
   DeclineScrapedProductDto,
+  ImportCsvDto,
   ScrapeListQueryDto,
   SubmitScrapeDto,
   UpdateScrapedProductDto,
@@ -55,6 +56,12 @@ export class ScraperController {
   @Roles(UserRole.ADMIN)
   submit(@Request() req: any, @Body() body: SubmitScrapeDto) {
     return this.scraper.submit(body, req.user?.userId);
+  }
+
+  @Post('import-csv')
+  @Roles(UserRole.ADMIN)
+  importCsv(@Request() req: any, @Body() body: ImportCsvDto) {
+    return this.scraper.importCsv(body, req.user?.userId);
   }
 
   @Post('items/bulk-approve')
