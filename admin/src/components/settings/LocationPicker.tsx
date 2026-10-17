@@ -10,7 +10,63 @@ import { errorMessage, http } from '@/lib/http';
 import { NumberField } from './fields';
 import type { SettingsFormInput, SettingsFormValues } from './schema';
 
-const LocationMap = React.lazy(() => import('./LocationMap'));
+const LocationMap = React.lazy(async () => {
+    try {
+        return await import('./LocationMap');
+    } catch (err) {
+        // Retry once on dynamic import failure (e.g. Vite dependency re-optimization 504)
+        console.warn('Initial LocationMap import failed, retrying...', err);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return await import('./LocationMap');
+    }
+});
+
+interface MapErrorBoundaryProps {
+    children: React.ReactNode;
+}
+
+interface MapErrorBoundaryState {
+    hasError: boolean;
+}
+
+class MapErrorBoundary extends React.Component<MapErrorBoundaryProps, MapErrorBoundaryState> {
+    constructor(props: MapErrorBoundaryProps) {
+        super(props);
+        this.state = { hasError: false };
+    }
+
+    static getDerivedStateFromError(): MapErrorBoundaryState {
+        return { hasError: true };
+    }
+
+    componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+        console.error('LocationMap failed to render:', error, errorInfo);
+    }
+
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div className="flex size-full flex-col items-center justify-center gap-2 bg-muted/40 p-4 text-center">
+                    <MapPin className="size-8 text-muted-foreground/60" aria-hidden />
+                    <p className="text-sm font-medium text-foreground">Map preview unavailable</p>
+                    <p className="text-xs text-muted-foreground max-w-xs">
+                        The map could not load. You can still set the store coordinates manually or use the search box.
+                    </p>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => this.setState({ hasError: false })}
+                        className="mt-1 text-xs"
+                    >
+                        Retry map
+                    </Button>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
 
 type Form = UseFormReturn<SettingsFormInput, unknown, SettingsFormValues>;
 
@@ -167,15 +223,17 @@ export function LocationPicker({ form, disabled }: { form: Form; disabled?: bool
 
             <div className="relative h-72 overflow-hidden rounded-lg ring-1 ring-border sm:h-80">
                 {mounted ? (
-                    <React.Suspense fallback={<Skeleton className="size-full rounded-none" />}>
-                        <LocationMap
-                            latitude={latitude}
-                            longitude={longitude}
-                            radiusKm={typeof radius === 'number' ? radius : undefined}
-                            disabled={disabled}
-                            onPick={pick}
-                        />
-                    </React.Suspense>
+                    <MapErrorBoundary>
+                        <React.Suspense fallback={<Skeleton className="size-full rounded-none" />}>
+                            <LocationMap
+                                latitude={latitude}
+                                longitude={longitude}
+                                radiusKm={typeof radius === 'number' ? radius : undefined}
+                                disabled={disabled}
+                                onPick={pick}
+                            />
+                        </React.Suspense>
+                    </MapErrorBoundary>
                 ) : (
                     <Skeleton className="size-full rounded-none" />
                 )}

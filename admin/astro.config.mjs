@@ -9,6 +9,9 @@ export default defineConfig({
   integrations: [react()],
 
   vite: {
-    plugins: [tailwindcss()]
+    plugins: [tailwindcss()],
+    optimizeDeps: {
+      include: ['leaflet', 'react-leaflet', '@react-leaflet/core']
+    }
   }
 });

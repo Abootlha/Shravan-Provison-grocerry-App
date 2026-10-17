@@ -7,7 +7,33 @@ import { deliveryPoint, riderOf, trackingSocketUrl } from './order-model';
 import type { LatLng, OrderDetail } from './types';
 
 // Leaflet touches `window` on import, so the map loads only in the browser, only when needed.
-const RiderTrackingMap = React.lazy(() => import('../RiderTrackingMap'));
+const RiderTrackingMap = React.lazy(async () => {
+    try {
+        return await import('../RiderTrackingMap');
+    } catch (err) {
+        console.warn('Initial RiderTrackingMap import failed, retrying...', err);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return await import('../RiderTrackingMap');
+    }
+});
+
+class TrackingMapErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+    state = { hasError: false };
+    static getDerivedStateFromError() {
+        return { hasError: true };
+    }
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div className="flex h-72 w-full flex-col items-center justify-center gap-2 rounded-xl border bg-muted/30 p-4 text-center">
+                    <p className="text-sm font-medium text-foreground">Map preview unavailable</p>
+                    <p className="text-xs text-muted-foreground">Unable to render live tracking map.</p>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
 
 interface LocationFix extends LatLng {
     at: string;
@@ -82,15 +108,17 @@ export function LiveTracking({ order }: { order: OrderDetail }) {
     return (
         <div className="space-y-2">
             {facts.length ? <p className="text-sm font-medium text-brand-text">{facts.join(' · ')}</p> : null}
-            <React.Suspense fallback={<Skeleton className="h-72 w-full rounded-xl" />}>
-                <RiderTrackingMap
-                    riders={fix ? [{ riderId: rider?.id ?? 'rider', riderName: rider?.name ?? 'Rider', latitude: fix.latitude, longitude: fix.longitude, timestamp: fix.at }] : []}
-                    routeCoordinates={route}
-                    storeLocation={store}
-                    customerLocation={customer ?? undefined}
-                    lastLocationUpdateAt={fix?.at ?? null}
-                />
-            </React.Suspense>
+            <TrackingMapErrorBoundary>
+                <React.Suspense fallback={<Skeleton className="h-72 w-full rounded-xl" />}>
+                    <RiderTrackingMap
+                        riders={fix ? [{ riderId: rider?.id ?? 'rider', riderName: rider?.name ?? 'Rider', latitude: fix.latitude, longitude: fix.longitude, timestamp: fix.at }] : []}
+                        routeCoordinates={route}
+                        storeLocation={store}
+                        customerLocation={customer ?? undefined}
+                        lastLocationUpdateAt={fix?.at ?? null}
+                    />
+                </React.Suspense>
+            </TrackingMapErrorBoundary>
             {!fix ? (
                 <p className="text-xs text-muted-foreground">No location from the rider yet. The map updates as soon as their app reports one.</p>
             ) : null}
