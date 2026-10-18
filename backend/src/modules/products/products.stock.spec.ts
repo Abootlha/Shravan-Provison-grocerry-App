@@ -17,6 +17,7 @@ describe('ProductsService - stock locking', () => {
         bump: jest.fn(),
         version: jest.fn().mockResolvedValue('0'),
       } as any,
+      {} as any,
     );
   });
 

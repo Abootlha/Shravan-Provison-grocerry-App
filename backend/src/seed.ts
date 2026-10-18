@@ -111,6 +111,7 @@ async function seed() {
   const productTemplates = [
     // Fruits & Vegetables
     {
+      category: 'Fruits & Vegetables',
       name: 'Fresh Bananas',
       price: 45,
       originalPrice: 55,
@@ -120,6 +121,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Fruits & Vegetables',
       name: 'Red Apples',
       price: 180,
       originalPrice: 200,
@@ -129,6 +131,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Fruits & Vegetables',
       name: 'Fresh Tomatoes',
       price: 35,
       originalPrice: 40,
@@ -138,6 +141,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Fruits & Vegetables',
       name: 'Green Capsicum',
       price: 60,
       originalPrice: 70,
@@ -147,6 +151,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Fruits & Vegetables',
       name: 'Onions',
       price: 30,
       originalPrice: 35,
@@ -157,6 +162,7 @@ async function seed() {
     },
     // Dairy
     {
+      category: 'Dairy & Breakfast',
       name: 'Amul Milk',
       price: 30,
       originalPrice: 32,
@@ -166,6 +172,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Dairy & Breakfast',
       name: 'Amul Butter',
       price: 55,
       originalPrice: 58,
@@ -175,6 +182,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Dairy & Breakfast',
       name: 'Curd',
       price: 40,
       originalPrice: 45,
@@ -184,6 +192,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Dairy & Breakfast',
       name: 'Paneer',
       price: 90,
       originalPrice: 100,
@@ -193,6 +202,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Dairy & Breakfast',
       name: 'Eggs',
       price: 75,
       originalPrice: 80,
@@ -203,6 +213,7 @@ async function seed() {
     },
     // Munchies
     {
+      category: 'Munchies',
       name: 'Lays Chips',
       price: 20,
       originalPrice: 20,
@@ -212,6 +223,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Munchies',
       name: 'Kurkure',
       price: 20,
       originalPrice: 20,
@@ -221,6 +233,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Munchies',
       name: 'Haldirams Bhujia',
       price: 85,
       originalPrice: 90,
@@ -230,6 +243,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Munchies',
       name: 'Pringles',
       price: 150,
       originalPrice: 160,
@@ -240,6 +254,7 @@ async function seed() {
     },
     // Cold Drinks
     {
+      category: 'Cold Drinks & Juices',
       name: 'Coca Cola',
       price: 40,
       originalPrice: 40,
@@ -249,6 +264,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Cold Drinks & Juices',
       name: 'Pepsi',
       price: 40,
       originalPrice: 40,
@@ -258,6 +274,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Cold Drinks & Juices',
       name: 'Real Mango Juice',
       price: 90,
       originalPrice: 99,
@@ -267,6 +284,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Cold Drinks & Juices',
       name: 'Red Bull',
       price: 125,
       originalPrice: 125,
@@ -277,6 +295,7 @@ async function seed() {
     },
     // Instant Food
     {
+      category: 'Instant & Frozen Food',
       name: 'Maggi Noodles',
       price: 14,
       originalPrice: 14,
@@ -286,6 +305,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Instant & Frozen Food',
       name: 'MTR Ready to Eat',
       price: 85,
       originalPrice: 95,
@@ -296,6 +316,7 @@ async function seed() {
     },
     // Tea & Coffee
     {
+      category: 'Tea, Coffee & Health',
       name: 'Tata Tea Gold',
       price: 180,
       originalPrice: 195,
@@ -305,6 +326,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Tea, Coffee & Health',
       name: 'Nescafe Classic',
       price: 350,
       originalPrice: 375,
@@ -315,6 +337,7 @@ async function seed() {
     },
     // Bakery
     {
+      category: 'Bakery & Biscuits',
       name: 'Britannia Bread',
       price: 45,
       originalPrice: 45,
@@ -324,6 +347,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Bakery & Biscuits',
       name: 'Parle-G Biscuits',
       price: 10,
       originalPrice: 10,
@@ -334,6 +358,7 @@ async function seed() {
     },
     // Atta & Rice
     {
+      category: 'Atta, Rice & Dal',
       name: 'Aashirvaad Atta',
       price: 280,
       originalPrice: 300,
@@ -343,6 +368,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Atta, Rice & Dal',
       name: 'India Gate Basmati',
       price: 450,
       originalPrice: 480,
@@ -352,6 +378,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Atta, Rice & Dal',
       name: 'Toor Dal',
       price: 160,
       originalPrice: 175,
@@ -362,6 +389,7 @@ async function seed() {
     },
     // Masala
     {
+      category: 'Masala & Dry Fruits',
       name: 'MDH Garam Masala',
       price: 85,
       originalPrice: 90,
@@ -371,6 +399,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Masala & Dry Fruits',
       name: 'Almonds',
       price: 250,
       originalPrice: 280,
@@ -380,6 +409,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Masala & Dry Fruits',
       name: 'Cashews',
       price: 320,
       originalPrice: 350,
@@ -390,6 +420,7 @@ async function seed() {
     },
     // Cleaning
     {
+      category: 'Cleaning Essentials',
       name: 'Surf Excel',
       price: 260,
       originalPrice: 280,
@@ -399,6 +430,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Cleaning Essentials',
       name: 'Vim Dishwash',
       price: 95,
       originalPrice: 100,
@@ -409,6 +441,7 @@ async function seed() {
     },
     // Personal Care
     {
+      category: 'Personal Care',
       name: 'Colgate Toothpaste',
       price: 110,
       originalPrice: 120,
@@ -418,6 +451,7 @@ async function seed() {
       image: 'https://via.placeholder.com/150',
     },
     {
+      category: 'Personal Care',
       name: 'Dettol Soap',
       price: 45,
       originalPrice: 48,
@@ -428,19 +462,31 @@ async function seed() {
     },
   ];
 
-  // Assign products to categories (distribute them)
-  const products = [];
-  let catIndex = 0;
-  for (const template of productTemplates) {
-    products.push({
+  // Each template names its category; produce and dairy are perishable.
+  const categoryByName = new Map<string, any>(
+    categories.map((c: any) => [c.name, c]),
+  );
+  const PERISHABLE_CATEGORIES = new Set([
+    'Fruits & Vegetables',
+    'Dairy & Breakfast',
+  ]);
+  const products = productTemplates.map(({ category, ...template }) => {
+    const cat = categoryByName.get(category);
+    if (!cat)
+      throw new Error(
+        `Seed product "${template.name}" has unknown category "${category}"`,
+      );
+    const isPerishable = PERISHABLE_CATEGORIES.has(category);
+    return {
       ...template,
-      categoryId: categories[catIndex % categories.length]._id,
+      categoryId: cat._id,
       isAvailable: true,
+      isPerishable,
+      shelfLife: isPerishable ? 3 : 180,
       reviewCount: Math.floor(Math.random() * 500) + 50,
       soldCount: Math.floor(Math.random() * 1000) + 100,
-    });
-    catIndex++;
-  }
+    };
+  });
 
   await productModel.insertMany(products);
   console.log(`✅ Created ${products.length} products`);

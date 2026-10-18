@@ -9,6 +9,11 @@ import {
 import { RedisService } from '../../common/utils/redis.service';
 import { CatalogCacheService } from '../../common/utils/catalog-cache.service';
 import { ConfigService } from '@nestjs/config';
+import {
+  Category,
+  CategoryDocument,
+  CategoryType,
+} from '../categories/schemas/category.schema';
 
 /** Fields that mirror each other (legacy flat field → structured path). */
 const LEGACY_FIELD_PATHS: Record<string, string> = {
@@ -25,6 +30,48 @@ export interface PaginatedProducts {
   totalPages: number;
 }
 
+export interface HomeShelf {
+  category: Record<string, any>;
+  /** Fresh produce / dairy: the app gives these the lead spot on Home. */
+  fresh: boolean;
+  products: ProductDocument[];
+  /** Sellable, in-stock products in the category (not just those returned). */
+  total: number;
+}
+
+export interface HomeFeed {
+  sections: HomeShelf[];
+  perCategory: number;
+  total: number;
+}
+
+const HOME_CATEGORY_FIELDS =
+  'name nameHi icon image color sortOrder group groupHi type isActive';
+
+/** In stock: stock on the product, or on any active variant. */
+const IN_STOCK_FILTER = {
+  $or: [
+    { stock: { $gt: 0 } },
+    {
+      variants: { $elemMatch: { stock: { $gt: 0 }, isActive: { $ne: false } } },
+    },
+  ],
+};
+
+const FRESH_CATEGORY =
+  /fruit|vegetable|\bveg|sabzi|produce|herb|dairy|\beggs?\b|bread|\bmilk\b/i;
+// "Tea, Coffee & Milk" is a beverages aisle, not fresh milk.
+const NOT_FRESH_CATEGORY = /\btea\b|coffee|biscuit|frozen/i;
+
+/** Is this category fresh produce / dairy (by `group`, else by its name)? */
+export const isFreshCategory = (category: {
+  name?: string;
+  group?: string;
+}): boolean => {
+  const text = `${category.group || ''} ${category.name || ''}`;
+  return FRESH_CATEGORY.test(text) && !NOT_FRESH_CATEGORY.test(text);
+};
+
 @Injectable()
 export class ProductsService {
   constructor(
@@ -32,6 +79,8 @@ export class ProductsService {
     private redisService: RedisService,
     private configService: ConfigService,
     private catalogCache: CatalogCacheService,
+    @InjectModel(Category.name)
+    private categoryModel: Model<CategoryDocument>,
   ) {}
 
   /**
@@ -158,6 +207,90 @@ export class ProductsService {
     else parts.push('all');
     parts.push(`${page}:${limit}`);
     return parts.join(':');
+  }
+
+  /**
+   * Home feed: one shelf per active category (sortOrder) with its top
+   * `perCategory` sellable, in-stock products (soldCount, then newest).
+   * Two product queries regardless of category count: an aggregation picks
+   * the ids per category, then one populated find loads them in the same
+   * shape as GET /products. Categories without such products are omitted.
+   */
+  async findHome(perCategory = 12): Promise<HomeFeed> {
+    const cacheKey = `products:v${await this.catalogCache.version()}:home:${perCategory}`;
+    const cached = await this.redisService.getJSON<HomeFeed>(cacheKey);
+    if (cached) return cached;
+
+    const categories: any[] = await this.categoryModel
+      .find({ type: CategoryType.CATEGORY, isActive: true })
+      .sort({ sortOrder: 1, name: 1 })
+      .select(HOME_CATEGORY_FIELDS)
+      .lean()
+      .exec();
+
+    let sections: HomeShelf[] = [];
+    if (categories.length) {
+      const ids = categories.map((c) => c._id);
+      const groups: { _id: string; ids: Types.ObjectId[]; total: number }[] =
+        await this.productModel.aggregate([
+          {
+            $match: {
+              isAvailable: true,
+              ...ACTIVE_STATUS_FILTER,
+              // legacy rows may store the category id as a string
+              categoryId: { $in: [...ids, ...ids.map(String)] },
+              ...IN_STOCK_FILTER,
+            },
+          },
+          { $sort: { soldCount: -1, createdAt: -1, _id: -1 } },
+          {
+            $group: {
+              _id: { $toString: '$categoryId' },
+              ids: { $push: '$_id' },
+              total: { $sum: 1 },
+            },
+          },
+          { $project: { total: 1, ids: { $slice: ['$ids', perCategory] } } },
+        ]);
+
+      const byCategory = new Map(groups.map((g) => [String(g._id), g]));
+      const productIds = groups.flatMap((g) => g.ids);
+      const docs = productIds.length
+        ? await this.productModel
+            .find({ _id: { $in: productIds } })
+            .populate('categoryId', 'name type')
+            .populate('subcategoryId', 'name parentId')
+            .populate('itemGroupId', 'name subcategoryId')
+            .exec()
+        : [];
+      const docById = new Map(docs.map((d: any) => [String(d._id), d]));
+
+      sections = categories
+        .map((category) => {
+          const group = byCategory.get(String(category._id));
+          if (!group) return null;
+          const products = group.ids
+            .map((id) => docById.get(String(id)))
+            .filter(Boolean) as ProductDocument[];
+          if (!products.length) return null;
+          return {
+            category,
+            fresh: isFreshCategory(category),
+            products,
+            total: group.total,
+          };
+        })
+        .filter(Boolean) as HomeShelf[];
+    }
+
+    const result: HomeFeed = {
+      sections,
+      perCategory,
+      total: sections.reduce((sum, s) => sum + s.total, 0),
+    };
+    const ttl = this.configService.get<number>('cache.ttl.products') || 300;
+    await this.redisService.setJSON(cacheKey, result, ttl);
+    return result;
   }
 
   async findById(id: string): Promise<ProductDocument | null> {

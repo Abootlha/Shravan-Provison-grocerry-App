@@ -115,6 +115,11 @@ export class UpdateProductDto {
   @IsBoolean()
   isAvailable?: boolean;
 
+  /** Fresh produce / dairy: short shelf life, perishable returns policy. */
+  @IsOptional()
+  @IsBoolean()
+  isPerishable?: boolean;
+
   /** draft | active | archived. Defaults to active on create. */
   @IsOptional()
   @IsEnum(ProductStatus)

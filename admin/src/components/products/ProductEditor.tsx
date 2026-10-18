@@ -18,6 +18,7 @@ import { canEditCatalogue, invalidateProducts, useCategories, useItemGroups, use
 import {
     emptyProductForm,
     FIELD_SECTION,
+    looksFreshCategory,
     mapServerMessage,
     productSchema,
     productToForm,
@@ -674,6 +675,20 @@ function OrganisationSection({ form, isCreate }: { form: Form; isCreate: boolean
         }
     }, [categoryId, subcategoryId, form]);
 
+    // Picking a fresh produce / dairy category switches "Perishable" on (and a dry-goods one off),
+    // until the user sets the switch themselves.
+    const perishableTouched = React.useRef(false);
+    const pickedCategory = React.useRef(categoryId);
+    React.useEffect(() => {
+        if (pickedCategory.current === categoryId) return;
+        pickedCategory.current = categoryId;
+        if (perishableTouched.current || !categoryId) return;
+        const name = categories.data?.find((c) => c._id === categoryId)?.name;
+        if (name === undefined) return;
+        const fresh = looksFreshCategory(name);
+        if (form.getValues('isPerishable') !== fresh) form.setValue('isPerishable', fresh, { shouldDirty: true });
+    }, [categoryId, categories.data, form]);
+
     const catOptions = (categories.data ?? []).map((c) => ({ value: c._id, label: c.isActive === false ? `${c.name} (hidden)` : c.name }));
     const loading = categories.isPending || subcategories.isPending || itemGroups.isPending;
 
@@ -734,6 +749,26 @@ function OrganisationSection({ form, isCreate }: { form: Form; isCreate: boolean
                                 <FieldDescription>Turn off to pause sales without unpublishing.</FieldDescription>
                             </FieldContent>
                             <Switch id="available-field" checked={!!field.value} onCheckedChange={field.onChange} />
+                        </Field>
+                    )}
+                />
+                <Controller
+                    control={form.control}
+                    name="isPerishable"
+                    render={({ field }) => (
+                        <Field orientation="horizontal" className="self-end rounded-xl border p-3">
+                            <FieldContent>
+                                <FieldLabel htmlFor="perishable-field">Perishable</FieldLabel>
+                                <FieldDescription>Fresh fruit, vegetables, dairy. Shown in the app’s fresh section.</FieldDescription>
+                            </FieldContent>
+                            <Switch
+                                id="perishable-field"
+                                checked={!!field.value}
+                                onCheckedChange={(v) => {
+                                    perishableTouched.current = true;
+                                    field.onChange(v);
+                                }}
+                            />
                         </Field>
                     )}
                 />

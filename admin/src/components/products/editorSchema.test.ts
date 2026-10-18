@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyProductForm, mapServerMessage, productSchema, productToForm, toProductPayload, unitLooksLikeBarcode } from './editorSchema';
+import { emptyProductForm, looksFreshCategory, mapServerMessage, productSchema, productToForm, toProductPayload, unitLooksLikeBarcode } from './editorSchema';
 import type { AdminProduct } from './types';
 
 const CAT = 'aaaaaaaaaaaaaaaaaaaaaaa1';
@@ -69,5 +69,13 @@ describe('helpers', () => {
     it('maps backend field names to form fields and labels', () => {
         expect(mapServerMessage('originalPrice must not be less than 0')).toEqual({ field: 'mrp', message: 'MRP must not be less than 0' });
         expect(mapServerMessage('Something else broke')).toEqual({ message: 'Something else broke' });
+    });
+
+    it('recognises fresh produce and dairy categories', () => {
+        expect(looksFreshCategory('Fruits & Vegetables')).toBe(true);
+        expect(looksFreshCategory('Dairy, Bread & Eggs')).toBe(true);
+        expect(looksFreshCategory('Tea , Coffee & Milk')).toBe(false);
+        expect(looksFreshCategory('Bakery & Biscuits')).toBe(false);
+        expect(looksFreshCategory(undefined)).toBe(false);
     });
 });

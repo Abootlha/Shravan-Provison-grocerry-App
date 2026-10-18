@@ -30,6 +30,15 @@ export function imageSourceError(value: string): string | null {
     return 'Image links must start with https://';
 }
 
+/**
+ * Does this category look like fresh produce or dairy? Used to default the perishable switch when a
+ * category is picked. Mirrors the backend's isFreshCategory (products.service.ts).
+ */
+export function looksFreshCategory(name: string | undefined | null): boolean {
+    const text = name ?? '';
+    return /fruit|vegetable|\bveg|sabzi|produce|herb|dairy|\beggs?\b|bread|\bmilk\b/i.test(text) && !/\btea\b|coffee|biscuit|frozen/i.test(text);
+}
+
 /** A unit with 8+ digits is almost always a barcode pasted into the wrong field. */
 export function unitLooksLikeBarcode(unit: string | undefined | null): boolean {
     return !!unit && /\d{8,}/.test(unit.replace(/\s+/g, ''));
@@ -74,6 +83,7 @@ export const productSchema = z
         reorderLevel: optionalNumber('Reorder level', { min: 0, max: 100_000, int: true }),
         shelfLife: optionalNumber('Shelf life', { min: 0 }),
         storageType: optionalText('Storage', 50),
+        isPerishable: z.boolean(),
         // Organisation
         categoryId: z.string().min(1, 'Choose a category'),
         subcategoryId: z.string(),
@@ -140,6 +150,7 @@ export const FIELD_SECTION: Record<string, SectionId> = {
     reorderLevel: 'inventory',
     shelfLife: 'inventory',
     storageType: 'inventory',
+    isPerishable: 'organisation',
     categoryId: 'organisation',
     subcategoryId: 'organisation',
     itemGroupId: 'organisation',
@@ -173,6 +184,7 @@ export function emptyProductForm(status: ProductStatus = 'active'): ProductFormI
         reorderLevel: 10,
         shelfLife: undefined,
         storageType: '',
+        isPerishable: false,
         categoryId: '',
         subcategoryId: '',
         itemGroupId: '',
@@ -201,6 +213,7 @@ export function productToForm(p: AdminProduct): ProductFormInput {
         reorderLevel: num(p.reorderLevel) ?? 10,
         shelfLife: num(p.shelfLife) || undefined,
         storageType: p.storageType ?? '',
+        isPerishable: p.isPerishable ?? false,
         categoryId: refId(p.categoryId),
         subcategoryId: refId(p.subcategoryId),
         itemGroupId: refId(p.itemGroupId),
@@ -284,6 +297,7 @@ export function toProductPayload(v: ProductFormValues, dirty?: Dirty): Record<st
         else if (!isCreate) body.itemGroupId = null;
     }
     if (changed('status')) body.status = v.status;
+    if (changed('isPerishable')) body.isPerishable = v.isPerishable;
     // isAvailable only when the user touched it (on create the backend default is fine unless turned off).
     if (isCreate ? v.isAvailable === false : !!dirty?.isAvailable) body.isAvailable = v.isAvailable;
 
@@ -311,6 +325,7 @@ export const SERVER_FIELD_ALIASES: Record<string, keyof ProductFormValues> = {
     reorderLevel: 'reorderLevel',
     shelfLife: 'shelfLife',
     storageType: 'storageType',
+    isPerishable: 'isPerishable',
     categoryId: 'categoryId',
     subcategoryId: 'subcategoryId',
     itemGroupId: 'itemGroupId',
