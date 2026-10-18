@@ -2,7 +2,7 @@
  * Checkout (also rendered by the Cart tab). State and the order/payment flow live in
  * screens/checkout/useCheckout.js; this file only lays the pieces out.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DeviceEventEmitter, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { useDispatch } from 'react-redux';
@@ -31,14 +31,15 @@ import { press } from '../theme/motion';
 import { hydrateCart, removeFromCart } from '../store/slices/cartSlice';
 import { useCheckout } from './checkout/useCheckout';
 import { DeliveryEtaCard } from './checkout/DeliveryEtaCard';
+import { DeliveryAddressCard } from './checkout/DeliveryAddressCard';
 import { CheckoutItemRow } from './checkout/CheckoutItemRow';
 import { OffersCard } from './checkout/OffersCard';
 import { GROUP_RADIUS, ICON_CIRCLE } from './checkout/layout';
 import { FreeDeliveryNudge } from './checkout/FreeDeliveryNudge';
 import { UnavailableItemsCard } from './checkout/UnavailableItemsCard';
 import { SuggestionsRail } from './checkout/SuggestionsRail';
-import { TipSelector } from './checkout/TipSelector';
-import { DeliveryInstructionsCard } from './checkout/DeliveryInstructionsCard';
+import { ExtrasCard } from './checkout/ExtrasCard';
+import { productId, useCheckoutProducts, useGapFillers } from './checkout/useCheckoutProducts';
 import { BillSummary } from './checkout/BillSummary';
 import { PlaceOrderBar } from './checkout/PlaceOrderBar';
 import { AddressSheet } from './checkout/AddressSheet';
@@ -68,11 +69,36 @@ const CheckoutScreen = ({ navigation, route }) => {
     const [barHeight, setBarHeight] = useState(220);
 
     const inTab = route?.name === 'Cart';
-    // On the Cart tab the floating dock sits over the bottom of the screen: the pay
-    // sheet runs underneath it (so nothing shows through) and pads itself clear of it.
+    // Blinkit/Zepto pattern: the floating dock hides while the Cart tab has items (back arrow
+    // returns to the previous tab); with an empty cart the dock is back for browsing.
+    const hideDock = inTab && c.hasItems;
+    useEffect(() => {
+        if (!inTab) return;
+        navigation.setOptions({ tabBarStyle: hideDock ? { display: 'none' } : undefined });
+    }, [inTab, hideDock, navigation]);
+    useFocusEffect(useCallback(() => {
+        if (inTab) DeviceEventEmitter.emit('SET_TAB_BAR_VISIBLE', !hideDock);
+    }, [inTab, hideDock]));
     const dockHeight = useTabBarHeight();
-    const barOffset = inTab ? dockHeight : 0;
-    const barBottomPad = inTab ? barOffset : insets.bottom;
+    const barOffset = inTab ? dockHeight : 0; // empty state keeps clear of the dock
+    const barBottomPad = insets.bottom;
+
+    // Catalogue for the free-delivery rail and "You might also like" (one request).
+    const products = useCheckoutProducts();
+    const [initialCartIds] = useState(() => new Set(c.cartItems.map((i) => String(i.productId || i.id))));
+    const fillers = useGapFillers(products, initialCartIds, c.bill?.freeDeliveryGap || 0);
+    const suggestionExclude = useMemo(
+        () => new Set([...initialCartIds, ...fillers.map(productId)]),
+        [initialCartIds, fillers],
+    );
+
+    // "View bill" in the pay bar scrolls the bill summary into view.
+    const scrollRef = useRef(null);
+    const billY = useRef(0); // bill's offset inside the stack below
+    const stackY = useRef(0); // the stack's offset in the scroll content
+    const viewBill = useCallback(() => {
+        scrollRef.current?.scrollTo({ y: Math.max(0, stackY.current + billY.current - space.md), animated: true });
+    }, []);
 
     // The pay sheet rides the keyboard (tip / instructions inputs); whatever it covers becomes
     // extra scroll room so the focused field can always be scrolled clear.
@@ -98,11 +124,6 @@ const CheckoutScreen = ({ navigation, route }) => {
             },
         });
     }, [barHeight, dispatch, insets.bottom, isHi]);
-
-    // The pay bar docks above the tab bar, so make sure it isn't scrolled away.
-    useFocusEffect(useCallback(() => {
-        if (inTab) DeviceEventEmitter.emit('SET_TAB_BAR_VISIBLE', true);
-    }, [inTab]));
 
     // Amount shown in the status overlay. Frozen while the overlay is up, because
     // a successful payment clears the cart underneath it.
@@ -140,6 +161,17 @@ const CheckoutScreen = ({ navigation, route }) => {
     const addNewAddress = () => {
         setAddressSheet(false);
         navigation.navigate('AddAddress');
+    };
+    // Edit opens the form on this address; saving returns here with it selected.
+    const editAddress = useCallback((address) => {
+        if (!address) return;
+        setAddressSheet(false);
+        navigation.navigate('AddAddress', { editAddress: address });
+    }, [navigation]);
+    // No saved addresses yet: straight to the form; otherwise pick one from the sheet.
+    const addOrPickAddress = () => {
+        if (c.savedAddresses.length === 0 && !c.isFetchingAddresses) addNewAddress();
+        else setAddressSheet(true);
     };
     const openMap = () => {
         setAddressSheet(false);
@@ -182,8 +214,8 @@ const CheckoutScreen = ({ navigation, route }) => {
 
     const header = (
         <View style={styles.header}>
-            {/* the Cart tab is a root: no back arrow there (the pushed Checkout keeps it) */}
-            {inTab ? (
+            {/* the dock is hidden while the cart has items, so the Cart tab gets a back arrow too */}
+            {inTab && !c.hasItems ? (
                 <View style={styles.headerSpacer} />
             ) : (
                 <IconButton name="arrow-left" variant="ghost" accessibilityLabel={isHi ? 'वापस जाएं' : 'Go back'} onPress={goBack} />
@@ -191,15 +223,7 @@ const CheckoutScreen = ({ navigation, route }) => {
             <Text variant="h3" accessibilityRole="header" style={styles.headerTitle}>
                 {isHi ? 'चेकआउट' : 'Checkout'}
             </Text>
-            {c.hasItems ? (
-                <IconButton
-                    name="trash-can-outline"
-                    variant="surface"
-                    size="md"
-                    accessibilityLabel={isHi ? 'कार्ट खाली करें' : 'Clear cart'}
-                    onPress={() => setClearSheet(true)}
-                />
-            ) : <View style={styles.headerSpacer} />}
+            <View style={styles.headerSpacer} />
         </View>
     );
 
@@ -225,6 +249,7 @@ const CheckoutScreen = ({ navigation, route }) => {
     const body = c.hasItems ? (
         <View style={styles.flex}>
             <ScrollView
+                ref={scrollRef}
                 style={styles.scroll}
                 contentContainerStyle={[styles.content, { paddingBottom: barHeight + space.xl }]}
                 showsVerticalScrollIndicator={false}
@@ -237,6 +262,7 @@ const CheckoutScreen = ({ navigation, route }) => {
                                 itemTotal={c.bill.itemTotal}
                                 gap={c.bill.freeDeliveryGap}
                                 threshold={c.bill.freeDeliveryThreshold}
+                                fillers={fillers}
                                 isHi={isHi}
                             />
                         ) : null}
@@ -287,25 +313,57 @@ const CheckoutScreen = ({ navigation, route }) => {
                                 </View>
                                 <MaterialCommunityIcons name="chevron-right" size={20} color={colors.inkMuted} />
                             </PressableScale>
+                            <Divider />
+                            <PressableScale
+                                onPress={() => setClearSheet(true)}
+                                haptic="light"
+                                scaleTo={press.subtle}
+                                accessibilityLabel={isHi ? 'कार्ट खाली करें' : 'Clear cart'}
+                                style={styles.clear}
+                            >
+                                <MaterialCommunityIcons name="trash-can-outline" size={16} color={colors.inkMuted} />
+                                <Text variant="label" color="muted">{isHi ? 'कार्ट खाली करें' : 'Clear cart'}</Text>
+                            </PressableScale>
                         </Animated.View>
                     </Animated.View>
                 </View>
 
-                <Animated.View layout={sizeLayout}>
-                    <SuggestionsRail cartItems={c.cartItems} onOpenProduct={openProduct} isHi={isHi} />
+                <Animated.View layout={sizeLayout} style={styles.gutter}>
+                    <DeliveryAddressCard
+                        address={c.selectedAddress}
+                        loading={c.isFetchingAddresses}
+                        distanceKm={c.addressInfo.distanceKm}
+                        store={c.addressInfo.store}
+                        coords={c.addressInfo.coords}
+                        outOfArea={c.addressInfo.outOfArea}
+                        radiusKm={c.addressInfo.radiusKm}
+                        onChange={() => setAddressSheet(true)}
+                        onEdit={() => editAddress(c.selectedAddress)}
+                        onAdd={addOrPickAddress}
+                        isHi={isHi}
+                    />
                 </Animated.View>
 
+                <Animated.View layout={sizeLayout}>
+                    <SuggestionsRail products={products} excludeIds={suggestionExclude} onOpenProduct={openProduct} isHi={isHi} />
+                </Animated.View>
+
+                {/* plain wrapper: its onLayout gives the stack's offset in the scroll content (for "View bill") */}
+                <View onLayout={(e) => { stackY.current = e.nativeEvent.layout.y; }}>
                 <Animated.View layout={sizeLayout} style={[styles.gutter, styles.stack]}>
                     <OffersCard discount={c.bill?.discount} rate={c.bill?.discountRate} isHi={isHi} />
-                    <TipSelector tip={c.tip} onChange={c.setTip} isHi={isHi} />
-                    <DeliveryInstructionsCard
+                    <View onLayout={(e) => { billY.current = e.nativeEvent.layout.y; }}>
+                        <BillSummary bill={c.bill} tip={c.tip} state={c.billState} isHi={isHi} />
+                    </View>
+                    <ExtrasCard
+                        tip={c.tip}
+                        onChangeTip={c.setTip}
                         selected={c.selectedInstructions}
                         onToggle={c.toggleInstruction}
                         note={c.customInstruction}
                         onChangeNote={c.setCustomInstruction}
                         isHi={isHi}
                     />
-                    <BillSummary bill={c.bill} tip={c.tip} state={c.billState} isHi={isHi} />
                     <View style={styles.policy}>
                         <MaterialCommunityIcons name="shield-check-outline" size={16} color={colors.inkMuted} />
                         <Text variant="caption" color="muted" style={styles.flex}>
@@ -315,6 +373,7 @@ const CheckoutScreen = ({ navigation, route }) => {
                         </Text>
                     </View>
                 </Animated.View>
+                </View>
                 <Animated.View style={keyboardRoom} />
             </ScrollView>
 
@@ -326,16 +385,18 @@ const CheckoutScreen = ({ navigation, route }) => {
             >
                 <PlaceOrderBar
                     ref={sliderRef}
-                    address={c.selectedAddress}
-                    onChangeAddress={() => setAddressSheet(true)}
                     paymentOption={c.paymentOption}
                     onChangePayment={() => setPaymentSheet(true)}
                     amount={c.payableAmount}
+                    estimate={c.bill?.grandTotal ?? null}
+                    onViewBill={viewBill}
                     billState={c.billState}
                     onRetryQuote={c.retryQuote}
                     isCod={c.selectedPayment === 'cod'}
                     onConfirm={onConfirm}
-                    closedLabel={closedLine}
+                    blockedReason={closedLine || c.addressBlock || (c.selectedAddress
+                        ? null
+                        : (isHi ? 'ऑर्डर से पहले डिलीवरी पता जोड़ें' : 'Add a delivery address to continue'))}
                     bottomPad={barBottomPad}
                     isHi={isHi}
                 />
@@ -362,6 +423,7 @@ const CheckoutScreen = ({ navigation, route }) => {
                         selected={c.selectedAddress}
                         onSelect={c.selectAddress}
                         onAddNew={addNewAddress}
+                        onEdit={editAddress}
                         onOpenMap={openMap}
                         loading={c.isFetchingAddresses}
                         isHi={isHi}
@@ -444,6 +506,14 @@ const useStyles = makeStyles((t) => ({
         justifyContent: 'center',
     },
     addMoreTexts: { flex: 1 },
+    clear: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: space.xs,
+        minHeight: HIT,
+        paddingVertical: space.xs,
+    },
     policy: { flexDirection: 'row', alignItems: 'flex-start', gap: space.sm, paddingHorizontal: space.xs },
     barDock: { position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: z.sticky },
     sheetActions: { flexDirection: 'row', gap: space.md },

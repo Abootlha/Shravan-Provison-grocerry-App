@@ -40,7 +40,7 @@ import { PlaceSuggestions } from './address/PlaceSuggestions';
 import { SavedAddressCard } from './address/SavedAddressCard';
 import { CurrentLocationRow } from './address/CurrentLocationRow';
 import { useServiceArea } from './address/useServiceArea';
-import { formatAddressLine } from './address/addressUtils';
+import { formatAddressLine, toClientAddresses } from './address/addressUtils';
 
 /** Reverse geocoding found no street address for a GPS fix. */
 class AddressLookupError extends Error {
@@ -135,28 +135,14 @@ const LocationScreen = ({ navigation }) => {
         try {
             const profile = await UserService.getProfile();
             if (profile?.addresses && profile.addresses.length > 0) {
+                // Each entry keeps its server id (and index, for id-less backends), so hiding a
+                // duplicate here never shifts which address an edit or delete reaches.
                 const seen = new Set();
-                const uniqueAddresses = [];
-
-                profile.addresses.forEach((addr, index) => {
-                    const normAddress = (addr.address || '').toLowerCase().trim();
-                    const normCity = (addr.city || '').toLowerCase().trim();
-                    const key = `${normAddress}_${normCity}_${addr.type}`;
-
-                    if (!seen.has(key) && (addr._id || `saved-${index}`) !== pendingSwipe.current?.item.id) {
-                        seen.add(key);
-                        uniqueAddresses.push({
-                            id: addr._id || `saved-${index}`,
-                            originalIndex: index,
-                            type: addr.type,
-                            address: addr.address,
-                            city: addr.city,
-                            pincode: addr.pincode,
-                            isDefault: addr.isDefault,
-                            latitude: addr.latitude,
-                            longitude: addr.longitude,
-                        });
-                    }
+                const uniqueAddresses = toClientAddresses(profile.addresses).filter((addr) => {
+                    const key = `${(addr.address || '').toLowerCase().trim()}_${(addr.city || '').toLowerCase().trim()}_${addr.type}`;
+                    if (seen.has(key) || addr.id === pendingSwipe.current?.item.id) return false;
+                    seen.add(key);
+                    return true;
                 });
 
                 // If there's exactly 1 address, force it to be default visually on frontend
@@ -438,10 +424,7 @@ const LocationScreen = ({ navigation }) => {
     };
 
     const handleEditAddress = useCallback((item, index) => {
-        navigation.navigate('AddAddress', {
-            editAddress: { ...item, listIndex: index },
-            addressIndex: item.originalIndex ?? index,
-        });
+        navigation.navigate('AddAddress', { editAddress: { ...item, listIndex: index } });
     }, [navigation]);
 
     const handleRequestDelete = useCallback((item, index) => {
@@ -454,8 +437,7 @@ const LocationScreen = ({ navigation }) => {
         if (!targetItem) return;
         try {
             setIsFetchingAddresses(true);
-            const targetIndex = targetItem.originalIndex ?? targetItem.listIndex;
-            await UserService.removeAddress(targetIndex);
+            await UserService.removeAddress(targetItem);
 
             dispatch(removeSavedAddress(targetItem.id));
             await fetchSavedAddresses();
@@ -477,17 +459,10 @@ const LocationScreen = ({ navigation }) => {
         if (pendingSwipe.current === entry) pendingSwipe.current = null;
         const { item } = entry;
         try {
-            // Server indices shift as addresses change, so resolve this one by id right before deleting.
-            let target = item.originalIndex ?? item.listIndex;
-            if (!String(item.id).startsWith('saved-')) {
-                const profile = await UserService.getProfile(undefined, { fresh: true });
-                const list = profile?.addresses || [];
-                const at = list.findIndex((a) => a?._id === item.id);
-                if (at < 0) return; // already gone
-                target = at;
-            }
-            await UserService.removeAddress(target);
+            // By server id when the address has one (indices shift as addresses change).
+            await UserService.removeAddress(item);
         } catch (error) {
+            if (error?.response?.status === 404) return; // already gone
             console.error('Delete address failed:', error);
             toast.error(latest.current.isHi ? 'पता हटाने में विफल' : "Couldn't delete the address");
         } finally {
@@ -533,11 +508,7 @@ const LocationScreen = ({ navigation }) => {
     const handleSetDefaultAddress = useCallback(async (item, index) => {
         try {
             setIsFetchingAddresses(true);
-            const targetIndex = item.originalIndex ?? index;
-            await UserService.updateAddress(targetIndex, {
-                ...item,
-                isDefault: true,
-            });
+            await UserService.setDefaultAddress({ ...item, listIndex: index });
             await fetchSavedAddressesRef.current();
         } catch (error) {
             console.error('Set default address failed:', error);

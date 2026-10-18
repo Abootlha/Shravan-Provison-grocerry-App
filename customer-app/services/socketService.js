@@ -7,12 +7,22 @@ import {
     updateRiderLocation,
     updateETA,
     setError,
+    clearError,
 } from '../store/slices/orderTrackingSlice';
 
+// Codes sent by the /tracking namespace (connect_error data / auth_error payload).
+const AUTH_ERROR_CODES = ['TOKEN_MISSING', 'TOKEN_INVALID', 'TOKEN_EXPIRED', 'TOKEN_REVOKED', 'REFRESH_TOKEN_NOT_ALLOWED'];
+
 const isAuthError = (error) => {
+    if (AUTH_ERROR_CODES.includes(error?.data?.code) || AUTH_ERROR_CODES.includes(error?.code)) return true;
     const message = typeof error === 'string' ? error : error?.message || '';
     return /unauthori[sz]ed|jwt|token/i.test(message);
 };
+
+// Shown in the tracking screen's status pill; raw transport errors are only logged.
+const LIVE_LOST_MESSAGE = 'Live updates are unavailable. Reopen this screen to try again.';
+const LIVE_ORDER_MESSAGE = 'Live updates are unavailable for this order.';
+const SERVER_RETRY_MS = 5000;
 
 class SocketService {
     constructor() {
@@ -25,6 +35,7 @@ class SocketService {
         this.reconnectionDelayMax = 10000;
         this.authRetries = 0;
         this.authRetryTimer = null;
+        this.serverRetryTimer = null;
     }
 
     /**
@@ -112,6 +123,8 @@ class SocketService {
         this.socket.on('connect', () => {
             console.log('Socket connected:', this.socket.id);
             store.dispatch(setConnectionStatus('connected'));
+            store.dispatch(clearError());
+            clearTimeout(this.serverRetryTimer);
             this.reconnectAttempts = 0;
             this.authRetries = 0;
             this.joinedOrderId = null;
@@ -129,7 +142,7 @@ class SocketService {
         });
 
         this.socket.on('connect_error', (error) => {
-            console.warn('Socket connection warning:', error.message);
+            console.warn('Socket connection warning:', error.message, error?.data?.code || '');
             if (isAuthError(error)) {
                 this.handleAuthFailure('connect_error');
                 return;
@@ -138,10 +151,23 @@ class SocketService {
 
             if (this.reconnectAttempts >= this.maxReconnectAttempts) {
                 store.dispatch(setConnectionStatus('disconnected'));
-                store.dispatch(setError('Failed to connect to tracking server'));
-            } else {
-                store.dispatch(setConnectionStatus('reconnecting'));
+                store.dispatch(setError(LIVE_LOST_MESSAGE));
+                return;
             }
+            store.dispatch(setConnectionStatus('reconnecting'));
+            // A handshake refused by the server (e.g. auth temporarily unavailable) is not
+            // retried by socket.io itself; transport errors are (socket.active stays true).
+            if (this.socket && !this.socket.active) {
+                clearTimeout(this.serverRetryTimer);
+                this.serverRetryTimer = setTimeout(() => this.socket?.connect(), SERVER_RETRY_MS);
+            }
+        });
+
+        // Sent right before the server closes an open socket: the access token expired or the
+        // session was revoked. Refresh and reconnect (a real logout ends the session instead).
+        this.socket.on('auth_error', (payload) => {
+            if (__DEV__) console.log('Socket auth_error:', payload?.code);
+            this.handleAuthFailure('auth_error');
         });
 
         // Reconnection events are emitted by the Manager (socket.io), not the Socket.
@@ -165,7 +191,7 @@ class SocketService {
         manager.on('reconnect_failed', () => {
             console.warn('Socket reconnection failed');
             store.dispatch(setConnectionStatus('disconnected'));
-            store.dispatch(setError('Failed to reconnect to tracking server'));
+            store.dispatch(setError(LIVE_LOST_MESSAGE));
         });
 
         this.socket.on('orderStatusUpdate', (data) => {
@@ -228,7 +254,6 @@ class SocketService {
 
         this.socket.on('error', (error) => {
             console.warn('Socket error:', error);
-            store.dispatch(setError(error.message || 'Socket error occurred'));
         });
 
         this.socket.on('joinedOrderRoom', (data) => {
@@ -242,8 +267,7 @@ class SocketService {
                 this.handleAuthFailure('exception');
                 return;
             }
-            const message = typeof error === 'string' ? error : error?.message || 'Realtime connection error';
-            store.dispatch(setError(message));
+            store.dispatch(setError(LIVE_ORDER_MESSAGE));
         });
     }
 
@@ -290,6 +314,8 @@ class SocketService {
     }
 
     disconnect() {
+        clearTimeout(this.serverRetryTimer);
+        this.serverRetryTimer = null;
         clearTimeout(this.authRetryTimer);
         this.authRetryTimer = null;
         this.authRetries = 0;

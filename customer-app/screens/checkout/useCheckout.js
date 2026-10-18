@@ -36,7 +36,8 @@ import { toast, haptic } from '../../components/ui';
 import { billFromQuote, estimateBill } from './bill';
 import { useOrderQuote } from './useOrderQuote';
 import { findPaymentOption } from './paymentMethods';
-import { resolveCoords, toClientAddresses } from '../address/addressUtils';
+import { isSameAddress, orderAddressLine, resolveCoords, toClientAddresses } from '../address/addressUtils';
+import { useServiceArea } from '../address/useServiceArea';
 import { markStoreClosed, useStoreFees, useStoreStatus } from '../../hooks/useStoreSettings';
 import { describeError, friendlyError } from '../../services/normalize';
 
@@ -77,6 +78,7 @@ export function useCheckout({ navigation, route }) {
     const dispatch = useDispatch();
     const { isHi } = useTranslation();
     const store = useStoreStatus();
+    const serviceArea = useServiceArea();
 
     const { totalItems, items: cartItems } = useSelector((state) => state.cart);
     const fees = useStoreFees();
@@ -124,6 +126,21 @@ export function useCheckout({ navigation, route }) {
     const payableAmount = billState === 'ready' ? Number(quote.quote.totalAmount) : null;
     const paymentOption = findPaymentOption(selectedPayment, isHi);
 
+    // Where the order goes: distance from the store and whether it is inside the delivery radius.
+    const addressInfo = useMemo(() => {
+        const coords = resolveCoords(selectedAddress, savedAddresses || []);
+        const distanceKm = coords ? serviceArea.distanceKm(coords) : null;
+        const outOfArea = distanceKm != null && distanceKm > serviceArea.radiusKm;
+        // A saved address (server id or index) is edited in place; a one-off pin is saved as new.
+        const isSaved = !!selectedAddress && (
+            mongoIdPattern.test(String(selectedAddress.id || '')) || Number.isInteger(selectedAddress.originalIndex)
+        );
+        return { coords, distanceKm, outOfArea, isSaved, radiusKm: serviceArea.radiusKm, store: serviceArea.store };
+    }, [selectedAddress, savedAddresses, serviceArea.distanceKm, serviceArea.radiusKm, serviceArea.store]);
+    const addressBlock = addressInfo.outOfArea
+        ? (isHi ? 'यह पता डिलीवरी क्षेत्र से बाहर है' : 'Address is outside our delivery area')
+        : null;
+
     useEffect(() => {
         isMountedRef.current = true;
         return () => {
@@ -163,12 +180,23 @@ export function useCheckout({ navigation, route }) {
         setIsFetchingAddresses(true);
         try {
             const profile = await UserService.getProfile();
-            if (profile?.addresses && profile.addresses.length > 0) {
+            if (Array.isArray(profile?.addresses)) {
                 const formattedAddresses = toClientAddresses(profile.addresses);
                 dispatch(setSavedAddresses(formattedAddresses));
 
-                if (!selectedAddress) {
-                    const defaultAddr = formattedAddresses.find((a) => a.isDefault) || formattedAddresses[0];
+                // Keep the current choice, refreshed to the saved copy (server id, new details).
+                // A saved address that no longer exists (deleted elsewhere) is replaced by the
+                // default; a one-off map pin stays selected.
+                const current = selectedAddress
+                    && (formattedAddresses.find((a) => a.id === selectedAddress.id)
+                        || formattedAddresses.find((a) => isSameAddress(a, selectedAddress)));
+                const wasSaved = !!selectedAddress && (
+                    mongoIdPattern.test(String(selectedAddress.id || '')) || Number.isInteger(selectedAddress.originalIndex)
+                );
+                if (current) {
+                    dispatch(setSelectedAddress(current));
+                } else if (!selectedAddress || wasSaved) {
+                    const defaultAddr = formattedAddresses.find((a) => a.isDefault) || formattedAddresses[0] || null;
                     dispatch(setSelectedAddress(defaultAddr));
                 }
             }
@@ -191,6 +219,9 @@ export function useCheckout({ navigation, route }) {
             .map((o) => o.en);
         if (customInstruction.trim()) labels.push(customInstruction.trim());
         if (tip > 0) labels.push(`Tip ₹${tip} for the delivery partner (paid at the door)`);
+        // POST /orders has no receiver fields: the rider reads them here.
+        const receiver = [selectedAddress?.receiverName, selectedAddress?.receiverPhone].filter(Boolean).join(', ');
+        if (receiver) labels.push(`Receiver: ${receiver}`);
         return labels.join(', ');
     };
 
@@ -214,7 +245,8 @@ export function useCheckout({ navigation, route }) {
             totalAmount: quote.quote.totalAmount,
             deliveryAddress: {
                 type: addrToUse.type || 'Home',
-                address: addrToUse.address || addrToUse.addressLine,
+                // Flat / floor / landmark folded in: the order address has no fields for them.
+                address: orderAddressLine(addrToUse),
                 city: addrToUse.city,
                 pincode: addrToUse.pincode,
                 latitude: coords?.latitude,
@@ -331,6 +363,15 @@ export function useCheckout({ navigation, route }) {
                 description: isHi
                     ? 'डिलीवरी के लिए नक्शे पर स्थान चुनें।'
                     : 'We need its map location to deliver. Edit the address or pick another one.',
+            });
+            return false;
+        }
+
+        if (addressInfo.outOfArea) {
+            toast.error(isHi ? 'यहाँ डिलीवरी उपलब्ध नहीं' : 'We don’t deliver to this address', {
+                description: isHi
+                    ? `यह पता स्टोर से ${addressInfo.distanceKm} किमी दूर है। ${addressInfo.radiusKm} किमी के भीतर का पता चुनें।`
+                    : `It is ${addressInfo.distanceKm} km from the store. Choose an address within ${addressInfo.radiusKm} km.`,
             });
             return false;
         }
@@ -512,6 +553,8 @@ export function useCheckout({ navigation, route }) {
         savedAddresses: savedAddresses || [],
         selectedAddress,
         selectAddress,
+        addressInfo,
+        addressBlock,
         isFetchingAddresses,
         selectedPayment,
         setSelectedPayment,

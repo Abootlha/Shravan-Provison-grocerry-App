@@ -46,6 +46,7 @@ const Tab = createBottomTabNavigator();
 // Floating dock (Part C #3). Content scrolls behind it; screens pad their lists by
 // useTabBarHeight(). Screens can hide it while scrolling down by emitting
 // SET_TAB_BAR_VISIBLE(false); it springs back on (true) and on every tab switch.
+// A tab that sets `tabBarStyle: { display: 'none' }` (Cart with items) keeps the dock hidden.
 const CustomTabBar = ({ state, descriptors, navigation }) => {
     const totalItems = useSelector((s) => s.cart.totalItems);
     const { t } = useTranslation();
@@ -53,6 +54,8 @@ const CustomTabBar = ({ state, descriptors, navigation }) => {
     const dockInset = useDockInset();
     const travel = useTabBarHeight() + space.lg; // fully below the screen edge, shadow included
     const hidden = useSharedValue(0);
+    const focusedKey = state.routes[state.index]?.key;
+    const routeHidesDock = descriptors[focusedKey]?.options?.tabBarStyle?.display === 'none';
 
     const show = useCallback(
         (visible) => {
@@ -63,13 +66,13 @@ const CustomTabBar = ({ state, descriptors, navigation }) => {
     );
 
     useEffect(() => {
-        show(true); // always visible after a tab switch
-    }, [state.index, show]);
+        show(!routeHidesDock); // visible after a tab switch, unless that tab hides it
+    }, [state.index, routeHidesDock, show]);
 
     useEffect(() => {
-        const sub = DeviceEventEmitter.addListener('SET_TAB_BAR_VISIBLE', (visible) => show(visible !== false));
+        const sub = DeviceEventEmitter.addListener('SET_TAB_BAR_VISIBLE', (visible) => show(visible !== false && !routeHidesDock));
         return () => sub.remove();
-    }, [show]);
+    }, [show, routeHidesDock]);
 
     const slide = useAnimatedStyle(() =>
         reduce ? { opacity: 1 - hidden.value } : { opacity: 1 - hidden.value * 0.4, transform: [{ translateY: hidden.value * travel }] },
@@ -106,7 +109,7 @@ const CustomTabBar = ({ state, descriptors, navigation }) => {
     };
 
     return (
-        <Animated.View style={[styles.dockLayer, { height: travel }, slide, { pointerEvents: 'box-none' }]}>
+        <Animated.View style={[styles.dockLayer, { height: travel }, slide, { pointerEvents: routeHidesDock ? 'none' : 'box-none' }]}>
             <FloatingDock items={items} activeKey={state.routes[state.index]?.key} onSelect={onSelect} bottomInset={dockInset} />
         </Animated.View>
     );

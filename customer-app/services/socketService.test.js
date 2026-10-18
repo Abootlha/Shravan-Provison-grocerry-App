@@ -168,13 +168,13 @@ describe('SocketService', () => {
             )[1];
 
             // Simulate multiple connection errors
-            for (let i = 0; i < 5; i++) {
+            for (let i = 0; i < socketService.maxReconnectAttempts; i++) {
                 connectErrorHandler(new Error('Connection failed'));
             }
 
             expect(store.dispatch).toHaveBeenCalledWith(setConnectionStatus('disconnected'));
             expect(store.dispatch).toHaveBeenCalledWith(
-                setError('Failed to connect to tracking server')
+                setError('Live updates are unavailable. Reopen this screen to try again.')
             );
         });
 
@@ -301,20 +301,43 @@ describe('SocketService', () => {
             );
         });
 
-        it('should dispatch error on socket error event', () => {
+        it('should only log transport errors (no raw message in the UI)', () => {
             socketService.connect('token');
 
-            // Get the error event handler
             const errorHandler = mockSocket.on.mock.calls.find(
                 (call) => call[0] === 'error'
             )[1];
+            errorHandler({ message: 'xhr poll error' });
 
-            const errorData = { message: 'Socket error occurred' };
+            expect(store.dispatch).not.toHaveBeenCalledWith(setError('xhr poll error'));
+        });
 
-            // Simulate event
-            errorHandler(errorData);
+        it('should refresh the token when the server sends auth_error', () => {
+            socketService.connect('token');
+            const spy = jest.spyOn(socketService, 'handleAuthFailure').mockResolvedValue();
 
-            expect(store.dispatch).toHaveBeenCalledWith(setError(errorData.message));
+            const authErrorHandler = mockSocket.on.mock.calls.find(
+                (call) => call[0] === 'auth_error'
+            )[1];
+            authErrorHandler({ code: 'TOKEN_EXPIRED', message: 'Access token expired' });
+
+            expect(spy).toHaveBeenCalledWith('auth_error');
+            spy.mockRestore();
+        });
+
+        it('should treat connect_error with an auth code as an auth failure', () => {
+            socketService.connect('token');
+            const spy = jest.spyOn(socketService, 'handleAuthFailure').mockResolvedValue();
+
+            const connectErrorHandler = mockSocket.on.mock.calls.find(
+                (call) => call[0] === 'connect_error'
+            )[1];
+            const error = new Error('unauthorized');
+            error.data = { code: 'TOKEN_REVOKED' };
+            connectErrorHandler(error);
+
+            expect(spy).toHaveBeenCalledWith('connect_error');
+            spy.mockRestore();
         });
     });
 

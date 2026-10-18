@@ -61,7 +61,7 @@ export function RiderCard({ rider, stale, activeLeg, isHi }) {
                     <View style={styles.stale}>
                         <MaterialCommunityIcons name="clock-alert-outline" size={16} color={colors.warning} />
                         <Text variant="caption" color="warning" style={styles.info}>
-                            {isHi ? 'राइडर की लाइव लोकेशन में देरी है। हम रूट रीफ़्रेश कर रहे हैं।' : "Live location is delayed. We're refreshing the route."}
+                            {isHi ? 'राइडर की लाइव लोकेशन में देरी है। सिग्नल मिलते ही अपडेट शुरू हो जाएँगे।' : 'Live location is delayed. It will update as soon as the rider has signal.'}
                         </Text>
                     </View>
                 </>

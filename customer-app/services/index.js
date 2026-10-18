@@ -7,6 +7,7 @@ export {
     OrderService,
     UserService,
     SettingsService,
+    addressRef,
 } from './services';
 export {
     fetchRoute,

@@ -12,9 +12,14 @@
  * sentence-case title (the mixed-weight Headline is reserved for the Home hero line).
  *
  * SECTION_ORDER is the page rhythm — layouts alternate so no two neighbours look alike:
- *   carousel → editorial card + rail → rail → grid → chips + rail → 2-up tiles → rail
- *   → themed block → aisle rails
+ *   carousel → fresh 2-up tiles (one block per fresh category) → editorial card + rail → rail
+ *   → grid (every category) → chips + rail → rail → themed block → one rail per category
+ *
+ * "Shelves" are the per-category product lists ({ category, fresh, products, total }) from
+ * GET /products/home. Older backends only have GET /products?limit=100; shelvesFrom() rebuilds
+ * shelves from that slice so Home still lists every category it can see.
  */
+import { isFreshCategory } from '../../services/normalize';
 import { discountOf, idOf, nameOf } from './catalog';
 
 // ---------------------------------------------------------------------------
@@ -24,14 +29,14 @@ import { discountOf, idOf, nameOf } from './catalog';
 /** Page order. `type` picks the renderer in HomeScreen; `style` is the visual treatment. */
 export const SECTION_ORDER = [
     { id: 'banners', type: 'banners', style: 'carousel' },
+    { id: 'fresh', type: 'fresh', style: 'tiles2up', min: 2, limit: 4 },
     { id: 'moment', type: 'moment', style: 'editorial', min: 4, limit: 12 },
     { id: 'again', type: 'rail', source: 'orders', style: 'rail', min: 3, limit: 10 },
-    { id: 'grid', type: 'grid', style: 'grid', limit: 8 },
+    { id: 'grid', type: 'grid', style: 'grid' },
     { id: 'price', type: 'priceStore', style: 'chips', min: 4, limit: 12 },
-    { id: 'fresh', type: 'fresh', style: 'tiles2up', min: 2, limit: 4 },
     { id: 'deals', type: 'rail', source: 'discount', style: 'rail', minDiscount: 10, min: 4, limit: 10 },
     { id: 'season', type: 'season', style: 'themed', min: 4, limit: 10 },
-    { id: 'aisles', type: 'aisles', style: 'rail', count: 3, min: 3, limit: 12 },
+    { id: 'aisles', type: 'aisles', style: 'rail', min: 1, limit: 12 },
 ];
 
 /**
@@ -198,10 +203,24 @@ const byPopularity = (a, b) => popularity(b) - popularity(a);
 /** Matching, in-stock products, most popular first. */
 export const collect = (available, rule, limit) => available.filter((p) => matches(p, rule)).sort(byPopularity).slice(0, limit);
 
-/** Fruits & vegetables: perishable products in a produce category. */
-const isProduce = (p) => {
-    const cat = `${p.categoryId?.name || p.categoryName || ''} ${p.subcategory || p.subcategoryId?.name || ''}`.toLowerCase();
-    return /fruit|veg|herb|produce|sabzi/.test(cat);
+/**
+ * Per-category shelves from a flat product list (fallback for backends without /products/home):
+ * categories in the order given, each with its in-stock products, most popular first.
+ */
+export const shelvesFrom = (products, categories) => {
+    const byCat = new Map();
+    products.filter(isAvailable).forEach((p) => {
+        const id = String(productCategoryId(p));
+        if (!byCat.has(id)) byCat.set(id, []);
+        byCat.get(id).push(p);
+    });
+    return categories
+        .map((category) => {
+            const list = byCat.get(String(idOf(category)));
+            if (!list?.length) return null;
+            return { category, fresh: isFreshCategory(category), products: list.sort(byPopularity), total: list.length };
+        })
+        .filter(Boolean);
 };
 
 /** Freshness facts the record actually carries (storage + shelf life). Null when it has neither. */
@@ -226,41 +245,27 @@ const buyAgain = (available, orders) => {
     return available.filter((p) => counts.has(String(p._id))).sort((a, b) => counts.get(String(b._id)) - counts.get(String(a._id)));
 };
 
-/** Categories ranked by how much of them sells (sum of soldCount / reviewCount over in-stock items). */
-const topAisles = (available, categories, count, min) => {
-    const groups = new Map();
-    available.forEach((p) => {
-        const id = String(productCategoryId(p));
-        if (!groups.has(id)) groups.set(id, { id, products: [], score: 0 });
-        const g = groups.get(id);
-        g.products.push(p);
-        g.score += popularity(p);
-    });
-    return Array.from(groups.values())
-        .filter((g) => g.products.length >= min)
-        .map((g) => ({ ...g, category: categories.find((c) => String(idOf(c)) === g.id) || null }))
-        .filter((g) => g.category)
-        .sort((a, b) => b.score - a.score || b.products.length - a.products.length)
-        .slice(0, count)
-        .map((g) => ({ ...g, products: g.products.sort(byPopularity) }));
-};
-
 // ---------------------------------------------------------------------------
 // Builder
 // ---------------------------------------------------------------------------
 
 /**
- * buildHomeSections({ products, categories, orders, now, language, t }) → section descriptors.
+ * buildHomeSections({ products, categories, shelves, orders, now, language, t }) → section descriptors.
+ * `shelves` defaults to shelvesFrom(products, categories).
  * Each descriptor carries its data plus translated, mixed-weight title parts. Renderers live in
  * HomeScreen / EditorialSections; this stays pure so it is easy to test and reorder.
  */
-export function buildHomeSections({ products = [], categories = [], orders = [], now = new Date(), language = 'en', t, eta = null }) {
+export function buildHomeSections({ products = [], categories = [], shelves, orders = [], now = new Date(), language = 'en', t, eta = null }) {
     const tr = (key, vars) => fmt(t(key), vars);
     const title = (key, vars) => ({ lead: tr(`${key}.lead`, vars), emphasis: tr(`${key}.emphasis`, vars), trail: optional(t, `${key}.trail`, vars) });
     const count = (n) => tr(n === 1 ? 'homeFeed.itemOne' : 'homeFeed.items', { n });
 
     const available = products.filter(isAvailable);
     const out = [];
+    const allShelves = (shelves || shelvesFrom(products, categories))
+        .map((s) => ({ ...s, products: s.products.filter(isAvailable) }))
+        .filter((s) => s.products.length);
+    const freshShown = new Set(); // fresh categories already shown as tiles (no second rail)
 
     SECTION_ORDER.forEach((cfg) => {
         switch (cfg.type) {
@@ -309,7 +314,7 @@ export function buildHomeSections({ products = [], categories = [], orders = [],
             }
 
             case 'grid':
-                if (categories.length) out.push({ key: cfg.id, type: 'grid', categories: categories.slice(0, cfg.limit) });
+                if (categories.length) out.push({ key: cfg.id, type: 'grid', categories: cfg.limit ? categories.slice(0, cfg.limit) : categories });
                 break;
 
             case 'priceStore': {
@@ -328,22 +333,25 @@ export function buildHomeSections({ products = [], categories = [], orders = [],
                 break;
             }
 
-            case 'fresh': {
-                const produce = available.filter((p) => p.isPerishable !== false && isProduce(p)).sort(byPopularity);
-                if (produce.length < cfg.min) break;
-                const n = Math.min(cfg.limit, produce.length);
-                const tiles = produce.slice(0, n - (n % 2)); // whole rows of two
-                const category = categories.find((c) => String(idOf(c)) === String(productCategoryId(tiles[0]))) || null;
-                out.push({
-                    key: cfg.id,
-                    type: 'fresh',
-                    ...title('homeFeed.fresh'),
-                    subtitle: tr('homeFeed.fresh.subtitle', { n: produce.length }),
-                    products: tiles.map((p) => ({ product: p, freshness: freshnessOf(p) })),
-                    category,
-                });
+            case 'fresh':
+                // One 2-up block per fresh category (fruits & vegetables, dairy...), leading the page.
+                allShelves
+                    .filter((shelf) => shelf.fresh && shelf.products.length >= cfg.min)
+                    .forEach((shelf) => {
+                        const n = Math.min(cfg.limit, shelf.products.length);
+                        const tiles = shelf.products.slice(0, n - (n % 2)); // whole rows of two
+                        const id = String(idOf(shelf.category));
+                        freshShown.add(id);
+                        out.push({
+                            key: `fresh-${id}`,
+                            type: 'fresh',
+                            title: nameOf(shelf.category, language),
+                            subtitle: count(shelf.total),
+                            products: tiles.map((p) => ({ product: p, freshness: freshnessOf(p) })),
+                            category: shelf.category,
+                        });
+                    });
                 break;
-            }
 
             case 'season': {
                 const used = new Set(out.flatMap((s) => (s.type === 'moment' ? s.products.map((p) => String(p._id)) : [])));
@@ -369,16 +377,20 @@ export function buildHomeSections({ products = [], categories = [], orders = [],
             }
 
             case 'aisles':
-                topAisles(available, categories, cfg.count, cfg.min).forEach((g) => {
-                    out.push({
-                        key: `aisle-${g.id}`,
-                        type: 'rail',
-                        title: nameOf(g.category, language),
-                        subtitle: count(g.products.length),
-                        products: g.products.slice(0, cfg.limit),
-                        category: g.category,
+                // Every category with stock, in category order: nothing hides below a top-N cut.
+                allShelves
+                    .filter((shelf) => !freshShown.has(String(idOf(shelf.category))) && shelf.products.length >= cfg.min)
+                    .forEach((shelf) => {
+                        const id = String(idOf(shelf.category));
+                        out.push({
+                            key: `aisle-${id}`,
+                            type: 'rail',
+                            title: nameOf(shelf.category, language),
+                            subtitle: count(shelf.total),
+                            products: shelf.products.slice(0, cfg.limit),
+                            category: shelf.category,
+                        });
                     });
-                });
                 break;
 
             default:

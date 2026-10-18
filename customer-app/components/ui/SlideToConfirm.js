@@ -5,6 +5,8 @@
  *
  * Props
  *   label           string — e.g. "Slide to pay ₹248" (static text + a static chevron hint; no shimmer loop)
+ *   hintLabel       string — shown briefly when the track is tapped instead of slid (default "Slide to confirm");
+ *                   the tap also nudges the knob once so the drag is discoverable
  *   confirmedLabel  string — shown after confirm (default "Processing…")
  *   onConfirm       () => void | Promise — a rejected promise resets the slider
  *   loading         boolean — show spinner in the knob (controlled; defaults to true right after confirm
@@ -24,7 +26,7 @@
  *   <SlideToConfirm ref={slider} label={`Slide to pay ₹${total}`} loading={paying}
  *     onConfirm={async () => { try { await pay(); } catch (e) { slider.current.reset(); } }} />
  */
-import React, { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -61,7 +63,7 @@ const useTones = makeThemed(({ colors: c }) => ({
 }));
 
 export const SlideToConfirm = forwardRef(function SlideToConfirm(
-    { label, confirmedLabel = 'Processing…', onConfirm, loading, disabled = false, tone = 'accent', style },
+    { label, hintLabel = 'Slide to confirm', confirmedLabel = 'Processing…', onConfirm, loading, disabled = false, tone = 'accent', style },
     ref,
 ) {
     const TONES = useTones();
@@ -74,6 +76,9 @@ export const SlideToConfirm = forwardRef(function SlideToConfirm(
     const x = useSharedValue(0);
     const start = useSharedValue(0);
     const crossed = useSharedValue(false);
+    const [hint, setHint] = useState(false);
+    const hintTimer = useRef(null);
+    useEffect(() => () => clearTimeout(hintTimer.current), []);
 
     // one-time nudge so people discover the drag (fires once when the track is measured; never loops)
     useEffect(() => {
@@ -131,6 +136,23 @@ export const SlideToConfirm = forwardRef(function SlideToConfirm(
             }
         });
 
+    // A tap instead of a slide: nudge the knob once and say what to do (label swaps back after a beat).
+    const nudge = () => {
+        if (done || disabled || !max) return;
+        haptics.light();
+        if (!reduce) {
+            x.value = withSequence(withTiming(28, { duration: 160, easing: easings.out }), withSpring(0, springs.bouncy));
+        }
+        setHint(true);
+        clearTimeout(hintTimer.current);
+        hintTimer.current = setTimeout(() => setHint(false), 1800);
+    };
+    const tap = Gesture.Tap()
+        .enabled(!disabled && !done && max > 0)
+        .onEnd((_e, success) => {
+            if (success) scheduleOnRN(nudge);
+        });
+
     const knobStyle = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
     const trailStyle = useAnimatedStyle(() => ({
         opacity: interpolate(x.value, [0, 16], [0, 1], 'clamp'),
@@ -147,50 +169,52 @@ export const SlideToConfirm = forwardRef(function SlideToConfirm(
     const busy = done && loading !== false;
 
     return (
-        <View
-            accessible
-            // RN-web renders role="button" as a <button>, which never reports onLayout and
-            // swallows the drag; expose it as a slider there instead.
-            accessibilityRole={Platform.OS === 'web' ? 'adjustable' : 'button'}
-            accessibilityLabel={done ? confirmedLabel : label}
-            accessibilityHint="Swipe right, or double tap, to confirm"
-            accessibilityState={{ disabled, busy }}
-            accessibilityActions={[{ name: 'activate' }]}
-            onAccessibilityAction={(e) => e.nativeEvent.actionName === 'activate' && !disabled && confirm()}
-            onLayout={(e) => setW(e.nativeEvent.layout.width)}
-            style={[styles.track, { backgroundColor: t.track, opacity: disabled ? 0.45 : 1 }, style]}
-        >
-            <View style={[StyleSheet.absoluteFill, styles.clip, { pointerEvents: 'none' }]}>
-                {w > 0 ? <Animated.View style={[styles.trail, { width: w, backgroundColor: t.trail }, trailStyle, { pointerEvents: 'none' }]} /> : null}
-            </View>
+        <GestureDetector gesture={tap}>
+            <View
+                accessible
+                // RN-web renders role="button" as a <button>, which never reports onLayout and
+                // swallows the drag; expose it as a slider there instead.
+                accessibilityRole={Platform.OS === 'web' ? 'adjustable' : 'button'}
+                accessibilityLabel={done ? confirmedLabel : label}
+                accessibilityHint="Swipe right, or double tap, to confirm"
+                accessibilityState={{ disabled, busy }}
+                accessibilityActions={[{ name: 'activate' }]}
+                onAccessibilityAction={(e) => e.nativeEvent.actionName === 'activate' && !disabled && confirm()}
+                onLayout={(e) => setW(e.nativeEvent.layout.width)}
+                style={[styles.track, { backgroundColor: t.track, opacity: disabled ? 0.45 : 1 }, style]}
+            >
+                <View style={[StyleSheet.absoluteFill, styles.clip, { pointerEvents: 'none' }]}>
+                    {w > 0 ? <Animated.View style={[styles.trail, { width: w, backgroundColor: t.trail }, trailStyle, { pointerEvents: 'none' }]} /> : null}
+                </View>
 
-            <View style={[styles.labelWrap, { pointerEvents: 'none' }]}>
-                {done ? (
-                    <Animated.Text style={[type.button, { color: t.fg }]}>{confirmedLabel}</Animated.Text>
-                ) : (
-                    <Animated.View style={[styles.labelRow, labelStyle]}>
-                        <Animated.Text numberOfLines={1} style={[type.button, { color: t.fg }]}>
-                            {label}
-                        </Animated.Text>
-                        <Animated.View style={[styles.trailingChevrons, chevronStyle]}>
-                            <MaterialCommunityIcons name="chevron-double-right" size={18} color={t.fg} style={{ opacity: 0.7 }} />
-                        </Animated.View>
-                    </Animated.View>
-                )}
-            </View>
-
-            <GestureDetector gesture={pan}>
-                <Animated.View style={[styles.knob, WEB_DRAG, knobStyle]} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    {busy ? (
-                        <ActivityIndicator color={t.icon} />
-                    ) : done ? (
-                        <MaterialCommunityIcons name="check-bold" size={24} color={t.icon} />
+                <View style={[styles.labelWrap, { pointerEvents: 'none' }]}>
+                    {done ? (
+                        <Animated.Text style={[type.button, { color: t.fg }]}>{confirmedLabel}</Animated.Text>
                     ) : (
-                        <MaterialCommunityIcons name="chevron-double-right" size={28} color={t.icon} />
+                        <Animated.View style={[styles.labelRow, labelStyle]}>
+                            <Animated.Text numberOfLines={1} style={[type.button, { color: t.fg }]}>
+                                {hint ? hintLabel : label}
+                            </Animated.Text>
+                            <Animated.View style={[styles.trailingChevrons, chevronStyle]}>
+                                <MaterialCommunityIcons name="chevron-double-right" size={18} color={t.fg} style={{ opacity: 0.7 }} />
+                            </Animated.View>
+                        </Animated.View>
                     )}
-                </Animated.View>
-            </GestureDetector>
-        </View>
+                </View>
+
+                <GestureDetector gesture={pan}>
+                    <Animated.View style={[styles.knob, WEB_DRAG, knobStyle]} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                        {busy ? (
+                            <ActivityIndicator color={t.icon} />
+                        ) : done ? (
+                            <MaterialCommunityIcons name="check-bold" size={24} color={t.icon} />
+                        ) : (
+                            <MaterialCommunityIcons name="chevron-double-right" size={28} color={t.icon} />
+                        )}
+                    </Animated.View>
+                </GestureDetector>
+            </View>
+        </GestureDetector>
     );
 });
 

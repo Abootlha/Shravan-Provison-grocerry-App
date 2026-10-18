@@ -87,6 +87,11 @@ function CheckoutItemRowBase({ item, index = 0, showDivider = false, refusedReas
                                 {item.unit ? `${item.unit} · ₹${formatINR(price)}` : `₹${formatINR(price)} each`}
                             </Text>
                         )}
+                        {!refusedReason && lineMrp ? (
+                            <Text variant="caption" color="success" numberOfLines={1}>
+                                {isHi ? `₹${formatINR(lineMrp - lineTotal)} की बचत` : `You save ₹${formatINR(lineMrp - lineTotal)}`}
+                            </Text>
+                        ) : null}
                     </View>
 
                     <View style={styles.side}>

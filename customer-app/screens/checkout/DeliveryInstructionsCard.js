@@ -8,25 +8,13 @@ import { GROUP_RADIUS, ICON_CIRCLE } from './layout';
 import { getInstructionOptions } from './useCheckout';
 
 /** Sent as the order's deliveryInstructions. */
-function DeliveryInstructionsCardBase({ selected, onToggle, note, onChangeNote, isHi }) {
+/** `bare`: only the chips and note, for the collapsible extras card. */
+function DeliveryInstructionsCardBase({ selected, onToggle, note, onChangeNote, isHi, bare = false }) {
     const styles = useStyles();
     const { colors, isDark } = useTheme();
     const options = getInstructionOptions(isHi);
-    return (
-        <Card padding="lg" radius={GROUP_RADIUS} style={styles.card}>
-            <View style={styles.head}>
-                <View style={styles.icon}>
-                    <MaterialCommunityIcons name="message-text-outline" size={20} color={colors.inkSecondary} />
-                </View>
-                <View style={styles.texts}>
-                    <Text variant="title" accessibilityRole="header">
-                        {isHi ? 'डिलीवरी निर्देश' : 'Delivery instructions'}
-                    </Text>
-                    <Text variant="caption" color="secondary">
-                        {isHi ? 'पार्टनर को बताएं कि कैसे पहुँचाना है' : 'Tell your partner how to hand it over'}
-                    </Text>
-                </View>
-            </View>
+    const body = (
+        <>
             <View style={styles.chips}>
                 {options.map((o) => (
                     <Chip
@@ -51,6 +39,26 @@ function DeliveryInstructionsCardBase({ selected, onToggle, note, onChangeNote, 
                 maxLength={200}
                 multiline
             />
+        </>
+    );
+    if (bare) return <View style={styles.bare}>{body}</View>;
+
+    return (
+        <Card padding="lg" radius={GROUP_RADIUS} style={styles.card}>
+            <View style={styles.head}>
+                <View style={styles.icon}>
+                    <MaterialCommunityIcons name="message-text-outline" size={20} color={colors.inkSecondary} />
+                </View>
+                <View style={styles.texts}>
+                    <Text variant="title" accessibilityRole="header">
+                        {isHi ? 'डिलीवरी निर्देश' : 'Delivery instructions'}
+                    </Text>
+                    <Text variant="caption" color="secondary">
+                        {isHi ? 'पार्टनर को बताएं कि कैसे पहुँचाना है' : 'Tell your partner how to hand it over'}
+                    </Text>
+                </View>
+            </View>
+            {body}
         </Card>
     );
 }
@@ -59,6 +67,7 @@ export const DeliveryInstructionsCard = memo(DeliveryInstructionsCardBase);
 
 const useStyles = makeStyles((t) => ({
     card: { gap: space.md },
+    bare: { gap: space.md },
     head: { flexDirection: 'row', alignItems: 'center', gap: space.md },
     icon: {
         width: ICON_CIRCLE + space.xs,

@@ -237,12 +237,30 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
         }
     }, [riderLocation?.latitude, riderLocation?.longitude, routeCoordinates, currentOrder?.orderStatus, activeLeg, storeLocation?.latitude, storeLocation?.longitude, currentOrder?.deliveryAddress?.coordinates?.coordinates?.[0], currentOrder?.deliveryAddress?.coordinates?.coordinates?.[1]]);
 
+    // Heading: the device compass/GPS course when the rider app sends it, otherwise the bearing
+    // between fixes. A rider standing still keeps the last heading instead of snapping north.
     useEffect(() => {
-        if (riderLocation && previousRiderLocation) {
-            const bearing = calculateBearing(previousRiderLocation, riderLocation);
-            dispatch(setRiderHeading(bearing));
+        if (!riderLocation) return;
+        if (Number.isFinite(riderLocation.heading)) {
+            dispatch(setRiderHeading(riderLocation.heading));
+            return;
         }
+        if (!previousRiderLocation) return;
+        const moved = Math.abs(riderLocation.latitude - previousRiderLocation.latitude)
+            + Math.abs(riderLocation.longitude - previousRiderLocation.longitude);
+        if (moved < 0.00003) return; // ~3 m: GPS jitter, not movement
+        dispatch(setRiderHeading(calculateBearing(previousRiderLocation, riderLocation)));
     }, [riderLocation]);
+
+    // Re-render every 10 s while the order is live so "location delayed" / "On time" stay honest
+    // even when no socket event arrives.
+    const [, setClock] = useState(0);
+    const isLiveOrder = Boolean(currentOrder) && !['DELIVERED', 'CANCELLED'].includes(String(currentOrder?.orderStatus || '').toUpperCase());
+    useEffect(() => {
+        if (!isLiveOrder) return undefined;
+        const id = setInterval(() => setClock((n) => n + 1), 10000);
+        return () => clearInterval(id);
+    }, [isLiveOrder]);
 
     useEffect(() => {
         const fetchStoreLocation = async () => {

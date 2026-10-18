@@ -8,10 +8,10 @@ import {
 } from 'react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import * as Location from 'expo-location';
-import { useDispatch } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { setSelectedAddress } from '../store/slices/locationSlice';
+import { setSavedAddresses, setSelectedAddress } from '../store/slices/locationSlice';
 import { UserService } from '../services';
 import { geocodeAddress, reverseGeocode as mapplsReverseGeocode, searchPlaces } from '../services';
 import MapComponent from '../components/MapComponent';
@@ -35,6 +35,7 @@ import { SaveButton } from './address/SaveButton';
 import { FloatingInput } from './address/FloatingInput';
 import { PlaceSuggestions } from './address/PlaceSuggestions';
 import { useServiceArea } from './address/useServiceArea';
+import { ADDRESS_LABELS, findSavedMatch, normaliseLabel, toClientAddresses } from './address/addressUtils';
 
 const { width, height } = Dimensions.get('window');
 const SAVED_BEAT = 480; // ms the green check shows before navigating back
@@ -42,14 +43,22 @@ const ASPECT_RATIO = width / height;
 const LATITUDE_DELTA = 0.01;
 const LONGITUDE_DELTA = LATITUDE_DELTA * ASPECT_RATIO;
 
-const ADDRESS_TYPES = [
-    { id: 'Home', en: 'Home', hi: 'घर', icon: 'home-variant-outline' },
-    { id: 'Work', en: 'Work', hi: 'काम', icon: 'briefcase-outline' },
-    { id: 'Other', en: 'Other', hi: 'अन्य', icon: 'map-marker-outline' },
-];
+const ADDRESS_TYPES = ADDRESS_LABELS;
+const normaliseType = normaliseLabel;
 
-// Older saved addresses use "Office"; the chip for it is "Work".
-const normaliseType = (t) => (t === 'Office' ? 'Work' : ADDRESS_TYPES.some((a) => a.id === t) ? t : t ? 'Other' : 'Home');
+/** 10-digit Indian mobile from whatever was typed ('' when empty, null when invalid). */
+const cleanPhone = (raw) => {
+    const digits = String(raw || '').replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
+    if (!digits) return '';
+    return /^[6-9]\d{9}$/.test(digits) ? digits : null;
+};
+
+/** A backend without the optional address fields rejects them (forbidNonWhitelisted). */
+const rejectsNewFields = (error) => {
+    if (error?.response?.status !== 400) return false;
+    const msg = error?.response?.data?.message;
+    return (Array.isArray(msg) ? msg.join(' ') : String(msg || '')).includes('should not exist');
+};
 
 const AddAddressScreen = ({ navigation, route }) => {
     const styles = useStyles();
@@ -59,7 +68,12 @@ const AddAddressScreen = ({ navigation, route }) => {
     const mapRef = useRef(null);
     const searchQuery = route.params?.searchQuery || '';
     const editAddress = route.params?.editAddress || null;
-    const addressIndex = route.params?.addressIndex ?? null;
+    const profileUser = useSelector((state) => state.auth?.user);
+    // Saved addresses (server id, or index on an id-less backend) are updated in place; a one-off
+    // pin opened for editing (e.g. from checkout) is saved as a new address.
+    const isSavedEdit = !!editAddress && (
+        /^[a-f\d]{24}$/i.test(String(editAddress.id || '')) || Number.isInteger(editAddress.originalIndex)
+    );
     const { isHi } = useTranslation();
     const serviceArea = useServiceArea();
 
@@ -79,7 +93,13 @@ const AddAddressScreen = ({ navigation, route }) => {
         city: editAddress?.city || 'Gorakhpur',
         pincode: editAddress?.pincode || '',
     });
-    const [house, setHouse] = useState('');
+    const [details, setDetails] = useState({
+        houseNo: editAddress?.houseNo || '',
+        floor: editAddress?.floor || '',
+        landmark: editAddress?.landmark || '',
+        receiverName: editAddress?.receiverName || '',
+        receiverPhone: editAddress?.receiverPhone || '',
+    });
     const [errors, setErrors] = useState({});
     const [searchText, setSearchText] = useState(searchQuery);
     const [suggestions, setSuggestions] = useState([]);
@@ -146,6 +166,23 @@ const AddAddressScreen = ({ navigation, route }) => {
         } else {
             getCurrentLocation();
         }
+    }, []);
+
+    // Receiver defaults to the account holder (signed-in user, else GET /users/me).
+    useEffect(() => {
+        if (details.receiverName && details.receiverPhone) return;
+        let alive = true;
+        const fill = (p) => {
+            if (!alive || !p) return;
+            setDetails((d) => ({
+                ...d,
+                receiverName: d.receiverName || p.name || '',
+                receiverPhone: d.receiverPhone || String(p.phone || '').replace(/^\+91/, ''),
+            }));
+        };
+        if (profileUser?.name && profileUser?.phone) fill(profileUser);
+        else UserService.getProfile().then(fill).catch(() => fill(profileUser));
+        return () => { alive = false; };
     }, []);
 
     // Re-check once the real store location / radius arrive from settings.
@@ -422,6 +459,9 @@ const AddAddressScreen = ({ navigation, route }) => {
         if (!/^\d{6}$/.test(String(addressDetails.pincode || '').trim())) {
             next.pincode = isHi ? '6 अंकों का पिनकोड दर्ज करें' : 'Enter a 6-digit pincode';
         }
+        if (cleanPhone(details.receiverPhone) === null) {
+            next.receiverPhone = isHi ? '10 अंकों का मोबाइल नंबर दर्ज करें' : 'Enter a 10-digit mobile number';
+        }
         setErrors(next);
         return Object.keys(next).length === 0;
     };
@@ -430,42 +470,64 @@ const AddAddressScreen = ({ navigation, route }) => {
         if (!selectedLocation || !isServiceable) return;
         if (!validate()) return;
 
-        const fullAddress = [house.trim(), addressDetails.address.trim()].filter(Boolean).join(', ');
+        const street = addressDetails.address.trim();
         const city = addressDetails.city.trim();
         const pincode = String(addressDetails.pincode).trim();
+        const extras = {
+            houseNo: details.houseNo.trim(),
+            floor: details.floor.trim(),
+            landmark: details.landmark.trim(),
+            receiverName: details.receiverName.trim(),
+            receiverPhone: cleanPhone(details.receiverPhone) || '',
+        };
+        const payload = {
+            type: addressType,
+            address: street,
+            city,
+            pincode,
+            latitude: selectedLocation.latitude,
+            longitude: selectedLocation.longitude,
+            ...extras,
+            // A new address becomes the default; editing keeps the current default.
+            ...(isSavedEdit ? {} : { isDefault: true }),
+        };
+        // Older backend: no optional fields, so fold the flat / floor / landmark into the street.
+        const legacyPayload = () => {
+            const { houseNo, floor, landmark, receiverName, receiverPhone, ...rest } = payload;
+            const address = [houseNo, floor ? `Floor ${floor}` : '', street, landmark ? `Near ${landmark}` : '']
+                .filter(Boolean).join(', ');
+            return { ...rest, address };
+        };
+        const fullAddress = street;
 
         setIsSaving(true);
         try {
-            const isEditing = addressIndex !== null && addressIndex !== undefined;
-
-            if (isEditing) {
-                await UserService.updateAddress(addressIndex, {
-                    type: addressType,
-                    address: fullAddress,
-                    city,
-                    pincode,
-                    isDefault: editAddress?.isDefault ?? true,
-                    latitude: selectedLocation.latitude,
-                    longitude: selectedLocation.longitude,
-                });
-            } else {
-                await UserService.addAddress({
-                    type: addressType,
-                    address: fullAddress,
-                    city,
-                    pincode,
-                    isDefault: true,
-                    latitude: selectedLocation.latitude,
-                    longitude: selectedLocation.longitude,
-                });
+            const send = (body) => (isSavedEdit
+                ? UserService.updateAddress(editAddress, body)
+                : UserService.addAddress(body));
+            let result;
+            try {
+                result = await send(payload);
+            } catch (error) {
+                if (!rejectsNewFields(error)) throw error;
+                result = await send(legacyPayload());
             }
 
-            const formattedAddress = {
+            // Select the address exactly as the server stored it (real id), so checkout and the
+            // saved list agree; fall back to the local copy if the response has no list.
+            const list = Array.isArray(result?.addresses) ? toClientAddresses(result.addresses) : null;
+            if (list) dispatch(setSavedAddresses(list));
+            const stored = list
+                ? (isSavedEdit && list.find((a) => a.id === editAddress.id)) || findSavedMatch(list, payload)
+                : null;
+
+            const formattedAddress = stored || {
                 id: editAddress?.id || `saved-${Date.now()}`,
                 type: addressType,
                 address: fullAddress,
                 city,
                 pincode,
+                ...extras,
                 isDefault: editAddress?.isDefault ?? true,
                 latitude: selectedLocation.latitude,
                 longitude: selectedLocation.longitude,
@@ -494,6 +556,7 @@ const AddAddressScreen = ({ navigation, route }) => {
                 id: `loc-${Date.now()}`,
                 type: addressType,
                 address: fullAddress,
+                ...extras,
                 city: city || 'Gorakhpur',
                 pincode: pincode || '273202',
                 isDefault: true,
@@ -516,6 +579,10 @@ const AddAddressScreen = ({ navigation, route }) => {
 
     const setField = (key) => (text) => {
         setAddressDetails((d) => ({ ...d, [key]: key === 'pincode' ? text.replace(/[^0-9]/g, '') : text }));
+        if (errors[key]) setErrors((e) => ({ ...e, [key]: undefined }));
+    };
+    const setDetail = (key) => (text) => {
+        setDetails((d) => ({ ...d, [key]: key === 'receiverPhone' ? text.replace(/[^0-9+ ]/g, '') : text }));
         if (errors[key]) setErrors((e) => ({ ...e, [key]: undefined }));
     };
 
@@ -586,52 +653,98 @@ const AddAddressScreen = ({ navigation, route }) => {
                             )}
                         </ContentSwap>
 
-                        <View style={styles.types} accessibilityRole="radiogroup">
-                            {ADDRESS_TYPES.map((t) => (
-                                <Chip
-                                    key={t.id}
-                                    label={isHi ? t.hi : t.en}
-                                    selected={addressType === t.id}
-                                    onPress={() => setAddressType(t.id)}
-                                    leftIcon={({ color, size }) => <MaterialCommunityIcons name={t.icon} size={size} color={color} />}
+                        <View style={styles.group}>
+                            <Text variant="micro" color="muted" accessibilityRole="header">{isHi ? 'पता' : 'Address'}</Text>
+                            <View style={styles.pair}>
+                                <FloatingInput
+                                    label={isHi ? 'मकान / फ्लैट नं.' : 'House / flat no.'}
+                                    value={details.houseNo}
+                                    onChangeText={setDetail('houseNo')}
+                                    autoCapitalize="words"
+                                    returnKeyType="next"
+                                    maxLength={60}
+                                    style={styles.grow}
                                 />
-                            ))}
-                        </View>
-
-                        <FloatingInput
-                            label={isHi ? 'मकान / फ्लैट / मंज़िल (वैकल्पिक)' : 'House / flat / floor (optional)'}
-                            value={house}
-                            onChangeText={setHouse}
-                            autoCapitalize="words"
-                            returnKeyType="next"
-                            maxLength={100}
-                        />
-                        <FloatingInput
-                            label={isHi ? 'क्षेत्र / सड़क / इलाका' : 'Area / street / locality'}
-                            value={addressDetails.address}
-                            onChangeText={setField('address')}
-                            error={errors.address}
-                            autoCapitalize="words"
-                            maxLength={380}
-                        />
-                        <View style={styles.pair}>
+                                <FloatingInput
+                                    label={isHi ? 'मंज़िल' : 'Floor'}
+                                    value={details.floor}
+                                    onChangeText={setDetail('floor')}
+                                    returnKeyType="next"
+                                    maxLength={30}
+                                    style={styles.flex}
+                                />
+                            </View>
                             <FloatingInput
-                                label={isHi ? 'शहर' : 'City'}
-                                value={addressDetails.city}
-                                onChangeText={setField('city')}
-                                error={errors.city}
+                                label={isHi ? 'क्षेत्र / सड़क / इलाका' : 'Area / street / locality'}
+                                value={addressDetails.address}
+                                onChangeText={setField('address')}
+                                error={errors.address}
                                 autoCapitalize="words"
-                                maxLength={100}
-                                style={styles.flex}
+                                maxLength={380}
                             />
                             <FloatingInput
-                                label={isHi ? 'पिनकोड' : 'Pincode'}
-                                value={String(addressDetails.pincode || '')}
-                                onChangeText={setField('pincode')}
-                                error={errors.pincode}
-                                keyboardType="number-pad"
-                                maxLength={6}
-                                style={styles.flex}
+                                label={isHi ? 'लैंडमार्क (वैकल्पिक)' : 'Landmark (optional)'}
+                                value={details.landmark}
+                                onChangeText={setDetail('landmark')}
+                                autoCapitalize="words"
+                                maxLength={120}
+                            />
+                            <View style={styles.pair}>
+                                <FloatingInput
+                                    label={isHi ? 'शहर' : 'City'}
+                                    value={addressDetails.city}
+                                    onChangeText={setField('city')}
+                                    error={errors.city}
+                                    autoCapitalize="words"
+                                    maxLength={100}
+                                    style={styles.flex}
+                                />
+                                <FloatingInput
+                                    label={isHi ? 'पिनकोड' : 'Pincode'}
+                                    value={String(addressDetails.pincode || '')}
+                                    onChangeText={setField('pincode')}
+                                    error={errors.pincode}
+                                    keyboardType="number-pad"
+                                    maxLength={6}
+                                    style={styles.flex}
+                                />
+                            </View>
+                        </View>
+
+                        <View style={styles.group}>
+                            <Text variant="micro" color="muted" accessibilityRole="header">{isHi ? 'इस नाम से सहेजें' : 'Save as'}</Text>
+                            <View style={styles.types} accessibilityRole="radiogroup">
+                                {ADDRESS_TYPES.map((t) => (
+                                    <Chip
+                                        key={t.id}
+                                        label={isHi ? t.hi : t.en}
+                                        selected={addressType === t.id}
+                                        onPress={() => setAddressType(t.id)}
+                                        leftIcon={({ color, size }) => <MaterialCommunityIcons name={t.icon} size={size} color={color} />}
+                                    />
+                                ))}
+                            </View>
+                        </View>
+
+                        <View style={styles.group}>
+                            <Text variant="micro" color="muted" accessibilityRole="header">{isHi ? 'ऑर्डर कौन लेगा' : 'Receiver details'}</Text>
+                            <FloatingInput
+                                label={isHi ? 'नाम' : 'Name'}
+                                value={details.receiverName}
+                                onChangeText={setDetail('receiverName')}
+                                autoCapitalize="words"
+                                autoComplete="name"
+                                maxLength={80}
+                            />
+                            <FloatingInput
+                                label={isHi ? 'मोबाइल नंबर' : 'Phone number'}
+                                value={details.receiverPhone}
+                                onChangeText={setDetail('receiverPhone')}
+                                error={errors.receiverPhone}
+                                hint={isHi ? 'डिलीवरी पार्टनर इस नंबर पर कॉल करेगा' : 'The delivery partner calls this number'}
+                                keyboardType="phone-pad"
+                                autoComplete="tel"
+                                maxLength={14}
                             />
                         </View>
 
@@ -759,4 +872,6 @@ const useStyles = makeStyles((t) => ({
     unserviceable: { borderRadius: radii.card, backgroundColor: t.colors.surfaceSunken, paddingVertical: space.sm },
     types: { flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' },
     pair: { flexDirection: 'row', gap: space.md, alignItems: 'flex-start' },
+    grow: { flex: 1.6 },
+    group: { gap: space.md },
 }));

@@ -226,6 +226,7 @@ export const FreshSection = memo(({ section, language, labels, addLabel, soldOut
     return (
         <View style={styles.editorialSection}>
             <HomeSectionHeader
+                title={section.title}
                 lead={section.lead}
                 emphasis={section.emphasis}
                 trail={section.trail}
