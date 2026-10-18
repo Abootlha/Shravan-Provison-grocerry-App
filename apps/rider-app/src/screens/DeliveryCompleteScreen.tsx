@@ -1,184 +1,118 @@
-import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, Animated } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { COLORS, SPACING } from '../utils/constants';
+import React, { useEffect, useRef } from 'react';
+import { Animated, BackHandler, ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { AppText, Button, Card, Divider } from '../components/ui';
+import { useAppSelector } from '../hooks/useAuth';
+import { spacing, useTheme } from '../theme';
+import { formatMoney, formatTime } from '../utils/format';
+import { riderEarning } from '../utils/orderFlow';
 import type { DeliveryCompleteScreenProps } from '../types/navigation';
 
-export const DeliveryCompleteScreen: React.FC<DeliveryCompleteScreenProps> = ({
-  navigation,
-  route,
-}) => {
-  const { order, tip } = route.params;
-  const scaleAnim = React.useRef(new Animated.Value(0)).current;
-  const opacityAnim = React.useRef(new Animated.Value(0)).current;
+export const DeliveryCompleteScreen: React.FC<DeliveryCompleteScreenProps> = ({ navigation, route }) => {
+  const { colors: c } = useTheme();
+  const insets = useSafeAreaInsets();
+  const { order } = route.params;
+  const today = useAppSelector((s) => s.metrics.data?.today);
+  const online = useAppSelector((s) => Boolean(s.auth.user?.isOnline));
+  const scale = useRef(new Animated.Value(0.6)).current;
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        tension: 50,
-        friction: 7,
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacityAnim, {
-        toValue: 1,
-        duration: 500,
-        delay: 300,
-        useNativeDriver: true,
-      }),
-    ]).start();
+    Animated.spring(scale, { toValue: 1, useNativeDriver: true, friction: 5 }).start();
+  }, [scale]);
 
-    const timer = setTimeout(() => {
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'Home' }],
-      });
-    }, 5000);
+  const goHome = () => {
+    navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+    return true;
+  };
 
-    return () => clearTimeout(timer);
-  }, [navigation, scaleAnim, opacityAnim]);
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', goHome);
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const earning = riderEarning(order);
+  const collected = order.paymentMethod === 'COD' ? order.totalAmount : 0;
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <Animated.View
-          style={[
-            styles.iconContainer,
-            { transform: [{ scale: scaleAnim }] },
-          ]}
-        >
-          <Text style={styles.icon}>✓</Text>
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.xxxl }]}>
+        <Animated.View style={[styles.badge, { backgroundColor: c.success, transform: [{ scale }] }]}>
+          <MaterialCommunityIcons name="check-bold" size={56} color="#FFFFFF" />
         </Animated.View>
+        <AppText variant="h1" align="center" style={{ marginTop: spacing.xl }}>
+          Delivered
+        </AppText>
+        <AppText variant="body" tone="muted" align="center" style={{ marginTop: spacing.xs }}>
+          {order.orderNumber}
+          {order.deliveredAt ? ` · ${formatTime(order.deliveredAt)}` : ''}
+        </AppText>
 
-        <Animated.View style={[styles.textContainer, { opacity: opacityAnim }]}>
-          <Text style={styles.title}>Delivery Complete!</Text>
-          <Text style={styles.subtitle}>
-            Order #{order.orderNumber} has been delivered successfully
-          </Text>
-        </Animated.View>
-
-        <Animated.View style={[styles.earningsCard, { opacity: opacityAnim }]}>
-          <Text style={styles.earningsLabel}>You Earned</Text>
-          <Text style={styles.earningsValue}>
-            ₹{(order.deliveryFee + (tip || 0)).toFixed(2)}
-          </Text>
-          <View style={styles.breakdown}>
-            <View style={styles.breakdownItem}>
-              <Text style={styles.breakdownLabel}>Delivery Fee</Text>
-              <Text style={styles.breakdownValue}>₹{order.deliveryFee.toFixed(2)}</Text>
-            </View>
-            {tip && tip > 0 && (
-              <View style={styles.breakdownItem}>
-                <Text style={styles.breakdownLabel}>Tip</Text>
-                <Text style={[styles.breakdownValue, { color: COLORS.success }]}>
-                  +₹{tip.toFixed(2)}
-                </Text>
-              </View>
-            )}
+        <Card style={{ marginTop: spacing.xxl, gap: spacing.md }}>
+          <View style={styles.row}>
+            <AppText variant="body" tone="muted">
+              You earned
+            </AppText>
+            <AppText variant="h1" numeric tone="success">
+              {formatMoney(earning)}
+            </AppText>
           </View>
-        </Animated.View>
-
-        <Animated.View style={[styles.footer, { opacity: opacityAnim }]}>
-          <Text style={styles.footerText}>Redirecting to home...</Text>
-          <Text style={styles.skipText}>Tap anywhere to continue</Text>
-        </Animated.View>
+          <AppText variant="caption" tone="subtle">
+            Delivery fee {formatMoney(order.deliveryFee)}
+            {order.tip ? ` + tip ${formatMoney(order.tip)}` : ''}. Final payout is confirmed by the store.
+          </AppText>
+          {collected > 0 ? (
+            <>
+              <Divider />
+              <View style={styles.row}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                  <MaterialCommunityIcons name="cash-multiple" size={20} color={c.warningText} />
+                  <AppText variant="body" weight="semibold">
+                    Cash collected
+                  </AppText>
+                </View>
+                <AppText variant="h3" numeric>
+                  {formatMoney(collected)}
+                </AppText>
+              </View>
+              <AppText variant="caption" tone="subtle">
+                Hand this cash over to the store at the end of your shift.
+              </AppText>
+            </>
+          ) : null}
+          {today ? (
+            <>
+              <Divider />
+              <View style={styles.row}>
+                <AppText variant="bodySm" tone="muted">
+                  Today so far
+                </AppText>
+                <AppText variant="bodySm" weight="semibold" numeric>
+                  {today.deliveries} deliveries · {formatMoney(today.earnings)}
+                </AppText>
+              </View>
+            </>
+          ) : null}
+        </Card>
+      </ScrollView>
+      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.lg }]}>
+        <Button label={online ? 'Back to orders' : 'Done'} icon="home" onPress={goHome} />
       </View>
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.success,
-  },
-  content: {
-    flex: 1,
+  content: { padding: spacing.xl, alignItems: 'stretch', maxWidth: 560, width: '100%', alignSelf: 'center' },
+  badge: {
+    width: 104,
+    height: 104,
+    borderRadius: 52,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: SPACING.lg,
+    alignSelf: 'center',
   },
-  iconContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: COLORS.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 32,
-  },
-  icon: {
-    fontSize: 64,
-    color: COLORS.success,
-    fontWeight: '700',
-  },
-  textContainer: {
-    alignItems: 'center',
-    marginBottom: 32,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: COLORS.surface,
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: COLORS.surface,
-    opacity: 0.9,
-    textAlign: 'center',
-  },
-  earningsCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: SPACING.lg,
-    alignItems: 'center',
-    width: '100%',
-    marginBottom: 32,
-  },
-  earningsLabel: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginBottom: 8,
-  },
-  earningsValue: {
-    fontSize: 36,
-    fontWeight: '700',
-    color: COLORS.success,
-    marginBottom: 16,
-  },
-  breakdown: {
-    width: '100%',
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    paddingTop: 16,
-  },
-  breakdownItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  breakdownLabel: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-  },
-  breakdownValue: {
-    fontSize: 14,
-    color: COLORS.text,
-    fontWeight: '500',
-  },
-  footer: {
-    alignItems: 'center',
-  },
-  footerText: {
-    fontSize: 14,
-    color: COLORS.surface,
-    opacity: 0.8,
-  },
-  skipText: {
-    fontSize: 12,
-    color: COLORS.surface,
-    opacity: 0.6,
-    marginTop: 4,
-  },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
+  footer: { paddingHorizontal: spacing.xl, maxWidth: 560, width: '100%', alignSelf: 'center' },
 });

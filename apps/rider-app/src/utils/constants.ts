@@ -30,7 +30,8 @@ export const RIDER_SERVICE_URL = resolveLocalhost(extra.RIDER_SERVICE_URL) || AP
 
 export const ORDER_SERVICE_URL = resolveLocalhost(extra.ORDER_SERVICE_URL) || API_BASE_URL;
 
-export const SOCKET_URL = resolveLocalhost(extra.TRACKING_URL) || (IS_PRODUCTION ? '' : resolveLocalhost(DEV_TRACKING_URL)!);
+export const SOCKET_URL =
+  resolveLocalhost(extra.TRACKING_URL) || (IS_PRODUCTION ? '' : resolveLocalhost(DEV_TRACKING_URL)!);
 
 if (IS_PRODUCTION) {
   const misconfigured = [AUTH_SERVICE_URL, RIDER_SERVICE_URL, ORDER_SERVICE_URL, SOCKET_URL].filter(
@@ -44,59 +45,37 @@ if (IS_PRODUCTION) {
   }
 }
 
+/** Socket location cadence while online (the server accepts one every 2.5 s). */
 export const LOCATION_UPDATE_INTERVAL = 5000;
 export const LOCATION_UPDATE_THROTTLE = 5000;
 
-export const MAPMYINDIA_APP_ID = 'MAPMYINDIA_APP_ID';
-export const MAPMYINDIA_APP_CODE = 'MAPMYINDIA_APP_CODE';
-export const MAPMYINDIA_MAP_SDK_KEY = 'MAPMYINDIA_MAP_SDK_KEY';
+/**
+ * Optional key for client-side Google Directions. The backend already sends a
+ * route for the active leg; this is only a fallback. Without either, the map
+ * draws a straight line.
+ */
+export const GOOGLE_MAPS_API_KEY: string = extra.GOOGLE_MAPS_API_KEY || '';
 
-export const COLORS = {
-  primary: '#1E3A8A',
-  primaryDark: '#1E40AF',
-  secondary: '#F59E0B',
-  success: '#10B981',
-  error: '#EF4444',
-  warning: '#F59E0B',
-  background: '#F3F4F6',
-  surface: '#FFFFFF',
-  text: '#111827',
-  textSecondary: '#6B7280',
-  border: '#E5E7EB',
-  disabled: '#9CA3AF',
-} as const;
+/** Seconds a rider has to accept an order offer before it is declined for them. */
+export const OFFER_TIMEOUT_SECONDS = 45;
 
-export const FONTS = {
-  regular: 'System',
-  medium: 'System',
-  bold: 'System',
-} as const;
-
-export const SPACING = {
-  xs: 4,
-  sm: 8,
-  md: 16,
-  lg: 24,
-  xl: 32,
-  xxl: 48,
-} as const;
+/** Server-side OTP attempt limit (PATCH /orders/:id/status). */
+export const DELIVERY_OTP_MAX_ATTEMPTS = 5;
 
 export const ORDER_STATUS_LABELS: Record<string, string> = {
-  confirmed: 'Awaiting Acceptance',
+  confirmed: 'New request',
   assigned: 'Accepted',
-  packed: 'Packed',
-  picked_up: 'Picked Up',
-  out_for_delivery: 'Out for Delivery',
+  packed: 'Ready for pickup',
+  picked_up: 'Picked up',
+  out_for_delivery: 'On the way',
   delivered: 'Delivered',
   cancelled: 'Cancelled',
 };
 
-export const ORDER_STATUS_COLORS: Record<string, string> = {
-  confirmed: COLORS.warning,
-  assigned: COLORS.primary,
-  packed: '#F97316',
-  picked_up: '#8B5CF6',
-  out_for_delivery: '#EC4899',
-  delivered: COLORS.success,
-  cancelled: COLORS.error,
-};
+export const REJECT_REASONS = [
+  'Too far from the store',
+  'Vehicle issue',
+  'Already on a break',
+  'Unsafe area or weather',
+  'Personal emergency',
+] as const;

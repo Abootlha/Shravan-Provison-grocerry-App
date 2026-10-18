@@ -1,179 +1,125 @@
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
-  ActivityIndicator,
-} from 'react-native';
-import { COLORS, SPACING } from '../utils/constants';
+import React, { useEffect, useRef, useState } from 'react';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { AppText, Banner, Button } from '../components/ui';
+import { TextField } from '../components/TextField';
 import { useAppDispatch, useAppSelector } from '../hooks/useAuth';
-import { login } from '../store/slices/authSlice';
+import { clearError, clearSessionNotice, login } from '../store/slices/authSlice';
+import { radii, spacing, useTheme } from '../theme';
 import type { LoginScreenProps } from '../types/navigation';
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const { colors: c } = useTheme();
+  const insets = useSafeAreaInsets();
   const dispatch = useAppDispatch();
   const { loading, error, sessionNotice } = useAppSelector((state) => state.auth);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [touched, setTouched] = useState(false);
+  const passwordRef = useRef<TextInput>(null);
 
-  const handleLogin = async () => {
-    if (!username.trim() || !password.trim()) {
-      Alert.alert('Error', 'Please enter both username and password');
-      return;
-    }
+  useEffect(() => {
+    dispatch(clearError());
+  }, [dispatch]);
 
+  const usernameError = touched && !username.trim() ? 'Enter your username' : null;
+  const passwordError = touched && !password ? 'Enter your password' : null;
+
+  const submit = async () => {
+    setTouched(true);
+    if (!username.trim() || !password) return;
+    dispatch(clearSessionNotice());
     const result = await dispatch(login({ username: username.trim(), password }));
-    if (login.fulfilled.match(result)) {
-      navigation.replace('Home');
-    }
+    if (login.fulfilled.match(result)) navigation.replace('Home');
   };
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1, backgroundColor: c.bg }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.content}>
-        <View style={styles.header}>
-          <Text style={styles.logo}>SK</Text>
-          <Text style={styles.title}>Welcome Rider</Text>
-          <Text style={styles.subtitle}>Log in with your rider credentials</Text>
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: insets.top + spacing.xxxl, paddingBottom: insets.bottom + spacing.xl },
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={[styles.mark, { backgroundColor: c.brand }]}>
+          <MaterialCommunityIcons name="moped" size={36} color="#FFFFFF" />
         </View>
+        <AppText variant="h1" style={{ marginTop: spacing.xl }}>
+          Delivery partner login
+        </AppText>
+        <AppText variant="body" tone="muted" style={{ marginTop: spacing.xs }}>
+          Use the username and password from your store manager.
+        </AppText>
 
-        {sessionNotice ? (
-          <View style={styles.notice} accessibilityRole="alert">
-            <Text style={styles.noticeText}>{sessionNotice}</Text>
-          </View>
-        ) : null}
+        {sessionNotice ? <Banner tone="warning" title={sessionNotice} style={{ marginTop: spacing.xl }} /> : null}
 
-        <View style={styles.form}>
-          <TextInput
-            style={styles.input}
+        <View style={{ gap: spacing.lg, marginTop: spacing.xxl }}>
+          <TextField
+            label="Username"
+            icon="account-outline"
             value={username}
             onChangeText={setUsername}
-            placeholder="Username"
-            placeholderTextColor={COLORS.disabled}
+            placeholder="e.g. ravi.kumar"
             autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="username"
+            textContentType="username"
+            returnKeyType="next"
+            onSubmitEditing={() => passwordRef.current?.focus()}
+            error={usernameError}
           />
-
-          <TextInput
-            style={styles.input}
+          <TextField
+            ref={passwordRef}
+            label="Password"
+            icon="lock-outline"
             value={password}
             onChangeText={setPassword}
-            placeholder="Password"
-            placeholderTextColor={COLORS.disabled}
-            secureTextEntry
+            placeholder="Your password"
+            secureToggle
+            autoCapitalize="none"
+            autoComplete="password"
+            textContentType="password"
+            returnKeyType="go"
+            onSubmitEditing={submit}
+            error={passwordError}
           />
-
-          {error && <Text style={styles.error}>{error}</Text>}
-
-          <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleLogin}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color={COLORS.surface} />
-            ) : (
-              <Text style={styles.buttonText}>Login</Text>
-            )}
-          </TouchableOpacity>
+          {error ? <Banner tone="danger" title={error} /> : null}
+          <Button label="Log in" onPress={submit} loading={loading} testID="login-submit" />
         </View>
 
-        <Text style={styles.terms}>
-          By continuing, you agree to our Terms of Service and Privacy Policy
-        </Text>
-      </View>
+        <View style={styles.divider}>
+          <View style={[styles.line, { backgroundColor: c.border }]} />
+          <AppText variant="caption" tone="subtle">
+            OR
+          </AppText>
+          <View style={[styles.line, { backgroundColor: c.border }]} />
+        </View>
+
+        <Button
+          label="Log in with phone OTP"
+          icon="cellphone-message"
+          variant="outline"
+          onPress={() => {
+            dispatch(clearError());
+            navigation.navigate('OTP');
+          }}
+        />
+        <AppText variant="caption" tone="subtle" align="center" style={{ marginTop: spacing.md }}>
+          OTP login works for the phone number registered on your rider account.
+        </AppText>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  content: {
-    flex: 1,
-    padding: SPACING.lg,
-    justifyContent: 'center',
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 48,
-  },
-  logo: {
-    fontSize: 56,
-    fontWeight: '700',
-    color: COLORS.primary,
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: COLORS.text,
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-  },
-  form: {
-    marginBottom: 24,
-  },
-  input: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    marginBottom: 16,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    fontSize: 16,
-    color: COLORS.text,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  notice: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.error,
-    padding: SPACING.md,
-    marginBottom: SPACING.lg,
-  },
-  noticeText: {
-    color: COLORS.error,
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  error: {
-    color: COLORS.error,
-    fontSize: 14,
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  button: {
-    backgroundColor: COLORS.primary,
-    paddingVertical: SPACING.md,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  buttonText: {
-    color: COLORS.surface,
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  terms: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-  },
+  content: { paddingHorizontal: spacing.xl, flexGrow: 1, maxWidth: 520, width: '100%', alignSelf: 'center' },
+  mark: { width: 64, height: 64, borderRadius: radii.lg, alignItems: 'center', justifyContent: 'center' },
+  divider: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginVertical: spacing.xl },
+  line: { flex: 1, height: 1 },
 });

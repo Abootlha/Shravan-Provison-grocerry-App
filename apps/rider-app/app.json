@@ -5,11 +5,11 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#1E3A8A"
+      "backgroundColor": "#6C3CF4"
     },
     "ios": {
       "supportsTablet": false,
@@ -20,13 +20,17 @@
         "NSLocationAlwaysAndWhenInUseUsageDescription": "We need your location to track deliveries and show your position on the map.",
         "UIBackgroundModes": [
           "location"
+        ],
+        "LSApplicationQueriesSchemes": [
+          "comgooglemaps",
+          "tel"
         ]
       }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#1E3A8A"
+        "backgroundColor": "#6C3CF4"
       },
       "package": "com.shravankirana.rider",
       "permissions": [
@@ -35,8 +39,8 @@
         "ACCESS_BACKGROUND_LOCATION",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_LOCATION",
-        "CALL_PHONE",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "VIBRATE"
       ]
     },
     "plugins": [
@@ -51,7 +55,7 @@
       [
         "expo-notifications",
         {
-          "color": "#1E3A8A"
+          "color": "#6C3CF4"
         }
       ],
       "expo-secure-store"

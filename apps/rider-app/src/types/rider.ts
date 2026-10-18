@@ -1,45 +1,47 @@
+export const VEHICLE_TYPES = ['Two Wheeler', 'Electric Bike', 'Bicycle', 'Three Wheeler', 'Four Wheeler'] as const;
+
+export type VehicleType = (typeof VEHICLE_TYPES)[number];
+
+export type RiderStatus = 'available' | 'busy' | 'offline';
+
 export interface Rider {
   id: string;
   name: string;
+  username?: string;
   phone: string;
-  email?: string;
-  photo?: string;
-  vehicle: {
-    type: 'bike' | 'scooter' | 'cycle';
-    number?: string;
-    make?: string;
-    model?: string;
-  };
-  documents: {
-    aadhar?: string;
-    drivingLicense?: string;
-    rcBook?: string;
-  };
+  vehicleType?: string;
+  vehicleNumber?: string;
+  status: RiderStatus;
+  /** available or busy. Mirrors the server, never assumed locally. */
   isOnline: boolean;
+  isActive?: boolean;
   rating: number;
   totalDeliveries: number;
-  totalEarnings?: number;
-  totalOrders?: number;
-  acceptanceRate: number;
-  createdAt: string;
+  createdAt?: string;
 }
 
-export interface RiderStats {
-  todayDeliveries: number;
-  todayEarnings: number;
-  weekDeliveries: number;
-  weekEarnings: number;
-  monthDeliveries: number;
-  monthEarnings: number;
-  rating: number;
-  acceptanceRate: number;
+export interface PeriodMetrics {
+  deliveries: number;
+  earnings: number;
 }
 
-export interface RiderLocation {
-  riderId: string;
+export interface RiderMetrics {
+  totalDeliveries: number;
+  avgRating: number;
+  acceptanceRate: number;
+  currency: string;
+  timezone?: string;
+  earningsBasis?: string;
+  today: PeriodMetrics;
+  week: PeriodMetrics;
+  month: PeriodMetrics;
+}
+
+export interface LiveLocation {
   latitude: number;
   longitude: number;
-  heading?: number;
-  speed?: number;
-  timestamp: string;
+  heading: number | null;
+  speed: number | null;
+  accuracy: number | null;
+  timestamp: number;
 }

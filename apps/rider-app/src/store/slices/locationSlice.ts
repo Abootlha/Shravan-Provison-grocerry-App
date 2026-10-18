@@ -1,19 +1,23 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import type { Coordinates } from '../../types/order';
+import type { LiveLocation } from '../../types/rider';
+
+export type LocationPermission = 'unknown' | 'granted' | 'denied' | 'services_off';
 
 interface LocationState {
-  currentLocation: Coordinates | null;
+  current: LiveLocation | null;
+  /** True while the foreground GPS watcher is running. */
   isTracking: boolean;
-  heading: number | null;
-  speed: number | null;
+  permission: LocationPermission;
+  /** Background tracking could not start (e.g. "Allow all the time" not granted). */
+  backgroundWarning: string | null;
   error: string | null;
 }
 
 const initialState: LocationState = {
-  currentLocation: null,
+  current: null,
   isTracking: false,
-  heading: null,
-  speed: null,
+  permission: 'unknown',
+  backgroundWarning: null,
   error: null,
 };
 
@@ -21,36 +25,25 @@ const locationSlice = createSlice({
   name: 'location',
   initialState,
   reducers: {
-    setCurrentLocation: (state, action: PayloadAction<Coordinates>) => {
-      state.currentLocation = action.payload;
+    locationUpdated: (state, action: PayloadAction<LiveLocation>) => {
+      state.current = action.payload;
     },
-    setTracking: (state, action: PayloadAction<boolean>) => {
+    trackingChanged: (state, action: PayloadAction<boolean>) => {
       state.isTracking = action.payload;
     },
-    setHeading: (state, action: PayloadAction<number | null>) => {
-      state.heading = action.payload;
+    permissionChanged: (state, action: PayloadAction<LocationPermission>) => {
+      state.permission = action.payload;
     },
-    setSpeed: (state, action: PayloadAction<number | null>) => {
-      state.speed = action.payload;
+    backgroundWarningChanged: (state, action: PayloadAction<string | null>) => {
+      state.backgroundWarning = action.payload;
     },
-    setError: (state, action: PayloadAction<string | null>) => {
+    locationError: (state, action: PayloadAction<string | null>) => {
       state.error = action.payload;
-    },
-    clearLocation: (state) => {
-      state.currentLocation = null;
-      state.heading = null;
-      state.speed = null;
     },
   },
 });
 
-export const {
-  setCurrentLocation,
-  setTracking,
-  setHeading,
-  setSpeed,
-  setError,
-  clearLocation,
-} = locationSlice.actions;
+export const { locationUpdated, trackingChanged, permissionChanged, backgroundWarningChanged, locationError } =
+  locationSlice.actions;
 
 export default locationSlice.reducer;

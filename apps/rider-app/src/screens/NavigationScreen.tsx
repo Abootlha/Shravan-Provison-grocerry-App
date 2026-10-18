@@ -1,604 +1,451 @@
-import React, { useCallback, useEffect, useState, useRef } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Dimensions,
-  Alert,
-  ActivityIndicator,
-  StatusBar,
-  Platform,
-  Modal,
-  TextInput,
-} from 'react-native';
-import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { COLORS, SPACING } from '../utils/constants';
-import { openMapMyIndiaNavigation } from '../utils/mapmyindia';
-import { useOrders } from '../hooks/useOrders';
-import { useLocation } from '../hooks/useLocation';
+import { AppText, Banner, Button, EmptyState, IconButton, Pill, Skeleton } from '../components/ui';
+import { PaymentCallout, StatusStepper } from '../components/order';
+import { SlideToConfirm } from '../components/SlideToConfirm';
+import { OtpSheet } from '../components/OtpSheet';
+import { RejectSheet } from '../components/RejectSheet';
+import { DeliveryMap, DeliveryMapHandle } from '../components/DeliveryMap';
+import { useAppDispatch, useAppSelector } from '../hooks/useAuth';
+import { useOrderById } from '../hooks/useOrderById';
+import { useRouteLine } from '../hooks/useRouteLine';
+import { rejectOrder, updateOrderStatus } from '../store/slices/orderSlice';
+import { fetchMetrics } from '../store/slices/metricsSlice';
+import { elevation, radii, spacing, useTheme } from '../theme';
+import { callPhone, distanceKm, formatDistance, formatMoney, formatTime, openNavigation } from '../utils/format';
+import { addressDetails, cashToCollect, destinationOf, stageOf } from '../utils/orderFlow';
 import type { NavigationScreenProps } from '../types/navigation';
+import type { OrderStatus } from '../types/order';
 
-const { width, height } = Dimensions.get('window');
+export const NavigationScreen: React.FC<NavigationScreenProps> = ({ navigation, route }) => {
+  const theme = useTheme();
+  const c = theme.colors;
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const dispatch = useAppDispatch();
+  const { orderId } = route.params;
+  const { order, ended, loading, error, reload } = useOrderById(orderId);
+  const rider = useAppSelector((s) => s.location.current);
+  const locationPermission = useAppSelector((s) => s.location.permission);
+  const pendingOrderId = useAppSelector((s) => s.orders.pendingOrderId);
+  const mapRef = useRef<DeliveryMapHandle>(null);
+  const [follow, setFollow] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const [sheetHeight, setSheetHeight] = useState(320);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [otpOpen, setOtpOpen] = useState(false);
+  const [releaseOpen, setReleaseOpen] = useState(false);
 
-const ZEPTO_PURPLE = '#7C3AED';
-const ZEPTO_GREEN = '#10B981';
+  const destination = order ? destinationOf(order) : null;
+  const riderCoords = rider ? { latitude: rider.latitude, longitude: rider.longitude } : null;
+  const routeOrigin =
+    destination?.leg === 'customer' && !riderCoords ? (order?.pickup.address.coordinates ?? null) : riderCoords;
+  const routeLine = useRouteLine(routeOrigin, destination?.coords ?? null, order?.routeCoordinates ?? []);
 
-const MAP_STYLE_SILVER = [
-  { featureType: 'all', elementType: 'labels.text.fill', stylers: [{ color: '#616161' }] },
-  { featureType: 'all', elementType: 'labels.text.stroke', stylers: [{ color: '#f5f5f5' }] },
-  { featureType: 'administrative.land_parcel', elementType: 'labels.text.fill', stylers: [{ color: '#bdbdbd' }] },
-  { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#eeeeee' }] },
-  { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#757575' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
-  { featureType: 'road.arterial', elementType: 'labels.text.fill', stylers: [{ color: '#757575' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#dadada' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#c9c9c9' }] },
-];
+  const goHome = () => navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+  const back = () => (navigation.canGoBack() ? navigation.goBack() : goHome());
 
-const CustomMarkerView = ({ icon, color, label }: { icon: any; color: string; label: string }) => (
-  <View style={styles.markerContainer}>
-    <View style={[styles.markerOuter, { backgroundColor: color }]}>
-      <View style={styles.markerInner}>
-        <MaterialCommunityIcons name={icon} size={18} color="white" />
+  if (ended) {
+    return (
+      <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top }}>
+        <EmptyState
+          icon={ended.kind === 'cancelled' ? 'close-circle-outline' : 'account-switch-outline'}
+          title={
+            ended.kind === 'cancelled'
+              ? `Order ${ended.orderNumber ?? ''} was cancelled`.replace(/\s+/g, ' ')
+              : ended.self
+                ? 'Order released'
+                : `Order ${ended.orderNumber ?? ''} was reassigned`.replace(/\s+/g, ' ')
+          }
+          message={
+            ended.kind === 'cancelled'
+              ? `${ended.reason ? `Reason: ${ended.reason}. ` : ''}If you already picked it up, return the items to the store.`
+              : 'You no longer need to deliver this order.'
+          }
+          actionLabel="Back to home"
+          onAction={goHome}
+          style={{ flex: 1, justifyContent: 'center' }}
+        />
       </View>
-    </View>
-    <View style={styles.markerLabel}>
-      <Text style={styles.markerLabelText}>{label}</Text>
-    </View>
-  </View>
-);
-
-export const NavigationScreen: React.FC<NavigationScreenProps> = ({
-  navigation,
-  route,
-}) => {
-  const { order } = route.params;
-  const { updateStatus, completeDelivery, currentOrder, error } = useOrders();
-  const { currentLocation } = useLocation();
-  const [loading, setLoading] = useState(false);
-  const [otpModalVisible, setOtpModalVisible] = useState(false);
-  const [deliveryOtpInput, setDeliveryOtpInput] = useState('');
-  const mapRef = useRef<MapView>(null);
-
-  const activeOrder = currentOrder?.id === order.id ? currentOrder : order;
-  const activeOrderId = activeOrder.id || order.id;
-
-  const pickupCoords = order.pickup.address.coordinates;
-  const deliveryCoords = order.delivery.address.coordinates;
-
-  const handleOpenMapMyIndia = useCallback(async () => {
-    const startLat = currentLocation?.latitude || 0;
-    const startLng = currentLocation?.longitude || 0;
-    const endLat = ['picked_up', 'out_for_delivery'].includes(activeOrder.status)
-      ? deliveryCoords.latitude
-      : pickupCoords.latitude;
-    const endLng = ['picked_up', 'out_for_delivery'].includes(activeOrder.status)
-      ? deliveryCoords.longitude
-      : pickupCoords.longitude;
-
-    try {
-      await openMapMyIndiaNavigation({
-        startLat,
-        startLng,
-        endLat,
-        endLng,
-        vehicleType: 'bike',
-      });
-    } catch {
-      Alert.alert('Error', 'Unable to open navigation');
-    }
-  }, [currentLocation, activeOrder.status, pickupCoords, deliveryCoords]);
-
-  const handleMarkPickedUp = useCallback(async () => {
-    setLoading(true);
-    const result = await updateStatus(activeOrderId, 'picked_up', currentLocation ?? undefined);
-    setLoading(false);
-    if (result) {
-      Alert.alert('Success', 'Order marked as picked up!');
-    } else {
-      Alert.alert('Unable to update status', error || 'The pickup status could not be updated. Please try again.');
-    }
-  }, [updateStatus, activeOrderId, currentLocation, error]);
-
-  const handleStartDelivery = useCallback(async () => {
-    setLoading(true);
-    const result = await updateStatus(activeOrderId, 'out_for_delivery', currentLocation ?? undefined);
-    setLoading(false);
-    if (result) {
-      Alert.alert('Success', 'Order marked as out for delivery!');
-    } else {
-      Alert.alert('Unable to update status', error || 'The delivery status could not be updated. Please try again.');
-    }
-  }, [updateStatus, activeOrderId, currentLocation, error]);
-
-  const handleMarkDelivered = useCallback(async () => {
-    const otp = deliveryOtpInput.trim();
-    if (!/^\d{4}$/.test(otp)) {
-      Alert.alert('Invalid OTP', 'Please enter the 4-digit delivery OTP shown in the customer app.');
-      return;
-    }
-
-    setLoading(true);
-    // The server verifies the OTP; the rider never sees the expected value.
-    const { order: result, error: deliveryError } = await completeDelivery(
-      activeOrderId,
-      otp,
-      currentLocation ?? undefined
     );
-    setLoading(false);
-    if (result) {
-      setOtpModalVisible(false);
-      setDeliveryOtpInput('');
-      navigation.replace('DeliveryComplete', {
-        order: result,
-        tip: result.tip,
-      });
-    } else {
-      Alert.alert('Unable to complete delivery', deliveryError || 'The OTP may be incorrect. Please check with the customer and try again.');
-    }
-  }, [completeDelivery, activeOrderId, currentLocation, navigation, deliveryOtpInput]);
+  }
 
-  const mapRegion = {
-    latitude: currentLocation?.latitude || pickupCoords.latitude,
-    longitude: currentLocation?.longitude || pickupCoords.longitude,
-    latitudeDelta: 0.008,
-    longitudeDelta: 0.008,
+  if (!order || !destination) {
+    return (
+      <View
+        style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top + spacing.lg, paddingHorizontal: spacing.lg }}
+      >
+        <IconButton icon="arrow-left" label="Go back" onPress={back} size={44} />
+        {loading ? (
+          <View style={{ gap: spacing.lg, marginTop: spacing.lg }}>
+            <Skeleton height={windowHeight * 0.45} radius={radii.lg} />
+            <Skeleton height={180} radius={radii.lg} />
+          </View>
+        ) : (
+          <EmptyState
+            icon="map-marker-question-outline"
+            title="Could not load this order"
+            message={error ?? undefined}
+            actionLabel="Try again"
+            onAction={reload}
+          />
+        )}
+      </View>
+    );
+  }
+
+  const stage = stageOf(order);
+  const pending = pendingOrderId === order.id;
+  const cash = cashToCollect(order);
+  const away = distanceKm(riderCoords, destination.coords);
+  const remaining =
+    order.activeLeg && order.distanceRemainingMeters != null
+      ? order.distanceRemainingMeters / 1000
+      : routeLine?.distanceMeters != null
+        ? routeLine.distanceMeters / 1000
+        : away;
+  const details = destination.leg === 'customer' ? addressDetails(order) : '';
+
+  const advance = async (status: OrderStatus): Promise<boolean> => {
+    setActionError(null);
+    const result = await dispatch(updateOrderStatus({ orderId: order.id, status }));
+    if (updateOrderStatus.fulfilled.match(result)) {
+      setFollow(true);
+      return true;
+    }
+    setActionError(result.payload?.message ?? 'Could not update the order.');
+    return false;
   };
 
-  return (
-    <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+  const submitOtp = async (otp: string): Promise<string | null> => {
+    const result = await dispatch(updateOrderStatus({ orderId: order.id, status: 'delivered', deliveryOtp: otp }));
+    if (updateOrderStatus.fulfilled.match(result)) {
+      setOtpOpen(false);
+      dispatch(fetchMetrics());
+      navigation.replace('DeliveryComplete', { order: result.payload });
+      return null;
+    }
+    return result.payload?.message ?? 'Could not complete the delivery.';
+  };
 
-      <MapView
-        ref={mapRef}
-        style={styles.map}
-        provider={PROVIDER_DEFAULT}
-        initialRegion={mapRegion}
-        customMapStyle={MAP_STYLE_SILVER}
-        showsUserLocation
-        showsMyLocationButton={false}
-      >
-        <Marker coordinate={pickupCoords}>
-          <CustomMarkerView icon="store" color="#333" label="Store" />
-        </Marker>
+  const submitRelease = async (reason: string) => {
+    const result = await dispatch(rejectOrder({ orderId: order.id, reason }));
+    if (rejectOrder.fulfilled.match(result)) {
+      setReleaseOpen(false);
+      goHome();
+      return null;
+    }
+    return result.payload?.message ?? 'Could not release this order.';
+  };
 
-        <Marker coordinate={deliveryCoords}>
-          <CustomMarkerView icon="map-marker" color={ZEPTO_GREEN} label="Customer" />
-        </Marker>
-      </MapView>
-
-      <SafeAreaView style={styles.overlay} edges={['top']}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <MaterialCommunityIcons name="chevron-left" size={28} color="#333" />
-          </TouchableOpacity>
-          <View style={styles.headerContent}>
-            <Text style={styles.headerTitle}>
-              {['picked_up', 'out_for_delivery'].includes(activeOrder.status) ? 'Delivery Location' : 'Store Pickup'}
-            </Text>
-            <View style={styles.liveIndicator}>
-              <View style={styles.liveDot} />
-              <Text style={styles.liveText}>READY</Text>
+  const primaryAction = () => {
+    switch (order.status) {
+      case 'assigned':
+        return (
+          <View style={[styles.waiting, { backgroundColor: c.warningSoft }]}>
+            <ActivityIndicator color={c.warningText} />
+            <View style={{ flex: 1 }}>
+              <AppText variant="body" weight="bold" color={c.warningText}>
+                Store is packing the order
+              </AppText>
+              <AppText variant="bodySm" color={c.warningText}>
+                Head to the store. Pickup unlocks when it is packed.
+              </AppText>
             </View>
           </View>
-        </View>
-      </SafeAreaView>
+        );
+      case 'packed':
+        return (
+          <SlideToConfirm
+            label="Slide to confirm pickup"
+            onConfirm={() => advance('picked_up')}
+            disabled={pending}
+            testID="slide-pickup"
+          />
+        );
+      case 'picked_up':
+        return (
+          <Button
+            label="Start delivery"
+            icon="moped"
+            onPress={() => advance('out_for_delivery')}
+            loading={pending}
+            testID="start-delivery"
+          />
+        );
+      case 'out_for_delivery':
+        return (
+          <Button
+            label="Arrived · Enter delivery code"
+            icon="form-textbox-password"
+            variant="success"
+            onPress={() => {
+              setActionError(null);
+              setOtpOpen(true);
+            }}
+            testID="enter-otp"
+          />
+        );
+      default:
+        return <Button label="Back to home" onPress={goHome} />;
+    }
+  };
 
-      <View style={styles.bottomCard}>
-        <View style={styles.dragHandle} />
+  const canNavigate = Boolean(destination.coords);
 
-        <View style={styles.orderHeader}>
-          <View>
-            <Text style={styles.orderNumber}>#{order.orderNumber}</Text>
-            <Text style={styles.statusBadge}>
-              {['picked_up', 'out_for_delivery'].includes(activeOrder.status) ? 'HEADING TO CUSTOMER' : 'HEADING TO STORE'}
-            </Text>
+  return (
+    <View style={{ flex: 1, backgroundColor: c.surfaceAlt }}>
+      <DeliveryMap
+        ref={mapRef}
+        store={order.pickup.address.coordinates}
+        customer={order.delivery.address.coordinates}
+        rider={rider}
+        route={routeLine}
+        leg={destination.leg}
+        follow={follow}
+        onUserPan={() => setFollow(false)}
+        bottomInset={sheetHeight}
+      />
+
+      {/* Top bar */}
+      <View style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]} pointerEvents="box-none">
+        <IconButton
+          icon="arrow-left"
+          label="Go back"
+          onPress={back}
+          size={48}
+          style={[{ backgroundColor: c.surface }, elevation(theme, 2)]}
+        />
+        <View style={[styles.topPill, { backgroundColor: c.surface }, elevation(theme, 2)]}>
+          <MaterialCommunityIcons
+            name={destination.leg === 'store' ? 'storefront' : 'home-map-marker'}
+            size={20}
+            color={c.brandText}
+          />
+          <View style={{ flex: 1 }}>
+            <AppText variant="overline" tone="subtle">
+              {destination.leg === 'store' ? 'To store' : 'To customer'}
+            </AppText>
+            <AppText variant="body" weight="bold" numberOfLines={1}>
+              {remaining != null ? formatDistance(remaining) : canNavigate ? 'Locating you…' : 'No map location'}
+              {order.durationMinutes != null && destination.leg === 'customer'
+                ? ` · ${Math.max(1, Math.round(order.durationMinutes))} min`
+                : ''}
+            </AppText>
           </View>
-          <TouchableOpacity style={styles.callButton}>
-            <MaterialCommunityIcons name="phone" size={20} color={ZEPTO_PURPLE} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.addressSection}>
-          <View style={styles.addressRow}>
-            <View style={[styles.addressDot, { backgroundColor: ['picked_up', 'out_for_delivery'].includes(activeOrder.status) ? ZEPTO_GREEN : '#333' }]} />
-            <Text style={styles.addressText} numberOfLines={2}>
-              {['picked_up', 'out_for_delivery'].includes(activeOrder.status)
-                ? order.delivery.address.full
-                : order.pickup.address.full}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.actionsRow}>
-          <TouchableOpacity
-            style={styles.navButton}
-            onPress={handleOpenMapMyIndia}
-          >
-            <MaterialCommunityIcons name="navigation-variant" size={24} color="white" />
-            <Text style={styles.navButtonText}>NAVIGATE</Text>
-          </TouchableOpacity>
-
-          {activeOrder.status === 'assigned' && (
-            <TouchableOpacity
-              style={[styles.actionButton, styles.pickupButton]}
-              onPress={() => Alert.alert('Waiting for packing', 'The store has not packed this order yet. You will be notified once it is ready for pickup.')}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <Text style={styles.actionButtonText}>WAIT FOR PACKING</Text>
-              )}
-            </TouchableOpacity>
-          )}
-
-          {activeOrder.status === 'packed' && (
-            <TouchableOpacity
-              style={[styles.actionButton, styles.pickupButton]}
-              onPress={handleMarkPickedUp}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <Text style={styles.actionButtonText}>MARK PICKED UP</Text>
-              )}
-            </TouchableOpacity>
-          )}
-
-          {activeOrder.status === 'picked_up' && (
-            <TouchableOpacity
-              style={[styles.actionButton, styles.pickupButton]}
-              onPress={handleStartDelivery}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <Text style={styles.actionButtonText}>START DELIVERY</Text>
-              )}
-            </TouchableOpacity>
-          )}
-
-          {activeOrder.status === 'out_for_delivery' && (
-            <TouchableOpacity
-              style={[styles.actionButton, styles.deliverButton]}
-              onPress={() => setOtpModalVisible(true)}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <Text style={styles.actionButtonText}>DELIVERED</Text>
-              )}
-            </TouchableOpacity>
-          )}
         </View>
       </View>
 
-      <Modal
-        visible={otpModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setOtpModalVisible(false)}
+      {/* Map controls */}
+      <View style={[styles.mapControls, { bottom: sheetHeight + spacing.md }]} pointerEvents="box-none">
+        <IconButton
+          icon="fit-to-screen-outline"
+          label="Show whole route"
+          onPress={() => {
+            setFollow(false);
+            mapRef.current?.fitAll();
+          }}
+          size={48}
+          style={[{ backgroundColor: c.surface }, elevation(theme, 2)]}
+        />
+        <IconButton
+          icon={follow ? 'crosshairs-gps' : 'crosshairs'}
+          label={follow ? 'Following your location' : 'Follow my location'}
+          tone={follow ? 'brand' : 'default'}
+          onPress={() => {
+            setFollow(true);
+            mapRef.current?.recenter();
+          }}
+          size={48}
+          style={[{ backgroundColor: follow ? c.brandSoft : c.surface }, elevation(theme, 2)]}
+        />
+      </View>
+
+      {/* Bottom sheet */}
+      <View
+        onLayout={(e) => setSheetHeight(e.nativeEvent.layout.height)}
+        style={[
+          styles.sheet,
+          { backgroundColor: c.surface, paddingBottom: insets.bottom + spacing.lg, maxHeight: windowHeight * 0.78 },
+          elevation(theme, 3),
+        ]}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Confirm Delivery OTP</Text>
-            <Text style={styles.modalSubtitle}>
-              Ask the customer for the 4-digit delivery OTP and enter it below.
-            </Text>
-            <TextInput
-              style={styles.otpInput}
-              value={deliveryOtpInput}
-              onChangeText={(value) => setDeliveryOtpInput(value.replace(/\D/g, '').slice(0, 4))}
-              keyboardType="number-pad"
-              placeholder="Enter OTP"
-              maxLength={4}
-            />
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={[styles.modalButton, styles.modalCancel]} onPress={() => setOtpModalVisible(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalButton, styles.modalConfirm]} onPress={handleMarkDelivered} disabled={loading}>
-                <Text style={styles.modalConfirmText}>{loading ? 'Verifying...' : 'Verify & Deliver'}</Text>
-              </TouchableOpacity>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={expanded ? 'Collapse details' : 'Expand details'}
+          onPress={() => setExpanded((v) => !v)}
+          style={styles.handleArea}
+          hitSlop={8}
+        >
+          <View style={[styles.handle, { backgroundColor: c.borderStrong }]} />
+        </Pressable>
+
+        <ScrollView bounces={false} contentContainerStyle={{ gap: spacing.md }} showsVerticalScrollIndicator={false}>
+          <View style={styles.rowBetween}>
+            <Pill label={stage.pill.label} tone={stage.pill.tone} icon={stage.pill.icon} />
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => navigation.navigate('OrderDetail', { orderId: order.id })}
+              hitSlop={10}
+            >
+              <AppText variant="bodySm" weight="semibold" tone="brand">
+                {order.orderNumber} ›
+              </AppText>
+            </Pressable>
+          </View>
+
+          <View>
+            <AppText variant="h1">{stage.title}</AppText>
+            <AppText variant="bodySm" tone="muted" style={{ marginTop: 2 }}>
+              {stage.hint}
+            </AppText>
+          </View>
+
+          <View style={[styles.destination, { borderColor: c.border }]}>
+            <View style={{ flex: 1 }}>
+              <AppText variant="h3" numberOfLines={1}>
+                {destination.name}
+              </AppText>
+              {details ? (
+                <AppText variant="bodySm" weight="bold" numberOfLines={1}>
+                  {details}
+                </AppText>
+              ) : null}
+              <AppText variant="bodySm" tone="muted" numberOfLines={expanded ? 4 : 2}>
+                {destination.address || 'Address not available'}
+              </AppText>
+              {destination.leg === 'customer' && order.delivery.address.landmark ? (
+                <AppText variant="bodySm" tone="muted" numberOfLines={1}>
+                  Landmark: {order.delivery.address.landmark}
+                </AppText>
+              ) : null}
+            </View>
+            <View style={{ gap: spacing.sm }}>
+              <IconButton
+                icon="phone"
+                label={destination.leg === 'store' ? 'Call store' : 'Call customer'}
+                tone="success"
+                disabled={!destination.phone}
+                onPress={() => callPhone(destination.phone, destination.leg === 'store' ? 'the store' : 'the customer')}
+              />
             </View>
           </View>
-        </View>
-      </Modal>
+
+          <Button
+            label={canNavigate ? 'Navigate in Google Maps' : 'No map location saved'}
+            icon="navigation-variant"
+            variant="secondary"
+            size="md"
+            disabled={!canNavigate}
+            onPress={() => destination.coords && openNavigation(destination.coords, riderCoords)}
+          />
+
+          {destination.leg === 'customer' && order.delivery.instructions ? (
+            <Banner
+              tone="warning"
+              icon="note-text-outline"
+              title="Delivery note"
+              message={order.delivery.instructions}
+            />
+          ) : null}
+
+          {destination.leg === 'customer' && cash > 0 ? <PaymentCallout order={order} /> : null}
+          {destination.leg === 'store' && cash > 0 && expanded ? (
+            <AppText variant="bodySm" tone="warning">
+              Cash on delivery: collect {formatMoney(cash)} from the customer.
+            </AppText>
+          ) : null}
+
+          {expanded ? (
+            <View style={{ paddingVertical: spacing.sm }}>
+              <StatusStepper order={order} />
+            </View>
+          ) : null}
+
+          {locationPermission === 'denied' || locationPermission === 'services_off' ? (
+            <Banner
+              tone="warning"
+              icon="map-marker-off"
+              title="Location is off"
+              message="The store and customer cannot see you moving."
+            />
+          ) : null}
+
+          {actionError ? <Banner tone="danger" title={actionError} onDismiss={() => setActionError(null)} /> : null}
+
+          {primaryAction()}
+
+          {order.status === 'assigned' ? (
+            <Button
+              label="Can't do this order? Release it"
+              variant="ghost"
+              size="md"
+              onPress={() => setReleaseOpen(true)}
+            />
+          ) : null}
+          {expanded && order.estimatedDeliveryTime && destination.leg === 'customer' ? (
+            <AppText variant="caption" tone="subtle" align="center">
+              Customer expects delivery by {formatTime(order.estimatedDeliveryTime)}
+            </AppText>
+          ) : null}
+        </ScrollView>
+      </View>
+
+      <OtpSheet visible={otpOpen} order={order} onClose={() => setOtpOpen(false)} onSubmit={submitOtp} />
+      <RejectSheet
+        visible={releaseOpen}
+        orderNumber={order.orderNumber}
+        mode="release"
+        onClose={() => setReleaseOpen(false)}
+        onSubmit={submitRelease}
+      />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F5F5F5',
-  },
-  map: {
-    width,
-    height: height * 0.7,
-  },
-  overlay: {
+  topBar: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-  },
-  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    marginHorizontal: 16,
-    marginTop: Platform.OS === 'android' ? 40 : 0,
-    padding: 10,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#F0F0F0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F5F5F5',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerContent: {
+  topPill: {
     flex: 1,
-    marginLeft: 12,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#1F1F1F',
-  },
-  liveIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    gap: 6,
+    gap: spacing.md,
+    minHeight: 52,
+    borderRadius: radii.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
   },
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: ZEPTO_GREEN,
-  },
-  liveText: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: ZEPTO_GREEN,
-    letterSpacing: 0.5,
-  },
-
-  // Marker styles
-  markerContainer: {
-    alignItems: 'center',
-  },
-  markerOuter: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    padding: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: 'white',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  markerInner: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  markerLabel: {
-    backgroundColor: 'white',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    marginTop: 4,
-    borderWidth: 1,
-    borderColor: '#EEE',
-  },
-  markerLabelText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#333',
-  },
-
-  bottomCard: {
+  mapControls: { position: 'absolute', right: spacing.lg, gap: spacing.md },
+  sheet: {
     position: 'absolute',
-    bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'white',
-    padding: 20,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 10,
+    bottom: 0,
+    borderTopLeftRadius: radii.xl,
+    borderTopRightRadius: radii.xl,
+    paddingHorizontal: spacing.lg,
   },
-  dragHandle: {
-    width: 40,
-    height: 5,
-    backgroundColor: '#E0E0E0',
-    borderRadius: 2.5,
-    alignSelf: 'center',
-    marginBottom: 20,
-  },
-  orderHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 16,
-  },
-  orderNumber: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#1F1F1F',
-  },
-  statusBadge: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: ZEPTO_PURPLE,
-    letterSpacing: 0.5,
-    marginTop: 2,
-  },
-  callButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(124, 58, 237, 0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addressSection: {
-    backgroundColor: '#F9F9F9',
-    padding: 14,
-    borderRadius: 16,
-    marginBottom: 20,
-  },
-  addressRow: {
+  handleArea: { alignItems: 'center', paddingVertical: spacing.md },
+  handle: { width: 44, height: 5, borderRadius: 3 },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
+  destination: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-  },
-  addressDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  addressText: {
-    flex: 1,
-    fontSize: 14,
-    color: '#444',
-    fontWeight: '600',
-    lineHeight: 20,
-  },
-
-  actionsRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  navButton: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: '#333',
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  navButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  actionButton: {
-    flex: 1.2,
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pickupButton: {
-    backgroundColor: ZEPTO_PURPLE,
-  },
-  deliverButton: {
-    backgroundColor: ZEPTO_GREEN,
-  },
-  actionButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  modalCard: {
-    width: '100%',
-    backgroundColor: 'white',
-    borderRadius: 20,
-    padding: 20,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#1F1F1F',
-    marginBottom: 8,
-  },
-  modalSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
-    marginBottom: 16,
-  },
-  otpInput: {
+    gap: spacing.md,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    fontSize: 24,
-    fontWeight: '700',
-    letterSpacing: 8,
-    textAlign: 'center',
-    marginBottom: 16,
+    borderRadius: radii.md,
+    padding: spacing.md,
   },
-  modalActions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  modalButton: {
-    flex: 1,
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  modalCancel: {
-    backgroundColor: '#F3F4F6',
-  },
-  modalConfirm: {
-    backgroundColor: ZEPTO_GREEN,
-  },
-  modalCancelText: {
-    color: '#111827',
-    fontWeight: '700',
-  },
-  modalConfirmText: {
-    color: 'white',
-    fontWeight: '800',
-  },
+  waiting: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: radii.md, padding: spacing.lg },
 });

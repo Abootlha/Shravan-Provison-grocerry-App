@@ -1,352 +1,233 @@
-import React, { useState, useCallback } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  Alert,
-  Image,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { COLORS, SPACING } from '../utils/constants';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Constants from 'expo-constants';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { AppText, Banner, Button, Card, Divider, Row, ScreenHeader, SectionTitle } from '../components/ui';
+import { TextField } from '../components/TextField';
 import { useAppDispatch, useAppSelector } from '../hooks/useAuth';
-import { setUser } from '../store/slices/authSlice';
-import { logout } from '../store/slices/authSlice';
+import { logout, refreshRider, saveProfile } from '../store/slices/authSlice';
+import { radii, spacing, TOUCH_TARGET, useTheme } from '../theme';
+import { formatPhone } from '../utils/format';
+import { VEHICLE_TYPES } from '../types/rider';
 import type { ProfileScreenProps } from '../types/navigation';
-import type { Rider } from '../types/rider';
+
+const VEHICLE_ICONS: Record<string, React.ComponentProps<typeof MaterialCommunityIcons>['name']> = {
+  'Two Wheeler': 'moped',
+  'Electric Bike': 'moped-electric',
+  Bicycle: 'bicycle',
+  'Three Wheeler': 'rickshaw',
+  'Four Wheeler': 'car',
+};
+
+const VEHICLE_NUMBER = /^[A-Za-z0-9 -]{2,20}$/;
 
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
+  const { colors: c } = useTheme();
+  const insets = useSafeAreaInsets();
   const dispatch = useAppDispatch();
-  const { user } = useAppSelector((state) => state.auth);
-  const [name, setName] = useState(user?.name || '');
-  const [editing, setEditing] = useState(false);
+  const user = useAppSelector((s) => s.auth.user);
+  const [name, setName] = useState(user?.name ?? '');
+  const [vehicleType, setVehicleType] = useState(user?.vehicleType ?? '');
+  const [vehicleNumber, setVehicleNumber] = useState(user?.vehicleNumber ?? '');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
 
-  const handleSave = useCallback(() => {
-    if (name.trim().length < 2) {
-      Alert.alert('Error', 'Name must be at least 2 characters');
+  useEffect(() => {
+    dispatch(refreshRider());
+  }, [dispatch]);
+
+  // Pick up server values once they arrive, unless the rider is editing.
+  const [touched, setTouched] = useState(false);
+  useEffect(() => {
+    if (touched || !user) return;
+    setName(user.name ?? '');
+    setVehicleType(user.vehicleType ?? '');
+    setVehicleNumber(user.vehicleNumber ?? '');
+  }, [user, touched]);
+
+  const nameError = !name.trim() ? 'Enter your name' : name.trim().length > 80 ? 'Use at most 80 characters' : null;
+  const numberError =
+    vehicleNumber.trim() && !VEHICLE_NUMBER.test(vehicleNumber.trim())
+      ? 'Use 2–20 letters, digits, spaces or hyphens'
+      : null;
+
+  const patch = useMemo(() => {
+    const next: { name?: string; vehicleType?: string; vehicleNumber?: string } = {};
+    if (name.trim() !== (user?.name ?? '')) next.name = name.trim();
+    if (vehicleType && vehicleType !== (user?.vehicleType ?? '')) next.vehicleType = vehicleType;
+    if (vehicleNumber.trim().toUpperCase() !== (user?.vehicleNumber ?? '').toUpperCase())
+      next.vehicleNumber = vehicleNumber.trim().toUpperCase();
+    return next;
+  }, [name, vehicleType, vehicleNumber, user]);
+  const dirty = Object.keys(patch).length > 0;
+
+  const save = async () => {
+    if (nameError || numberError || !dirty) return;
+    setSaving(true);
+    setMessage(null);
+    const result = await dispatch(saveProfile(patch));
+    setSaving(false);
+    if (saveProfile.fulfilled.match(result)) {
+      setTouched(false);
+      setMessage({ tone: 'success', text: 'Profile saved' });
+    } else {
+      setMessage({ tone: 'danger', text: result.payload ?? 'Could not save your profile.' });
+    }
+  };
+
+  const confirmLogout = () => {
+    const run = async () => {
+      setLoggingOut(true);
+      await dispatch(logout());
+      setLoggingOut(false);
+    };
+    if (Platform.OS === 'web') {
+      run();
       return;
     }
-
-    dispatch(setUser({ ...(user as Rider), name: name.trim() }));
-    setEditing(false);
-    Alert.alert('Success', 'Profile updated successfully');
-  }, [dispatch, user, name]);
-
-  const handleLogout = useCallback(() => {
-    Alert.alert('Logout', 'Are you sure you want to logout?', [
+    Alert.alert('Log out?', 'You will go offline and stop receiving orders.', [
       { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Logout',
-        style: 'destructive',
-        onPress: () => {
-          dispatch(logout());
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'Login' }],
-          });
-        },
-      },
+      { text: 'Log out', style: 'destructive', onPress: run },
     ]);
-  }, [dispatch, navigation]);
+  };
+
+  const edit =
+    <T,>(setter: (v: T) => void) =>
+    (value: T) => {
+      setTouched(true);
+      setMessage(null);
+      setter(value);
+    };
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <View style={styles.avatarContainer}>
-            {user?.photo ? (
-              <Image source={{ uri: user.photo }} style={styles.avatar} />
-            ) : (
-              <View style={styles.avatarPlaceholder}>
-                <Text style={styles.avatarInitial}>
-                  {(user?.name || 'R').charAt(0).toUpperCase()}
-                </Text>
-              </View>
-            )}
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: c.bg }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScreenHeader title="Profile" onBack={() => navigation.goBack()} />
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.xxxl }]}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Card style={styles.identity}>
+          <View style={[styles.avatar, { backgroundColor: c.brand }]}>
+            <AppText variant="h1" color="#FFFFFF">
+              {(user?.name || 'R').charAt(0).toUpperCase()}
+            </AppText>
           </View>
-          <Text style={styles.name}>{user?.name || 'Rider'}</Text>
-          <Text style={styles.phone}>{user?.phone || ''}</Text>
-          <View style={styles.ratingContainer}>
-            <Text style={styles.ratingIcon}>⭐</Text>
-            <Text style={styles.rating}>{user?.rating?.toFixed(1) || '0.0'}</Text>
+          <View style={{ flex: 1 }}>
+            <AppText variant="h2" numberOfLines={1}>
+              {user?.name || 'Rider'}
+            </AppText>
+            <AppText variant="bodySm" tone="muted">
+              {user?.rating ? `★ ${user.rating.toFixed(1)} · ` : ''}
+              {user?.totalDeliveries ?? 0} deliveries
+            </AppText>
           </View>
+        </Card>
+
+        <View>
+          <SectionTitle title="Account" />
+          <Card style={{ paddingVertical: spacing.xs }}>
+            <Row icon="phone-outline" label="Phone" value={user?.phone ? formatPhone(user.phone) : 'Not set'} />
+            <Divider />
+            <Row icon="account-outline" label="Username" value={user?.username || 'Not set'} />
+          </Card>
+          <AppText variant="caption" tone="subtle" style={{ marginTop: spacing.sm }}>
+            Phone and username can only be changed by the store admin.
+          </AppText>
         </View>
 
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Personal Information</Text>
-            <TouchableOpacity onPress={() => setEditing(!editing)}>
-              <Text style={styles.editButton}>{editing ? 'Cancel' : 'Edit'}</Text>
-            </TouchableOpacity>
+        <View style={{ gap: spacing.lg }}>
+          <SectionTitle title="Details" style={{ marginBottom: 0 }} />
+          <TextField
+            label="Full name"
+            value={name}
+            onChangeText={edit(setName)}
+            error={touched ? nameError : null}
+            maxLength={80}
+            autoCapitalize="words"
+          />
+          <View style={{ gap: 6 }}>
+            <AppText variant="bodySm" weight="semibold" tone="muted">
+              Vehicle type
+            </AppText>
+            <View style={styles.chips} accessibilityRole="radiogroup">
+              {VEHICLE_TYPES.map((type) => {
+                const selected = vehicleType === type;
+                return (
+                  <Pressable
+                    key={type}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: selected }}
+                    onPress={() => edit(setVehicleType)(type)}
+                    style={[
+                      styles.chip,
+                      {
+                        borderColor: selected ? c.brand : c.border,
+                        backgroundColor: selected ? c.brandSoft : c.surface,
+                      },
+                    ]}
+                  >
+                    <MaterialCommunityIcons
+                      name={VEHICLE_ICONS[type] ?? 'moped'}
+                      size={20}
+                      color={selected ? c.brandText : c.textMuted}
+                    />
+                    <AppText
+                      variant="bodySm"
+                      weight={selected ? 'bold' : 'medium'}
+                      tone={selected ? 'brand' : 'default'}
+                    >
+                      {type}
+                    </AppText>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
-          <View style={styles.card}>
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Name</Text>
-              {editing ? (
-                <TextInput
-                  style={styles.input}
-                  value={name}
-                  onChangeText={setName}
-                  placeholder="Enter your name"
-                  placeholderTextColor={COLORS.disabled}
-                />
-              ) : (
-                <Text style={styles.fieldValue}>{user?.name || '-'}</Text>
-              )}
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Phone</Text>
-              <Text style={styles.fieldValue}>{user?.phone || '-'}</Text>
-            </View>
-            <View style={[styles.field, styles.fieldLast]}>
-              <Text style={styles.fieldLabel}>Email</Text>
-              <Text style={styles.fieldValue}>{user?.email || '-'}</Text>
-            </View>
-          </View>
-          {editing && (
-            <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-              <Text style={styles.saveButtonText}>Save Changes</Text>
-            </TouchableOpacity>
-          )}
+          <TextField
+            label="Vehicle number"
+            value={vehicleNumber}
+            onChangeText={edit(setVehicleNumber)}
+            placeholder="e.g. UP53 AB 1234"
+            autoCapitalize="characters"
+            maxLength={20}
+            error={numberError}
+            hint="Leave empty if your vehicle has no number."
+          />
+          {message ? <Banner tone={message.tone} title={message.text} /> : null}
+          <Button
+            label="Save changes"
+            onPress={save}
+            loading={saving}
+            disabled={!dirty || Boolean(nameError || numberError)}
+          />
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Vehicle Information</Text>
-          <View style={styles.card}>
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Vehicle Type</Text>
-              <Text style={styles.fieldValue}>
-                {user?.vehicle?.type
-                  ? user.vehicle.type.charAt(0).toUpperCase() + user.vehicle.type.slice(1)
-                  : '-'}
-              </Text>
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Vehicle Number</Text>
-              <Text style={styles.fieldValue}>{user?.vehicle?.number || '-'}</Text>
-            </View>
-            <View style={[styles.field, styles.fieldLast]}>
-              <Text style={styles.fieldLabel}>Vehicle Make/Model</Text>
-              <Text style={styles.fieldValue}>
-                {user?.vehicle?.make && user?.vehicle?.model
-                  ? `${user.vehicle.make} ${user.vehicle.model}`
-                  : '-'}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Documents</Text>
-          <View style={styles.card}>
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Aadhar Card</Text>
-              <Text style={styles.fieldValue}>
-                {user?.documents?.aadhar ? 'Uploaded' : 'Not Uploaded'}
-              </Text>
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Driving License</Text>
-              <Text style={styles.fieldValue}>
-                {user?.documents?.drivingLicense ? 'Uploaded' : 'Not Uploaded'}
-              </Text>
-            </View>
-            <View style={[styles.field, styles.fieldLast]}>
-              <Text style={styles.fieldLabel}>RC Book</Text>
-              <Text style={styles.fieldValue}>
-                {user?.documents?.rcBook ? 'Uploaded' : 'Not Uploaded'}
-              </Text>
-            </View>
-          </View>
-          <TouchableOpacity style={styles.uploadButton}>
-            <Text style={styles.uploadButtonText}>Upload Documents</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Statistics</Text>
-          <View style={styles.card}>
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Total Deliveries</Text>
-              <Text style={styles.fieldValue}>{user?.totalDeliveries || 0}</Text>
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Acceptance Rate</Text>
-              <Text style={styles.fieldValue}>{user?.acceptanceRate || 0}%</Text>
-            </View>
-            <View style={[styles.field, styles.fieldLast]}>
-              <Text style={styles.fieldLabel}>Member Since</Text>
-              <Text style={styles.fieldValue}>
-                {user?.createdAt
-                  ? new Date(user.createdAt).toLocaleDateString()
-                  : '-'}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Text style={styles.logoutButtonText}>Logout</Text>
-        </TouchableOpacity>
-
-        <View style={styles.bottomPadding} />
+        <Button label="Log out" icon="logout" variant="outline" onPress={confirmLogout} loading={loggingOut} />
+        <AppText variant="caption" tone="subtle" align="center">
+          Version {Constants.expoConfig?.version ?? '1.0.0'}
+        </AppText>
       </ScrollView>
-    </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  content: {
-    flex: 1,
-  },
-  header: {
-    alignItems: 'center',
-    paddingVertical: SPACING.lg,
-    backgroundColor: COLORS.surface,
-  },
-  avatarContainer: {
-    marginBottom: SPACING.sm,
-  },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-  },
-  avatarPlaceholder: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: COLORS.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarInitial: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: COLORS.surface,
-  },
-  name: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: COLORS.text,
-    marginBottom: 4,
-  },
-  phone: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginBottom: 8,
-  },
-  ratingContainer: {
+  content: { padding: spacing.lg, gap: spacing.xl, maxWidth: 640, width: '100%', alignSelf: 'center' },
+  identity: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
+  avatar: { width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center' },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  chip: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  ratingIcon: {
-    fontSize: 18,
-    marginRight: 4,
-  },
-  rating: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.warning,
-  },
-  section: {
-    padding: SPACING.md,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.sm,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  editButton: {
-    fontSize: 14,
-    color: COLORS.primary,
-    fontWeight: '500',
-  },
-  card: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: SPACING.md,
-  },
-  field: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: SPACING.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  fieldLast: {
-    borderBottomWidth: 0,
-  },
-  fieldLabel: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-  },
-  fieldValue: {
-    fontSize: 14,
-    color: COLORS.text,
-    fontWeight: '500',
-  },
-  input: {
-    fontSize: 14,
-    color: COLORS.text,
-    fontWeight: '500',
-    textAlign: 'right',
-    flex: 1,
-    marginLeft: SPACING.sm,
-  },
-  saveButton: {
-    backgroundColor: COLORS.primary,
-    paddingVertical: SPACING.sm,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: SPACING.sm,
-  },
-  saveButtonText: {
-    color: COLORS.surface,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  uploadButton: {
-    backgroundColor: COLORS.primary + '20',
-    paddingVertical: SPACING.sm,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.primary,
-    borderStyle: 'dashed',
-  },
-  uploadButtonText: {
-    color: COLORS.primary,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  logoutButton: {
-    backgroundColor: COLORS.error + '20',
-    paddingVertical: SPACING.md,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginHorizontal: SPACING.md,
-  },
-  logoutButtonText: {
-    color: COLORS.error,
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  bottomPadding: {
-    height: 40,
+    gap: spacing.sm,
+    minHeight: TOUCH_TARGET - 4,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.pill,
+    borderWidth: 1.5,
   },
 });

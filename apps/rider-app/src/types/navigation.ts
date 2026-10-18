@@ -4,13 +4,12 @@ import type { Order } from './order';
 export type RootStackParamList = {
   Splash: undefined;
   Login: undefined;
-  // otpLength: digits reported by POST /auth/send-otp (4-6, default 4).
-  OTP: { phone: string; name?: string; isNewAccount?: boolean; otpLength?: number };
+  /** Without a phone the screen asks for one first. */
+  OTP: { phone?: string; otpLength?: number } | undefined;
   Home: undefined;
-  AvailableOrders: undefined;
-  OrderDetail: { orderId: string; order?: Order };
-  Navigation: { orderId: string; order: Order };
-  DeliveryComplete: { order: Order; tip?: number };
+  OrderDetail: { orderId: string };
+  Navigation: { orderId: string };
+  DeliveryComplete: { order: Order };
   Earnings: undefined;
   Profile: undefined;
 };
@@ -19,7 +18,6 @@ export type SplashScreenProps = NativeStackScreenProps<RootStackParamList, 'Spla
 export type LoginScreenProps = NativeStackScreenProps<RootStackParamList, 'Login'>;
 export type OTPScreenProps = NativeStackScreenProps<RootStackParamList, 'OTP'>;
 export type HomeScreenProps = NativeStackScreenProps<RootStackParamList, 'Home'>;
-export type AvailableOrdersScreenProps = NativeStackScreenProps<RootStackParamList, 'AvailableOrders'>;
 export type OrderDetailScreenProps = NativeStackScreenProps<RootStackParamList, 'OrderDetail'>;
 export type NavigationScreenProps = NativeStackScreenProps<RootStackParamList, 'Navigation'>;
 export type DeliveryCompleteScreenProps = NativeStackScreenProps<RootStackParamList, 'DeliveryComplete'>;

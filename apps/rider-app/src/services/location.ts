@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import { LOCATION_UPDATE_THROTTLE, RIDER_SERVICE_URL } from '../utils/constants';
+import type { LiveLocation } from '../types/rider';
 import { storage } from './storage';
 import { ensureFreshAccessToken, refreshAccessToken } from './authSession';
 
@@ -43,11 +44,7 @@ if (!TaskManager.isTaskDefined(BACKGROUND_LOCATION_TASK)) {
         return;
       }
 
-      const body = JSON.stringify({
-        latitude: latest.coords.latitude,
-        longitude: latest.coords.longitude,
-        accuracy: latest.coords.accuracy,
-      });
+      const body = JSON.stringify(toLocationPayload(fromExpoLocation(latest)));
       const send = (accessToken: string) =>
         fetch(`${RIDER_SERVICE_URL}/riders/me/location`, {
           method: 'PUT',
@@ -75,16 +72,41 @@ if (!TaskManager.isTaskDefined(BACKGROUND_LOCATION_TASK)) {
   });
 }
 
-export interface CurrentLocation {
-  latitude: number;
-  longitude: number;
-  heading: number | null;
-  speed: number | null;
-  accuracy: number | null;
-  altitude: number | null;
-}
+export type CurrentLocation = LiveLocation;
 
 type LocationCallback = (location: CurrentLocation) => void;
+
+/** UI refresh cadence for the rider marker; uploads are throttled separately. */
+const WATCH_INTERVAL_MS = 2000;
+
+export function fromExpoLocation(location: Location.LocationObject): LiveLocation {
+  return {
+    latitude: location.coords.latitude,
+    longitude: location.coords.longitude,
+    heading: location.coords.heading,
+    speed: location.coords.speed,
+    accuracy: location.coords.accuracy,
+    timestamp: location.timestamp || Date.now(),
+  };
+}
+
+/**
+ * Body for PUT /riders/me/location and the riderLocationUpdate socket event.
+ * Drops values the server would reject (iOS reports -1 for unknown heading/speed).
+ */
+export function toLocationPayload(location: LiveLocation) {
+  const payload: {
+    latitude: number;
+    longitude: number;
+    accuracy?: number;
+    heading?: number;
+    speed?: number;
+  } = { latitude: location.latitude, longitude: location.longitude };
+  if (location.accuracy != null && location.accuracy >= 0) payload.accuracy = location.accuracy;
+  if (location.heading != null && location.heading >= 0 && location.heading <= 360) payload.heading = location.heading;
+  if (location.speed != null && location.speed >= 0) payload.speed = location.speed;
+  return payload;
+}
 
 class LocationService {
   private locationSubscription: Location.LocationSubscription | null = null;
@@ -93,6 +115,18 @@ class LocationService {
   private foregroundPermissionGranted = false;
   private backgroundPermissionGranted = false;
   private startTrackingPromise: Promise<boolean> | null = null;
+  /** Latest fix from any source. The single source of truth for "where am I". */
+  latest: CurrentLocation | null = null;
+
+  private publish(location: CurrentLocation): CurrentLocation {
+    this.latest = location;
+    this.callbacks.forEach((callback) => callback(location));
+    return location;
+  }
+
+  isWatching(): boolean {
+    return this.locationSubscription !== null;
+  }
   /** Human-readable reason for the last failed start, for the UI to surface. */
   lastError: string | null = null;
 
@@ -130,18 +164,18 @@ class LocationService {
       const foreground = await Location.getForegroundPermissionsAsync();
       this.foregroundPermissionGranted = foreground.status === 'granted';
       if (!this.foregroundPermissionGranted) {
-        console.log('[LocationService] Foreground permission not granted:', foreground.status);
+        if (__DEV__) console.log('[LocationService] Foreground permission not granted:', foreground.status);
         return false;
       }
 
       const servicesEnabled = await Location.hasServicesEnabledAsync();
       if (!servicesEnabled) {
-        console.log('[LocationService] Global location services disabled');
+        if (__DEV__) console.log('[LocationService] Global location services disabled');
         return false;
       }
       return true;
     } catch (error) {
-      console.log('[LocationService] hasPermissions error:', error);
+      if (__DEV__) console.log('[LocationService] hasPermissions error:', error);
       return false;
     }
   }
@@ -151,14 +185,7 @@ class LocationService {
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
-      return {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        heading: location.coords.heading,
-        speed: location.coords.speed,
-        accuracy: location.coords.accuracy,
-        altitude: location.coords.altitude,
-      };
+      return this.publish(fromExpoLocation(location));
     } catch {
       try {
         const location = await Location.getLastKnownPositionAsync();
@@ -166,14 +193,7 @@ class LocationService {
           return null;
         }
 
-        return {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          heading: location.coords.heading,
-          speed: location.coords.speed,
-          accuracy: location.coords.accuracy,
-          altitude: location.coords.altitude,
-        };
+        return this.publish(fromExpoLocation(location));
       } catch {
         return null;
       }
@@ -210,31 +230,27 @@ class LocationService {
       return true;
     }
 
-    const subscription = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.Balanced,
-        distanceInterval: 10,
-        timeInterval: LOCATION_UPDATE_THROTTLE,
-      },
-      (location) => {
-        const now = Date.now();
-        if (now - this.lastUpdate < LOCATION_UPDATE_THROTTLE) {
-          return;
+    let subscription: Location.LocationSubscription;
+    try {
+      subscription = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          distanceInterval: 5,
+          timeInterval: WATCH_INTERVAL_MS,
+        },
+        (location) => {
+          const now = Date.now();
+          if (now - this.lastUpdate < WATCH_INTERVAL_MS - 500) {
+            return;
+          }
+          this.lastUpdate = now;
+          this.publish(fromExpoLocation(location));
         }
-        this.lastUpdate = now;
-
-        const currentLocation: CurrentLocation = {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          heading: location.coords.heading,
-          speed: location.coords.speed,
-          accuracy: location.coords.accuracy,
-          altitude: location.coords.altitude,
-        };
-
-        this.callbacks.forEach((callback) => callback(currentLocation));
-      }
-    );
+      );
+    } catch {
+      this.lastError = 'Turn on location (GPS) to go online.';
+      return false;
+    }
 
     if (this.locationSubscription) {
       subscription.remove();
@@ -281,7 +297,7 @@ class LocationService {
       foregroundService: {
         notificationTitle: 'ShravanKirana Delivery Tracking',
         notificationBody: 'Sharing your live location for active deliveries.',
-        notificationColor: '#1E3A8A',
+        notificationColor: '#6C3CF4',
       },
     });
 
@@ -313,19 +329,13 @@ class LocationService {
     };
   }
 
-  calculateDistance(
-    lat1: number,
-    lon1: number,
-    lat2: number,
-    lon2: number
-  ): number {
+  calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const R = 6371;
     const dLat = this.toRad(lat2 - lat1);
     const dLon = this.toRad(lon2 - lon1);
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(this.toRad(lat1)) * Math.cos(this.toRad(lat2)) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      Math.cos(this.toRad(lat1)) * Math.cos(this.toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   }
