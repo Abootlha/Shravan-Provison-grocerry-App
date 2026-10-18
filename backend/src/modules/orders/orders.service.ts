@@ -56,6 +56,7 @@ import {
   OrderEventPayload,
   emitLocalOrderEvent,
 } from '../../sockets/order-events';
+import { RIDER_REJECTED_NOTE } from './rider-events';
 
 export { ADMIN_ORDER_EVENTS_CHANNEL };
 
@@ -107,7 +108,21 @@ export interface UpdateStatusOptions {
   actorRole?: string;
   deliveryOtp?: string;
   reason?: string;
+  /** Rider position; stored on the timeline entry for PICKED_UP / DELIVERED. */
+  location?: { latitude: number; longitude: number; accuracy?: number };
 }
+
+// Statuses whose timeline entry keeps the rider's position as proof.
+const LOCATION_SNAPSHOT_STATUSES: OrderStatus[] = [
+  OrderStatus.PICKED_UP,
+  OrderStatus.DELIVERED,
+];
+
+// A rider may hand an order back until the store has packed it.
+const RIDER_REJECTABLE_STATUSES: OrderStatus[] = [
+  OrderStatus.CONFIRMED,
+  OrderStatus.ASSIGNED,
+];
 
 @Injectable()
 export class OrdersService {
@@ -472,7 +487,7 @@ export class OrdersService {
       .populate('userId', 'name phone')
       .populate(
         'riderId',
-        'name phone vehicleType rating totalDeliveries currentLocation status lastLocationUpdate',
+        'name phone vehicleType vehicleNumber rating totalDeliveries currentLocation status lastLocationUpdate',
       )
       .lean()
       .exec();
@@ -609,6 +624,7 @@ export class OrdersService {
             name: (order.riderId as any).name,
             phone: (order.riderId as any).phone || '',
             vehicleType: (order.riderId as any).vehicleType,
+            vehicleNumber: (order.riderId as any).vehicleNumber ?? null,
             rating: (order.riderId as any).rating ?? 0,
             totalDeliveries: (order.riderId as any).totalDeliveries ?? 0,
             status: (order.riderId as any).status,
@@ -884,19 +900,27 @@ export class OrdersService {
       }
     }
 
+    const timelineEntry: Record<string, any> = {
+      status: newStatus,
+      timestamp: now,
+      changedBy: new Types.ObjectId(userId),
+    };
+    if (options.location && LOCATION_SNAPSHOT_STATUSES.includes(newStatus)) {
+      const { latitude, longitude, accuracy } = options.location;
+      timelineEntry.location = {
+        latitude,
+        longitude,
+        ...(typeof accuracy === 'number' ? { accuracy } : {}),
+      };
+    }
+
     // Atomic transition: only succeeds if nobody changed the status meanwhile.
     const updated = await this.orderModel
       .findOneAndUpdate(
         { _id: order._id, orderStatus: previousStatus },
         {
           $set,
-          $push: {
-            timeline: {
-              status: newStatus,
-              timestamp: now,
-              changedBy: new Types.ObjectId(userId),
-            },
-          },
+          $push: { timeline: timelineEntry },
         },
         { new: true },
       )
@@ -961,6 +985,14 @@ export class OrdersService {
       await this.releaseRider(
         updated.riderId.toString(),
         newStatus === OrderStatus.DELIVERED,
+      );
+    }
+
+    if (updated.riderId && newStatus === OrderStatus.CANCELLED) {
+      this.trackingGateway.notifyRiderOrderCancelled(
+        updated.riderId.toString(),
+        updated,
+        updated.cancellationReason ?? options.reason ?? null,
       );
     }
 
@@ -1459,17 +1491,142 @@ export class OrdersService {
 
     if (previousRiderId) {
       await this.releaseRider(previousRiderId, false);
+      this.trackingGateway.notifyRiderOrderUnassigned(
+        previousRiderId,
+        updated,
+        'admin_unassigned',
+      );
     }
 
     // Invalidate cache
     await this.cacheService.deleteOrder(updated._id.toString());
     await this.redisService.del(RedisService.Keys.orderStatus(updated.orderId));
     await this.publishAdminOrderEvent('order:updated', updated);
+    await this.broadcastTrackingState(updated._id.toString());
 
     return updated;
   }
 
-  async autoAssignNearestRider(orderId: string): Promise<OrderDocument | null> {
+  /** Sends the current tracking payload to the order room; never throws. */
+  private async broadcastTrackingState(orderId: string): Promise<any> {
+    try {
+      const trackingOrder = await this.buildRealtimeOrderPayload(orderId);
+      this.trackingGateway.broadcastOrderStatusUpdate(orderId, trackingOrder);
+      return trackingOrder;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to broadcast tracking state for ${orderId}: ${(error as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * A rider hands back an order reserved for them (CONFIRMED) or accepted
+   * but not packed yet (ASSIGNED). The order returns to CONFIRMED without a
+   * rider, the rider is freed, and auto-assignment runs again without them.
+   */
+  async riderRejectOrder(
+    orderId: string,
+    riderId: string,
+    reason?: string,
+  ): Promise<{ order: any; reassigned: boolean }> {
+    const order = await this.orderModel.findById(orderId);
+    if (!order) throw new NotFoundException('Order not found');
+
+    if (!order.riderId || order.riderId.toString() !== riderId) {
+      throw new ForbiddenException('This order is not assigned to you');
+    }
+    if (!RIDER_REJECTABLE_STATUSES.includes(order.orderStatus)) {
+      throw new BadRequestException(
+        `Order is ${order.orderStatus}; it can only be rejected before the store packs it`,
+      );
+    }
+
+    const previousStatus = order.orderStatus;
+    const riderObjectId = new Types.ObjectId(riderId);
+    const trimmedReason = reason?.trim();
+    const note = trimmedReason
+      ? `${RIDER_REJECTED_NOTE}: ${trimmedReason}`
+      : RIDER_REJECTED_NOTE;
+
+    const updated = await this.orderModel
+      .findOneAndUpdate(
+        { _id: order._id, orderStatus: previousStatus, riderId: riderObjectId },
+        {
+          $set: { orderStatus: OrderStatus.CONFIRMED },
+          $unset: { riderId: 1 },
+          $push: {
+            timeline: {
+              status: OrderStatus.CONFIRMED,
+              timestamp: new Date(),
+              changedBy: riderObjectId,
+              note,
+            },
+          },
+        },
+        { new: true },
+      )
+      .exec();
+
+    if (!updated) {
+      throw new ConflictException(
+        'Order was changed by another request. Please refresh and retry.',
+      );
+    }
+
+    await this.releaseRider(riderId, false);
+    await this.cacheService.deleteOrder(updated._id.toString());
+    await this.redisService.set(
+      RedisService.Keys.orderStatus(updated.orderId),
+      OrderStatus.CONFIRMED,
+    );
+    await this.logStatusChange(
+      updated._id,
+      previousStatus,
+      OrderStatus.CONFIRMED,
+      riderObjectId,
+      note,
+    );
+    this.trackingGateway.notifyRiderOrderUnassigned(
+      riderId,
+      updated,
+      'rider_rejected',
+    );
+    await this.broadcastOrderEvent(ORDER_STATUS_CHANNEL, {
+      orderId: updated.orderId,
+      status: OrderStatus.CONFIRMED,
+      paymentStatus: updated.paymentStatus,
+    });
+
+    let reassignedOrder: OrderDocument | null = null;
+    try {
+      reassignedOrder = await this.autoAssignNearestRider(
+        updated._id.toString(),
+        { excludeRiderIds: [riderId] },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Re-assignment after rider reject failed for ${updated.orderId}: ${(error as Error).message}`,
+      );
+    }
+
+    if (reassignedOrder) {
+      // assignRider already notified admins, the customer and the new rider.
+      return { order: reassignedOrder, reassigned: true };
+    }
+
+    await this.publishAdminOrderEvent('order:updated', updated);
+    const trackingOrder = await this.broadcastTrackingState(
+      updated._id.toString(),
+    );
+    return { order: trackingOrder ?? updated, reassigned: false };
+  }
+
+  async autoAssignNearestRider(
+    orderId: string,
+    options: { excludeRiderIds?: string[] } = {},
+  ): Promise<OrderDocument | null> {
     const order = await this.orderModel.findById(orderId).lean().exec();
     if (
       !order ||
@@ -1481,7 +1638,9 @@ export class OrdersService {
     }
 
     const storeSettings = await this.settingsService.getStoreSettings();
-    const triedRiderIds: Types.ObjectId[] = [];
+    const triedRiderIds: Types.ObjectId[] = (options.excludeRiderIds ?? [])
+      .filter((id) => Types.ObjectId.isValid(id))
+      .map((id) => new Types.ObjectId(id));
 
     // A candidate can be claimed by a concurrent assignment between the read
     // and the atomic claim in assignRider, so try a few candidates.

@@ -34,6 +34,10 @@ export class Rider {
   @Prop({ type: String, enum: VehicleType, default: VehicleType.TWO_WHEELER })
   vehicleType!: VehicleType;
 
+  /** Registration plate, upper-cased (e.g. "UP53 AB 1234"). */
+  @Prop({ trim: true })
+  vehicleNumber?: string;
+
   @Prop({ type: String, enum: RiderStatus, default: RiderStatus.OFFLINE })
   status!: RiderStatus;
 

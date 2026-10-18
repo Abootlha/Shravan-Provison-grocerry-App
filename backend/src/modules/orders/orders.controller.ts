@@ -23,6 +23,7 @@ import {
   AssignRiderDto,
   QuoteOrderDto,
   AdminOrdersQueryDto,
+  RejectOrderDto,
 } from './dto';
 import { UserRole, isStaffRole } from '../users/schemas/user.schema';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -150,6 +151,27 @@ export class OrdersController {
       req.user.userId,
     );
     return { order };
+  }
+
+  /**
+   * Rider hands back an order reserved for them (CONFIRMED) or accepted but
+   * not yet packed (ASSIGNED). The order is offered to another rider.
+   */
+  @Patch(':id/reject')
+  async rejectOrder(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body() body: RejectOrderDto,
+  ) {
+    if (req.user.role !== UserRole.RIDER) {
+      throw new ForbiddenException('Only riders can reject orders');
+    }
+
+    return this.ordersService.riderRejectOrder(
+      id,
+      req.user.userId,
+      body?.reason,
+    );
   }
 
   @Get('user/:userId')
@@ -283,6 +305,10 @@ export class OrdersController {
       {
         actorRole: req.user.role,
         deliveryOtp: updateStatusDto.deliveryOtp,
+        location:
+          req.user.role === UserRole.RIDER
+            ? updateStatusDto.location
+            : undefined,
       },
     );
 

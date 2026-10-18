@@ -1,7 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import * as fc from 'fast-check';
-import { RidersService } from './riders.service';
+import {
+  ETA_RECALC_INTERVAL_MS,
+  LOCATION_THROTTLE_MS,
+  RidersService,
+} from './riders.service';
 import { UserRole } from '../users/schemas/user.schema';
 import { Order, OrderStatus } from '../orders/schemas/order.schema';
 import { Rider, RiderStatus } from './schemas/rider.schema';
@@ -9,6 +13,7 @@ import { OrdersService } from '../orders/orders.service';
 import { RedisService } from '../../common/utils/redis.service';
 import { TrackingGateway } from '../../sockets/tracking.gateway';
 import { ETAService } from '../orders/eta.service';
+import { OrderStatusLog } from '../orders/schemas/order-status-log.schema';
 
 describe('RidersService - Property-Based Tests', () => {
   let service: RidersService;
@@ -29,11 +34,15 @@ describe('RidersService - Property-Based Tests', () => {
     find: jest.fn(),
   };
 
+  const mockRedisClient = { set: jest.fn() };
   const mockRedisService = {
     get: jest.fn(),
     set: jest.fn(),
     del: jest.fn(),
+    getClient: () => mockRedisClient,
   };
+
+  const mockOrderStatusLogModel = { countDocuments: jest.fn() };
 
   const mockTrackingGateway = {
     broadcastOrderStatusUpdate: jest.fn(),
@@ -56,6 +65,10 @@ describe('RidersService - Property-Based Tests', () => {
         { provide: RedisService, useValue: mockRedisService },
         { provide: TrackingGateway, useValue: mockTrackingGateway },
         { provide: ETAService, useValue: mockETAService },
+        {
+          provide: getModelToken(OrderStatusLog.name),
+          useValue: mockOrderStatusLogModel,
+        },
       ],
     }).compile();
 
@@ -67,6 +80,8 @@ describe('RidersService - Property-Based Tests', () => {
       mockUserModel.findOne(...args),
     );
     mockOrdersService.buildRealtimeOrderPayload.mockResolvedValue({});
+    // SET ... PX ... NX succeeds unless a test simulates a held slot.
+    mockRedisClient.set.mockResolvedValue('OK');
 
     // Set up default mock for order model (empty orders)
     mockOrderModel.find.mockReturnValue({
@@ -85,107 +100,120 @@ describe('RidersService - Property-Based Tests', () => {
   // **Validates: Requirements 3.7, 4.4, 4.5, 10.7**
   // Property 11: Location Update Throttling
   describe('Property 11: Location Update Throttling', () => {
-    it('rejects location updates within 5 seconds of previous update', async () => {
-      const riderId = '507f1f77bcf86cd799439011';
-      const location = { latitude: 10.5, longitude: 20.5 };
+    const riderId = '507f1f77bcf86cd799439011';
+    const location = { latitude: 10.5, longitude: 20.5 };
 
+    const riderDoc = () => {
       const saveMock = jest.fn().mockImplementation(function (this: any) {
         return Promise.resolve(this);
       });
-
-      const mockRider: any = {
+      const rider: any = {
         _id: riderId,
-        role: UserRole.RIDER,
         currentLocation: { type: 'Point', coordinates: [0, 0] },
         save: saveMock,
       };
+      mockUserModel.findOne.mockResolvedValue(rider);
+      return { rider, saveMock };
+    };
 
-      // First update - should succeed
-      mockRedisService.get.mockResolvedValueOnce(null);
-      mockRedisService.set.mockResolvedValue(undefined);
-      mockUserModel.findOne.mockResolvedValueOnce(mockRider);
-      mockOrderModel.find.mockReturnValue({
-        select: jest.fn().mockReturnValue({
-          lean: jest.fn().mockReturnValue({
-            exec: jest.fn().mockResolvedValue([]),
-          }),
-        }),
-      });
-
-      await service.updateLocation(riderId, location);
-      expect(saveMock).toHaveBeenCalledTimes(1);
-
-      // Second update within 5 seconds - should be throttled
-      mockRedisService.get.mockResolvedValueOnce(Date.now().toString());
-
-      await expect(service.updateLocation(riderId, location)).rejects.toThrow(
-        'Location updates are throttled to 5 seconds minimum interval',
+    /** Behaves like Redis SET key value PX ms NX with a controllable clock. */
+    const fakeRedisWithClock = () => {
+      let now = 0;
+      const expiries = new Map<string, number>();
+      mockRedisClient.set.mockImplementation(
+        (key: string, _v: string, _px: string, ms: number) => {
+          const until = expiries.get(key);
+          if (until !== undefined && until > now) return Promise.resolve(null);
+          expiries.set(key, now + ms);
+          return Promise.resolve('OK');
+        },
       );
+      return { advance: (ms: number) => (now += ms) };
+    };
 
-      // Save should still only have been called once
+    it('drops updates within 2.5 s silently instead of throwing', async () => {
+      const { saveMock } = riderDoc();
+      const clock = fakeRedisWithClock();
+
+      await expect(service.updateLocation(riderId, location)).resolves.toEqual(
+        expect.objectContaining({ throttled: false }),
+      );
+      clock.advance(1000);
+      await expect(service.updateLocation(riderId, location)).resolves.toEqual({
+        throttled: true,
+      });
       expect(saveMock).toHaveBeenCalledTimes(1);
     });
 
-    it('allows location updates after throttle period expires', async () => {
-      const riderId = '507f1f77bcf86cd799439011';
-      const location = { latitude: 10.5, longitude: 20.5 };
+    it('accepts every update from a client sending every 5 s, even with jitter', async () => {
+      const { saveMock } = riderDoc();
+      const clock = fakeRedisWithClock();
 
-      mockRedisService.get.mockResolvedValue(null);
-      mockRedisService.set.mockResolvedValue(undefined);
-
-      const saveMock = jest.fn().mockImplementation(function (this: any) {
-        return Promise.resolve(this);
-      });
-
-      const mockRider: any = {
-        _id: riderId,
-        role: UserRole.RIDER,
-        currentLocation: { type: 'Point', coordinates: [0, 0] },
-        save: saveMock,
-      };
-
-      mockUserModel.findOne.mockResolvedValue(mockRider);
-      mockOrderModel.find.mockReturnValue({
-        select: jest.fn().mockReturnValue({
-          lean: jest.fn().mockReturnValue({
-            exec: jest.fn().mockResolvedValue([]),
-          }),
-        }),
-      });
-
-      await expect(
-        service.updateLocation(riderId, location),
-      ).resolves.toBeDefined();
+      for (const gap of [0, 5000, 4600, 5300, 4800, 5000]) {
+        clock.advance(gap);
+        const result = await service.updateLocation(riderId, location);
+        expect(result.throttled).toBe(false);
+      }
+      expect(saveMock).toHaveBeenCalledTimes(6);
     });
 
-    it('sets Redis throttle key with 5-second TTL on successful update', async () => {
-      const riderId = '507f1f77bcf86cd799439011';
-      const location = { latitude: 10.5, longitude: 20.5 };
-
-      mockRedisService.get.mockResolvedValue(null);
-      mockRedisService.set.mockResolvedValue(undefined);
-
-      const saveMock = jest.fn().mockImplementation(function (this: any) {
-        return Promise.resolve(this);
-      });
-
-      const mockRider: any = {
-        _id: riderId,
-        role: UserRole.RIDER,
-        currentLocation: { type: 'Point', coordinates: [0, 0] },
-        save: saveMock,
-      };
-
-      mockUserModel.findOne.mockResolvedValue(mockRider);
-
+    it('claims the throttle slot atomically with a 2500 ms PX NX key', async () => {
+      riderDoc();
       await service.updateLocation(riderId, location);
-
-      const throttleKey = `rider:location:throttle:${riderId}`;
-      expect(mockRedisService.set).toHaveBeenCalledWith(
-        throttleKey,
+      expect(mockRedisClient.set).toHaveBeenCalledWith(
+        `rider:location:throttle:${riderId}`,
         expect.any(String),
-        5,
+        'PX',
+        LOCATION_THROTTLE_MS,
+        'NX',
       );
+      expect(LOCATION_THROTTLE_MS).toBe(2500);
+    });
+
+    it('fails open when Redis is unavailable', async () => {
+      const { saveMock } = riderDoc();
+      mockRedisClient.set.mockRejectedValue(new Error('ECONNREFUSED'));
+      const result = await service.updateLocation(riderId, location);
+      expect(result.throttled).toBe(false);
+      expect(saveMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('recalculates ETA at most every 15 s and broadcasts etaUpdate when it does', async () => {
+      riderDoc();
+      const clock = fakeRedisWithClock();
+      const orderId = '507f1f77bcf86cd799439013';
+      mockOrderModel.find.mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockReturnValue({
+            exec: jest
+              .fn()
+              .mockResolvedValue([
+                { _id: orderId, orderStatus: OrderStatus.OUT_FOR_DELIVERY },
+              ]),
+          }),
+        }),
+      });
+      const eta = new Date(Date.now() + 600000);
+      mockETAService.recalculateForOrder.mockResolvedValue(eta);
+
+      for (let i = 0; i < 4; i += 1) {
+        await service.updateLocation(riderId, location);
+        clock.advance(5000);
+      }
+
+      // t=0 and t=15 s recalculate; t=5 s and t=10 s reuse the last ETA.
+      expect(mockETAService.recalculateForOrder).toHaveBeenCalledTimes(2);
+      expect(mockTrackingGateway.broadcastETAUpdate).toHaveBeenCalledTimes(2);
+      expect(mockTrackingGateway.broadcastETAUpdate).toHaveBeenCalledWith(
+        orderId,
+        eta,
+        expect.anything(),
+      );
+      expect(ETA_RECALC_INTERVAL_MS).toBe(15000);
+      // Location is still broadcast on every accepted update.
+      expect(
+        mockTrackingGateway.broadcastRiderLocationUpdate,
+      ).toHaveBeenCalledTimes(4);
     });
   });
 
@@ -216,19 +244,19 @@ describe('RidersService - Property-Based Tests', () => {
       const result = await service.updateLocation(riderId, location);
 
       // Verify currentLocation is updated with GeoJSON format
-      expect(result.currentLocation.type).toBe('Point');
-      expect(result.currentLocation.coordinates[0]).toBeCloseTo(
+      expect(result.rider!.currentLocation.type).toBe('Point');
+      expect(result.rider!.currentLocation.coordinates[0]).toBeCloseTo(
         location.longitude,
         3,
       );
-      expect(result.currentLocation.coordinates[1]).toBeCloseTo(
+      expect(result.rider!.currentLocation.coordinates[1]).toBeCloseTo(
         location.latitude,
         3,
       );
 
       // Verify lastLocationUpdate is set to a Date
-      expect(result.lastLocationUpdate).toBeDefined();
-      expect(result.lastLocationUpdate).toBeInstanceOf(Date);
+      expect(result.rider!.lastLocationUpdate).toBeDefined();
+      expect(result.rider!.lastLocationUpdate).toBeInstanceOf(Date);
 
       // Verify save was called
       expect(saveMock).toHaveBeenCalled();
@@ -264,15 +292,15 @@ describe('RidersService - Property-Based Tests', () => {
             });
 
             // Verify coordinates are stored correctly
-            expect(result.currentLocation.coordinates[0]).toBeCloseTo(
+            expect(result.rider!.currentLocation.coordinates[0]).toBeCloseTo(
               longitude,
               2,
             );
-            expect(result.currentLocation.coordinates[1]).toBeCloseTo(
+            expect(result.rider!.currentLocation.coordinates[1]).toBeCloseTo(
               latitude,
               2,
             );
-            expect(result.lastLocationUpdate).toBeInstanceOf(Date);
+            expect(result.rider!.lastLocationUpdate).toBeInstanceOf(Date);
           },
         ),
         { numRuns: 30 },
@@ -306,8 +334,8 @@ describe('RidersService - Property-Based Tests', () => {
       });
 
       // GeoJSON format: [longitude, latitude]
-      expect(result.currentLocation.coordinates[0]).toBe(longitude);
-      expect(result.currentLocation.coordinates[1]).toBe(latitude);
+      expect(result.rider!.currentLocation.coordinates[0]).toBe(longitude);
+      expect(result.rider!.currentLocation.coordinates[1]).toBe(latitude);
     });
 
     it('updates lastLocationUpdate timestamp on each location update', async () => {
@@ -334,13 +362,13 @@ describe('RidersService - Property-Based Tests', () => {
 
       // First update
       const result1 = await service.updateLocation(riderId, location1);
-      const timestamp1 = result1.lastLocationUpdate;
+      const timestamp1 = result1.rider!.lastLocationUpdate;
 
       expect(timestamp1).toBeInstanceOf(Date);
 
       // Second update (simulate time passing)
       const result2 = await service.updateLocation(riderId, location2);
-      const timestamp2 = result2.lastLocationUpdate;
+      const timestamp2 = result2.rider!.lastLocationUpdate;
 
       expect(timestamp2).toBeInstanceOf(Date);
       expect(timestamp1).toBeDefined();
@@ -781,7 +809,11 @@ describe('RidersService - Property-Based Tests', () => {
         mockOrders[1]._id,
       );
 
-      // updateLocation only recalculates the ETA; it does not broadcast it
+      expect(mockTrackingGateway.broadcastETAUpdate).toHaveBeenCalledWith(
+        mockOrders[1]._id,
+        mockETA,
+        expect.anything(),
+      );
     });
 
     it('does not broadcast if location update fails', async () => {

@@ -58,6 +58,17 @@ export class TimelineEntry {
 
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   changedBy!: Types.ObjectId;
+
+  /** Where the rider was when recording PICKED_UP / DELIVERED. */
+  @Prop({
+    type: { latitude: Number, longitude: Number, accuracy: Number },
+    _id: false,
+  })
+  location?: { latitude: number; longitude: number; accuracy?: number };
+
+  /** e.g. "rider_rejected: <reason>" when a rider hands the order back. */
+  @Prop()
+  note?: string;
 }
 
 export const TimelineEntrySchema = SchemaFactory.createForClass(TimelineEntry);
