@@ -1,8 +1,8 @@
 /**
- * LoginScreen — flat canvas (DESIGN.md "Auth/onboarding"): the AuthBar logo, a still life of everyday
- * produce in a neutral image well, a plain headline, and one surface card holding the "+91" phone
- * field (auto-formatted "98765 43210", violet focus ring) and the violet Continue button. Sends the OTP
- * via AuthService.sendOtp and opens OTP (unchanged).
+ * LoginScreen — flat canvas (DESIGN.md "Auth/onboarding"): the AuthBar logo, a strip of real catalogue
+ * products (the onboarding collage, condensed: ProductStrip), a plain headline, and one surface card
+ * holding the "+91" phone field (auto-formatted "98765 43210", violet focus ring) and the violet
+ * Continue button. Sends the OTP via AuthService.sendOtp and opens OTP (unchanged).
  * Motion: the bar stays put while the content slides left into OTP (and back from the left on return);
  * the focus ring springs in; opened from Splash, the bar logo settles into place.
  * Theme: canvas + surface card in both modes (dark: #0F0F0F / #1A1A1A).
@@ -14,15 +14,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radii, space, type } from '../constants/theme';
 import { makeStyles, useTheme } from '../theme';
 import { springs, durations, easings } from '../theme/motion';
-import { Image } from 'expo-image';
 import { Button, IconButton, Screen, Text, toast } from '../components/ui';
 import { AuthService } from '../services';
 import { describeError, friendlyError } from '../services/normalize';
 import { useTranslation } from '../hooks/useTranslation';
 import { AuthBar, AuthHeading } from './auth/AuthHero';
 import { useFromSplashHandoff, useSheetSlide } from './auth/authMotion';
-
-const ART = require('../assets/onboarding/daily-vegetables.webp');
+import { ProductStrip } from './onboarding/ProductStrip';
 
 const formatPhone = (digits) => (digits.length > 5 ? `${digits.slice(0, 5)} ${digits.slice(5)}` : digits);
 
@@ -94,9 +92,7 @@ const LoginScreen = ({ navigation, route }) => {
                     showsVerticalScrollIndicator={false}
                 >
                     <Animated.View style={[styles.body, slide.style]}>
-                        <View style={styles.well}>
-                            <Image source={ART} style={styles.art} contentFit="contain" accessible={false} transition={0} />
-                        </View>
+                        <ProductStrip style={styles.strip} />
 
                         <AuthHeading
                             title={isHi ? 'लॉग इन या साइन अप करें' : 'Log in or sign up'}
@@ -174,8 +170,7 @@ const useStyles = makeStyles((t) => ({
     flex: { flex: 1 },
     scroll: { flexGrow: 1, paddingHorizontal: space.lg, paddingTop: space.sm },
     body: { gap: space.xl },
-    well: { height: 176, borderRadius: radii.card, backgroundColor: t.colors.imageWell, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
-    art: { width: '86%', height: '86%' },
+    strip: { marginHorizontal: -space.lg },
     card: {
         backgroundColor: t.colors.surface,
         borderRadius: radii.card,
