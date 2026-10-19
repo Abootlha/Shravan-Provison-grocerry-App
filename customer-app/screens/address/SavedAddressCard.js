@@ -5,7 +5,7 @@ import { Badge, Button, IconButton, PressableScale, SwipeableRow, Text } from '.
 import { radii, space } from '../../constants/theme';
 import { makeStyles, useTheme } from '../../theme';
 import { press } from '../../theme/motion';
-import { addressIcon, formatAddressLine } from './addressUtils';
+import { addressIcon, formatFullAddress, formatPhone, labelText } from './addressUtils';
 
 /**
  * A saved address: tap to deliver there; edit / delete / make default inline.
@@ -16,7 +16,9 @@ import { addressIcon, formatAddressLine } from './addressUtils';
 function SavedAddressCardBase({ item, index, selected, distanceKm, deliverable, onSelect, onEdit, onDelete, onSwipeDelete, onMakeDefault, isHi }) {
     const styles = useStyles();
     const { colors } = useTheme();
-    const title = item.type || 'Home';
+    const title = labelText(item.type || 'Home', isHi);
+    const fullAddress = formatFullAddress(item, isHi);
+    const receiver = [item.receiverName, formatPhone(item.receiverPhone)].filter(Boolean).join(' · ');
     const deleteLabel = isHi ? 'हटाएं' : 'Delete';
 
     const body = (
@@ -27,7 +29,7 @@ function SavedAddressCardBase({ item, index, selected, distanceKm, deliverable, 
                 scaleTo={press.subtle}
                 accessibilityRole="radio"
                 accessibilityState={{ selected, checked: selected }}
-                accessibilityLabel={`${title}, ${formatAddressLine(item)}`}
+                accessibilityLabel={[title, fullAddress, receiver].filter(Boolean).join(', ')}
                 style={styles.top}
             >
                 <View style={[styles.tile, selected && styles.tileOn]}>
@@ -39,7 +41,8 @@ function SavedAddressCardBase({ item, index, selected, distanceKm, deliverable, 
                         {item.isDefault ? <Badge tone="soft" size="sm" label={isHi ? 'डिफ़ॉल्ट' : 'Default'} /> : null}
                         {selected ? <MaterialCommunityIcons name="check-circle" size={18} color={colors.brandText} /> : null}
                     </View>
-                    <Text variant="body" color="secondary" numberOfLines={2}>{formatAddressLine(item)}</Text>
+                    <Text variant="body" color="secondary" numberOfLines={3}>{fullAddress}</Text>
+                    {receiver ? <Text variant="caption" color="muted" numberOfLines={1}>{receiver}</Text> : null}
                     {distanceKm != null ? (
                         <Text variant="caption" color={deliverable ? 'muted' : 'error'}>
                             {deliverable

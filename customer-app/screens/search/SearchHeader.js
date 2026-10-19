@@ -10,7 +10,7 @@
  * A new `fromRect` (a later tap on Home's bar) replays it; the dock's Search tab, which passes no
  * rect, doesn't animate.
  */
-import React, { forwardRef, useCallback, useEffect, useRef } from 'react';
+import React, { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, TextInput, View } from 'react-native';
 import Animated, {
     interpolate,
@@ -21,13 +21,12 @@ import Animated, {
     withTiming,
 } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { IconButton, RotatingPlaceholder } from '../../components/ui';
+import { IconButton, RotatingPlaceholder, Text } from '../../components/ui';
 import { radii, space, type } from '../../constants/theme';
 import { useTheme, makeStyles } from '../../theme';
 import { springs, durations, easings } from '../../theme/motion';
 
-const SUGGESTIONS_EN = ['milk', 'atta', 'eggs', 'bread', 'chips', 'paneer'];
-const SUGGESTIONS_HI = ['दूध', 'आटा', 'अंडे', 'ब्रेड', 'चिप्स', 'पनीर'];
+import { noteHintIndex, takeHintStart } from './useSearchCatalog';
 
 const validRect = (r) => !!r && [r.x, r.y, r.width, r.height].every((n) => Number.isFinite(n)) && r.width > 0 && r.height > 0;
 
@@ -108,8 +107,14 @@ function useFromRect(fromRect, fieldRef) {
     return { surface, content, back };
 }
 
-const SearchHeader = forwardRef(function SearchHeader({ value, onChangeText, onSubmit, onBack, onClear, isHi, fromRect }, ref) {
+/**
+ * `hints`: real in-stock product names (useSearchCatalog). The hint starts on the next name each
+ * visit, changes once, and moves on again whenever the field loses focus — never an endless loop.
+ */
+const SearchHeader = forwardRef(function SearchHeader({ value, onChangeText, onSubmit, onBack, onClear, isHi, fromRect, hints = [] }, ref) {
     const styles = useStyles();
+    const [hintStart] = useState(takeHintStart);
+    const [blurs, setBlurs] = useState(0);
     const { colors, isDark } = useTheme();
     const fieldRef = useRef(null);
     const motion = useFromRect(fromRect, fieldRef);
@@ -132,6 +137,7 @@ const SearchHeader = forwardRef(function SearchHeader({ value, onChangeText, onS
                             value={value}
                             onChangeText={onChangeText}
                             onSubmitEditing={onSubmit}
+                            onBlur={() => setBlurs((n) => n + 1)}
                             autoFocus
                             autoCorrect={false}
                             autoCapitalize="none"
@@ -143,12 +149,21 @@ const SearchHeader = forwardRef(function SearchHeader({ value, onChangeText, onS
                             style={styles.input}
                             maxFontSizeMultiplier={1.3}
                         />
-                        {!value ? (
+                        {!value && hints.length ? (
                             <RotatingPlaceholder
-                                items={isHi ? SUGGESTIONS_HI : SUGGESTIONS_EN}
+                                key={hints.length}
+                                items={hints}
                                 prefix={isHi ? 'खोजें ' : 'Search for '}
+                                startIndex={hintStart}
+                                maxChanges={1}
+                                advanceKey={blurs}
+                                onIndex={noteHintIndex}
                                 style={[styles.placeholder, { pointerEvents: 'none' }]}
                             />
+                        ) : !value ? (
+                            <Text variant="body" color="muted" numberOfLines={1} style={[styles.placeholder, { pointerEvents: 'none' }]}>
+                                {isHi ? 'सामान खोजें' : 'Search for groceries'}
+                            </Text>
                         ) : null}
                     </View>
                     {value ? (

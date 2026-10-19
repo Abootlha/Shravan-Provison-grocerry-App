@@ -1,5 +1,5 @@
 import React, { memo, useEffect, useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { View } from 'react-native';
 import Animated, {
     useAnimatedStyle,
     useReducedMotion,
@@ -34,31 +34,33 @@ const Scooter = ({ pulseKey, icon = 'moped' }) => {
     return (
         <View style={styles.tile}>
             <Animated.View style={bikeStyle}>
-                <MaterialCommunityIcons name={icon} size={22} color={colors.ink} />
+                <MaterialCommunityIcons name={icon} size={18} color={colors.ink} />
             </Animated.View>
         </View>
     );
 };
 
 /**
+ * Slim delivery line at the top of checkout: "Delivering in 10 mins" (or the closed line), with
+ * the free-delivery meter as `children`. The item count lives on the items card, not here.
+ *
  * minutes     store settings estimatedDeliveryMinutes, or null (then no time is promised)
  * closedLine  "Closed · opens at 8 AM" when the store is closed (replaces the delivery line)
  */
 function DeliveryEtaCardBase({ minutes = null, closedLine = null, itemCount = 0, isHi, children }) {
     const styles = useStyles();
-    const shipment = isHi ? `${itemCount} सामान की शिपमेंट` : `Shipment of ${itemCount} item${itemCount === 1 ? '' : 's'}`;
     let title;
     if (closedLine) {
-        title = <Text variant="title" accessibilityRole="header">{closedLine}</Text>;
+        title = <Text variant="bodyStrong" accessibilityRole="header">{closedLine}</Text>;
     } else if (minutes) {
         title = (
-            <Text variant="title" weight="medium" accessibilityRole="header">
+            <Text variant="bodyStrong" weight="medium" accessibilityRole="header">
                 {isHi ? 'डिलीवरी ' : 'Delivering in '}
-                <Text variant="title">{isHi ? `${minutes} मिनट में` : `${minutes} mins`}</Text>
+                <Text variant="bodyStrong">{isHi ? `${minutes} मिनट में` : `${minutes} mins`}</Text>
             </Text>
         );
     } else {
-        title = <Text variant="title" accessibilityRole="header">{isHi ? 'आपकी डिलीवरी' : 'Your delivery'}</Text>;
+        title = <Text variant="bodyStrong" accessibilityRole="header">{isHi ? 'आपकी डिलीवरी' : 'Your delivery'}</Text>;
     }
     return (
         <Card padding={0} radius={GROUP_RADIUS} style={styles.card}>
@@ -66,13 +68,11 @@ function DeliveryEtaCardBase({ minutes = null, closedLine = null, itemCount = 0,
                 <Scooter pulseKey={itemCount} icon={closedLine ? 'store-clock-outline' : 'moped'} />
                 <View style={styles.texts}>
                     {title}
-                    <Text variant="caption" color="muted">
-                        {closedLine
-                            ? isHi
-                                ? 'आपकी कार्ट सहेजी हुई है। स्टोर खुलने पर ऑर्डर करें।'
-                                : 'Your cart is saved. You can order when the store opens.'
-                            : shipment}
-                    </Text>
+                    {closedLine ? (
+                        <Text variant="caption" color="muted">
+                            {isHi ? 'आपकी कार्ट सहेजी हुई है। स्टोर खुलने पर ऑर्डर करें।' : 'Your cart is saved. You can order when the store opens.'}
+                        </Text>
+                    ) : null}
                 </View>
             </View>
             {children ? <View style={styles.footer}>{children}</View> : null}
@@ -84,17 +84,15 @@ export const DeliveryEtaCard = memo(DeliveryEtaCardBase);
 
 const useStyles = makeStyles((t) => ({
     card: { overflow: 'hidden' },
-    row: { flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.lg },
+    row: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg, paddingVertical: space.md },
     footer: {
         paddingHorizontal: space.lg,
-        paddingTop: space.md,
-        paddingBottom: space.lg,
-        borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: t.colors.hairline,
+        paddingTop: 0,
+        paddingBottom: space.md,
     },
     tile: {
-        width: 44,
-        height: 44,
+        width: 32,
+        height: 32,
         borderRadius: radii.well,
         backgroundColor: t.colors.surfaceSunken,
         alignItems: 'center',

@@ -7,6 +7,10 @@ import { AdminRidersService } from './admin-riders.service';
 import { SessionRevokerService } from '../auth/session-revoker.service';
 import { Rider, RiderSchema } from './schemas/rider.schema';
 import { Order, OrderSchema } from '../orders/schemas/order.schema';
+import {
+  OrderStatusLog,
+  OrderStatusLogSchema,
+} from '../orders/schemas/order-status-log.schema';
 import { RedisService } from '../../common/utils/redis.service';
 import { OrdersModule } from '../orders/orders.module';
 import { TrackingModule } from '../../sockets/tracking.module';
@@ -16,6 +20,7 @@ import { TrackingModule } from '../../sockets/tracking.module';
     MongooseModule.forFeature([
       { name: Rider.name, schema: RiderSchema },
       { name: Order.name, schema: OrderSchema },
+      { name: OrderStatusLog.name, schema: OrderStatusLogSchema },
     ]),
     forwardRef(() => OrdersModule),
     forwardRef(() => TrackingModule),

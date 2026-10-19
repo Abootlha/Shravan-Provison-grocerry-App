@@ -1,13 +1,15 @@
 /**
  * AddToCartButton — THE key interaction. Fixed width per size, so a grid never jumps.
  *
- *   quantity 0  → surface "ADD" (plain 1px violet border, radius 8, 13/800 violet), small "+" in the corner.
- *                 No offset edge, no shadow (DESIGN.md).
+ *   quantity 0  → surface "ADD" (plain 1px violet border, radius 8, 13/800 violet). A small "+" sits in the
+ *                 corner ONLY when the product has more than one pack size (`options` > 1): then ADD
+ *                 opens the variant chooser instead of adding. No offset edge, no shadow (DESIGN.md).
  *   tap         → a solid violet fill grows from the centre (same footprint) while "ADD" shrinks away
  *                 and the white − / + glyphs slide outward; the white count rolls in
- *   −/+         → count rolls (up on increment, down on decrement); light haptic each change
+ *   ADD         → light impact haptic
+ *   −/+         → count rolls (up on increment, down on decrement); selection haptic each tick
  *   back to 0   → the stepper morphs back into "ADD"
- *   at `max`    → + shakes, warning haptic, `onMaxReached` fires
+ *   at `max`    → + is dimmed (stock limit); pressing it shakes, warning haptic, `onMaxReached` fires
  *
  * Props
  *   quantity      number (controlled; source of truth is your cart state)
@@ -15,7 +17,8 @@
  *   onIncrement   () => void
  *   onDecrement   () => void
  *   size          'sm' 64×32 (grid cards) | 'md' 80×36 (lists, default) | 'lg' 112×44 (PDP / sticky bars)
- *   max           number — upper limit (optional)
+ *   max           number — upper limit, e.g. units in stock (optional)
+ *   options       number — pack sizes on offer; > 1 shows the "+" corner mark
  *   onMaxReached  () => void
  *   disabled      boolean — greyed, no interaction
  *   outOfStock    boolean — greyed "Sold out" (label override: outOfStockLabel)
@@ -45,11 +48,13 @@ import Animated, {
     withTiming,
 } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSelector } from 'react-redux';
 import { radii, fontFamily } from '../../constants/theme';
 import { useTheme } from '../../theme';
 import { springs, durations } from '../../theme/motion';
 import { RollingNumber } from './RollingNumber';
 import haptics from './haptics';
+import { pe } from './pointerEvents';
 
 export const ADD_BUTTON_SIZES = {
     sm: { w: 64, h: 32, font: 13, icon: 16, plus: 9, radius: radii.add },
@@ -93,10 +98,13 @@ export function AddToCartButton({
     label = 'ADD',
     outOfStockLabel = 'Sold out',
     productName = 'item',
+    options = 0,
     style,
 }) {
     const sz = ADD_BUTTON_SIZES[size] || ADD_BUTTON_SIZES.md;
     const { colors } = useTheme();
+    // screen-reader labels follow the app language
+    const hi = useSelector((s) => (s.language?.currentLanguage || s.auth?.language) === 'hi');
     const reduce = useReducedMotion();
     const active = quantity > 0 && !outOfStock;
     const p = useSharedValue(active ? 1 : 0);
@@ -163,11 +171,11 @@ export function AddToCartButton({
             onMaxReached && onMaxReached();
             return;
         }
-        haptics.light();
+        haptics.selection();
         onIncrement && onIncrement();
     };
     const dec = () => {
-        haptics.light();
+        haptics.selection();
         onDecrement && onDecrement();
     };
 
@@ -177,7 +185,7 @@ export function AddToCartButton({
         if (e.nativeEvent.actionName === 'activate') (active ? inc : add)();
     };
 
-    const greyFg = colors.inkDisabled;
+    const greyFg = colors.inkMuted; // a "Sold out" label still has to be readable (≥4.5:1 in both themes)
 
     return (
         <Animated.View
@@ -185,7 +193,21 @@ export function AddToCartButton({
             accessible
             accessibilityRole={active ? 'adjustable' : 'button'}
             accessibilityLabel={
-                outOfStock ? `${productName} is ${outOfStockLabel.toLowerCase()}` : active ? `${productName} quantity` : `Add ${productName} to cart`
+                hi
+                    ? outOfStock
+                        ? `${productName}, ${outOfStockLabel}`
+                        : active
+                          ? `${productName}, कार्ट में ${quantity}${atMax ? ', स्टॉक की सीमा पूरी' : ''}`
+                          : options > 1
+                            ? `${productName} जोड़ें, ${options} पैक साइज़`
+                            : `${productName} कार्ट में जोड़ें`
+                    : outOfStock
+                      ? `${productName} is ${outOfStockLabel.toLowerCase()}`
+                      : active
+                        ? `${productName}, ${quantity} in cart${atMax ? ', stock limit reached' : ''}`
+                        : options > 1
+                          ? `Add ${productName}, ${options} pack sizes`
+                          : `Add ${productName} to cart`
             }
             accessibilityValue={active ? { text: `${quantity}` } : undefined}
             accessibilityState={{ disabled: inactive }}
@@ -214,7 +236,7 @@ export function AddToCartButton({
             />
 
             {/* ADD state */}
-            <Animated.View style={[StyleSheet.absoluteFill, addStyle, { pointerEvents: active ? 'none' : 'auto' }]}>
+            <Animated.View style={[StyleSheet.absoluteFill, addStyle, active ? pe.none : pe.auto]}>
                 <Pressable
                     accessible={false}
                     onPress={add}
@@ -233,7 +255,7 @@ export function AddToCartButton({
                         {outOfStock ? outOfStockLabel : label}
                     </RNText>
                 </Pressable>
-                {!inactive ? (
+                {!inactive && options > 1 ? (
                     <RNText
                         allowFontScaling={false}
                         style={[styles.plus, { fontSize: sz.plus + 3, lineHeight: sz.plus + 4, color: colors.brandText }, { pointerEvents: 'none' }]}
@@ -245,9 +267,9 @@ export function AddToCartButton({
 
             {/* Stepper state */}
             {stepperMounted.current ? (
-                <Animated.View style={[StyleSheet.absoluteFill, styles.row, stepperStyle, { pointerEvents: active ? 'box-none' : 'none' }]}>
+                <Animated.View style={[StyleSheet.absoluteFill, styles.row, stepperStyle, active ? pe.boxNone : pe.none]}>
                     <Animated.View style={[styles.side, minusStyle]}>
-                        <StepGlyph name="minus" size={sz.icon} onPress={dec} side="left" label="Decrease quantity" color={colors.onBrand} />
+                        <StepGlyph name="minus" size={sz.icon} onPress={dec} side="left" label={hi ? 'मात्रा घटाएँ' : 'Decrease quantity'} color={colors.onBrand} />
                     </Animated.View>
                     <View style={[styles.count, { pointerEvents: 'none' }]}>
                         <RollingNumber
@@ -258,7 +280,9 @@ export function AddToCartButton({
                         />
                     </View>
                     <Animated.View style={[styles.side, plusStyle]}>
-                        <StepGlyph name="plus" size={sz.icon} onPress={inc} side="right" label="Increase quantity" shake={shake} color={colors.onBrand} />
+                        <View style={[styles.fill, atMax && styles.dim]}>
+                            <StepGlyph name="plus" size={sz.icon} onPress={inc} side="right" label={atMax ? (hi ? 'स्टॉक की सीमा पूरी' : 'Stock limit reached') : hi ? 'मात्रा बढ़ाएँ' : 'Increase quantity'} shake={shake} color={colors.onBrand} />
+                        </View>
                     </Animated.View>
                 </Animated.View>
             ) : null}
@@ -275,6 +299,8 @@ const styles = StyleSheet.create({
     side: { flex: 1 },
     half: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     count: { alignItems: 'center', justifyContent: 'center', minWidth: 18 },
+    fill: { flex: 1 },
+    dim: { opacity: 0.45 },
 });
 
 export default AddToCartButton;

@@ -40,7 +40,7 @@ const WEB = Platform.OS === 'web';
 
 const VARIANTS = {
     card: { inset: '8%', radius: radii.well, glyph: 0.42 },
-    hero: { inset: '10%', radius: 0, glyph: 0.32 },
+    hero: { inset: '5%', radius: 0, glyph: 0.32 }, // PDP: the product fills the hero
     thumb: { inset: '8%', radius: radii.well, glyph: 0.5 },
 };
 
@@ -115,6 +115,11 @@ function ProductImage({
                     accessible={false}
                 />
             ) : null}
+            {dimmed && status === 'loaded' ? (
+                // Sold-out wash: a veil of the well colour over the pack shot. (An opacity on the
+                // image itself is overridden by expo-image's fade-in on web, so it never showed.)
+                <View style={[StyleSheet.absoluteFill, styles.veil, { backgroundColor: tint || colors.imageWell }, { pointerEvents: 'none' }]} />
+            ) : null}
             {status === 'loading' ? (
                 <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
                     <Skeleton width="100%" height="100%" radius={r} tint={tint || colors.imageWell} />
@@ -151,6 +156,9 @@ const styles = StyleSheet.create({
     dimmed: {
         opacity: 0.45,
         filter: [{ grayscale: 1 }],
+    },
+    veil: {
+        opacity: 0.55,
     },
     dimmedGlyph: {
         opacity: 0.6,

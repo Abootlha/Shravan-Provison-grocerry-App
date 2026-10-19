@@ -424,7 +424,9 @@ function ItemRow({ item }: { item: OrderItem }) {
                     {item.name}
                 </p>
                 <p className="text-xs text-muted-foreground tabular-nums">
+                    {item.unit ? `${item.unit} · ` : ''}
                     {qty} × {formatMoney(price)}
+                    {item.sku ? <span className="ml-1.5">SKU {item.sku}</span> : null}
                 </p>
             </div>
             <Money value={qty * price} className="font-medium" />

@@ -28,7 +28,7 @@ export const PAYMENT_METHOD_MAP = {
     cod: 'COD',
     card: 'CARD',
     pluxee: 'CARD',
-    netbanking: 'CARD',
+    netbanking: 'NETBANKING',
     wallet: 'WALLET',
     wallet_sk: 'WALLET',
     amazon_wallet: 'WALLET',
@@ -45,8 +45,9 @@ export const getPayUOptions = (selectedPayment) => {
         case 'paytm':
         case 'amazon_upi':
         case 'super_upi':
-        case 'upi':
             return { pg: 'UPI', bankcode: 'INTENT' };
+        // "UPI" in the sheet: PayU's page lets the customer pick any app, scan a QR or type an ID.
+        case 'upi':
         case 'add_upi': return { pg: 'UPI' };
         case 'card': return { pg: 'CC' };
         case 'pluxee': return { pg: 'CC' };
@@ -56,7 +57,7 @@ export const getPayUOptions = (selectedPayment) => {
         case 'wallet':
         case 'wallet_sk':
             return { pg: 'CASH' };
-        default: return { pg: 'UPI', bankcode: 'INTENT' };
+        default: return { pg: 'UPI' };
     }
 };
 

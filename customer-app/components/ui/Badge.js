@@ -4,7 +4,7 @@
  * <Badge> props
  *   label     string, SENTENCE CASE ("12 mins", "20% off", "Bestseller") — never uppercase, no tracking
  *   tone      'neutral' sunken fill, secondary ink (default — most labels: "Default", "New", ETA)
- *             'discount' savings green fill, white text ("20% off", "₹24 off") — aliases 'offer' / 'gold'
+ *             'discount' savings green tint, green text ("20% off", "₹24 off") — aliases 'offer' / 'gold'
  *             'success' green tint, green ink ("Delivered", "Verified", "Veg")
  *             'brand'   violet fill, white text — only for a state the user acted on ("Selected")
  *             'accent'  alias of brand
@@ -36,7 +36,9 @@ import { RollingNumber } from './RollingNumber';
 
 const useTones = makeThemed(({ colors: c }) => {
     const NIGHT = { bg: c.surfaceNight, fg: c.onNight };
-    const SAVINGS = { bg: c.offer, fg: c.onGold }; // savings green fill (gold is removed)
+    // DESIGN.md: savings are green TEXT on the green tint, never a solid fill (a solid #4CC26A block
+    // was the loudest thing on dark cards). successInk on successTint is ≥4.5:1 in both themes.
+    const SAVINGS = { bg: c.successTint, fg: c.successInk };
     return {
         brand: { bg: c.brand, fg: c.onBrand },
         accent: { bg: c.brand, fg: c.onBrand },

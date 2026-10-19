@@ -1,8 +1,8 @@
 /**
- * LoginScreen — flat canvas (DESIGN.md "Auth/onboarding"): the AuthBar logo, a still life of everyday
- * produce in a neutral image well, a plain headline, and one surface card holding the "+91" phone
- * field (auto-formatted "98765 43210", violet focus ring) and the violet Continue button. Sends the OTP
- * via AuthService.sendOtp and opens OTP (unchanged).
+ * LoginScreen — flat canvas (DESIGN.md "Auth/onboarding"): the AuthBar logo, a violet card of real
+ * catalogue products (the onboarding hero panel in miniature: ProductStrip), a plain headline, and one
+ * surface card holding the "+91" phone field (auto-formatted "98765 43210", violet focus ring) and the
+ * violet Continue button. Sends the OTP via AuthService.sendOtp and opens OTP (unchanged).
  * Motion: the bar stays put while the content slides left into OTP (and back from the left on return);
  * the focus ring springs in; opened from Splash, the bar logo settles into place.
  * Theme: canvas + surface card in both modes (dark: #0F0F0F / #1A1A1A).
@@ -14,15 +14,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radii, space, type } from '../constants/theme';
 import { makeStyles, useTheme } from '../theme';
 import { springs, durations, easings } from '../theme/motion';
-import { Image } from 'expo-image';
 import { Button, IconButton, Screen, Text, toast } from '../components/ui';
 import { AuthService } from '../services';
 import { describeError, friendlyError } from '../services/normalize';
 import { useTranslation } from '../hooks/useTranslation';
+import { isValidMobile, mobileError, normalizeMobile } from '../utils/phone';
 import { AuthBar, AuthHeading } from './auth/AuthHero';
 import { useFromSplashHandoff, useSheetSlide } from './auth/authMotion';
-
-const ART = require('../assets/onboarding/daily-vegetables.webp');
+import { ProductStrip } from './onboarding/ProductStrip';
+import { useOnboardingType } from './onboarding/type';
 
 const formatPhone = (digits) => (digits.length > 5 ? `${digits.slice(0, 5)} ${digits.slice(5)}` : digits);
 
@@ -33,6 +33,7 @@ const LoginScreen = ({ navigation, route }) => {
     const slide = useSheetSlide();
     const reduce = useReducedMotion();
     const { t, isHi } = useTranslation();
+    const T = useOnboardingType(isHi); // Devanagari face for the Hindi button label
     const insets = useSafeAreaInsets();
     const [phoneNumber, setPhoneNumber] = useState('');
     const [isValid, setIsValid] = useState(false);
@@ -51,13 +52,16 @@ const LoginScreen = ({ navigation, route }) => {
         transform: [{ scaleX: 0.97 + 0.03 * ring.value }, { scaleY: 0.9 + 0.1 * ring.value }],
     }));
 
+    // Same rule as the address form (utils/phone): a pasted "+91 98765 43210" becomes 10 digits,
+    // and only numbers starting 6-9 are accepted.
     const handlePhoneChange = (text) => {
-        const cleaned = text.replace(/[^0-9]/g, '');
+        const cleaned = normalizeMobile(text);
         if (cleaned.length <= 10) {
             setPhoneNumber(cleaned);
-            setIsValid(cleaned.length === 10);
+            setIsValid(isValidMobile(cleaned));
         }
     };
+    const phoneError = phoneNumber.length === 10 ? mobileError(phoneNumber, isHi) : null;
 
     const handleContinue = async () => {
         if (!isValid || isLoading) return;
@@ -94,9 +98,7 @@ const LoginScreen = ({ navigation, route }) => {
                     showsVerticalScrollIndicator={false}
                 >
                     <Animated.View style={[styles.body, slide.style]}>
-                        <View style={styles.well}>
-                            <Image source={ART} style={styles.art} contentFit="contain" accessible={false} transition={0} />
-                        </View>
+                        <ProductStrip />
 
                         <AuthHeading
                             title={isHi ? 'लॉग इन या साइन अप करें' : 'Log in or sign up'}
@@ -120,7 +122,7 @@ const LoginScreen = ({ navigation, route }) => {
                                         keyboardType="phone-pad"
                                         textContentType="telephoneNumber"
                                         autoComplete="tel-national"
-                                        maxLength={11}
+                                        maxLength={16}
                                         onFocus={() => setIsFocused(true)}
                                         onBlur={() => setIsFocused(false)}
                                         onSubmitEditing={handleContinue}
@@ -146,6 +148,9 @@ const LoginScreen = ({ navigation, route }) => {
                                     ) : null}
                                 </View>
                             </View>
+                            {phoneError ? (
+                                <Text variant="caption" color="error" accessibilityLiveRegion="polite">{phoneError}</Text>
+                            ) : null}
 
                             <Button
                                 size="lg"
@@ -154,14 +159,12 @@ const LoginScreen = ({ navigation, route }) => {
                                 loading={isLoading}
                                 disabled={!isValid}
                                 onPress={handleContinue}
+                                labelStyle={T.button}
                             />
                         </View>
 
                         <Text variant="caption" color="muted" align="center" style={styles.terms}>
-                            {t('byContinu')}{' '}
-                            <Text variant="caption" color="ink" style={styles.link}>{t('terms')}</Text>
-                            {' '}{t('and')}{' '}
-                            <Text variant="caption" color="ink" style={styles.link}>{t('privacyPolicy')}</Text>
+                            {t('agreeToTerms')}
                         </Text>
                     </Animated.View>
                 </ScrollView>
@@ -174,8 +177,6 @@ const useStyles = makeStyles((t) => ({
     flex: { flex: 1 },
     scroll: { flexGrow: 1, paddingHorizontal: space.lg, paddingTop: space.sm },
     body: { gap: space.xl },
-    well: { height: 176, borderRadius: radii.card, backgroundColor: t.colors.imageWell, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
-    art: { width: '86%', height: '86%' },
     card: {
         backgroundColor: t.colors.surface,
         borderRadius: radii.card,
@@ -209,7 +210,6 @@ const useStyles = makeStyles((t) => ({
         outlineStyle: 'none',
     },
     terms: { paddingHorizontal: space.lg },
-    link: { textDecorationLine: 'underline' },
 }));
 
 export default LoginScreen;

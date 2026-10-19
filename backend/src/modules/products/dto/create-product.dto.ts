@@ -13,9 +13,15 @@ import {
   ValidateNested,
   IsEnum,
   IsInt,
+  Validate,
 } from 'class-validator';
 import { ProductStatus } from '../schemas/product.schema';
 import { Type } from 'class-transformer';
+import {
+  MAX_VARIANTS,
+  ProductVariantDto,
+  ValidVariantsConstraint,
+} from './variant.dto';
 import { IsImageSource } from './image-source.validator';
 import { NutritionDto } from './nutrition.dto';
 import { ValidateHierarchy } from '../validators/hierarchy.validator';
@@ -116,6 +122,11 @@ export class CreateProductDto {
   @IsBoolean()
   isAvailable?: boolean;
 
+  /** Fresh produce / dairy: short shelf life, perishable returns policy. */
+  @IsOptional()
+  @IsBoolean()
+  isPerishable?: boolean;
+
   /** draft | active | archived. Defaults to active on create. */
   @IsOptional()
   @IsEnum(ProductStatus)
@@ -135,4 +146,13 @@ export class CreateProductDto {
   @IsOptional()
   @IsBoolean()
   removeBackground?: boolean;
+
+  /** Pack sizes (Blinkit-style variants). Sent whole: the list replaces the stored one. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_VARIANTS)
+  @ValidateNested({ each: true })
+  @Type(() => ProductVariantDto)
+  @Validate(ValidVariantsConstraint)
+  variants?: ProductVariantDto[];
 }

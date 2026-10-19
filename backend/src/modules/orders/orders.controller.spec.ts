@@ -6,6 +6,9 @@ import { OrdersService } from './orders.service';
 import { OrderStatus } from './schemas/order.schema';
 import { UserRole } from '../users/schemas/user.schema';
 import { Types } from 'mongoose';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { UpdateStatusDto } from './dto';
 
 describe('OrdersController - Property-Based Tests', () => {
   let controller: OrdersController;
@@ -21,6 +24,7 @@ describe('OrdersController - Property-Based Tests', () => {
     getStatusHistory: jest.fn(),
     getTrackingOrderById: jest.fn(),
     findAccessInfoByOrderId: jest.fn(),
+    riderRejectOrder: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -1017,6 +1021,64 @@ describe('OrdersController - Property-Based Tests', () => {
         orderId,
         { includeDeliveryOtp: false },
       );
+    });
+
+    it('forwards the rider location for the timeline snapshot', async () => {
+      mockOrdersService.findById.mockResolvedValue({
+        _id: new Types.ObjectId(orderId),
+        riderId: new Types.ObjectId(riderId),
+        orderStatus: OrderStatus.PACKED,
+      });
+      mockOrdersService.updateStatus.mockResolvedValue({});
+      const location = { latitude: 26.7, longitude: 83.4 };
+
+      await controller.updateOrderStatus(req, orderId, {
+        status: OrderStatus.PICKED_UP,
+        location,
+      });
+
+      expect(mockOrdersService.updateStatus).toHaveBeenCalledWith(
+        orderId,
+        OrderStatus.PICKED_UP,
+        riderId,
+        expect.objectContaining({ location }),
+      );
+    });
+
+    it('validates the status location payload', async () => {
+      const bad = plainToInstance(UpdateStatusDto, {
+        status: OrderStatus.PICKED_UP,
+        location: { latitude: 120, longitude: 10 },
+      });
+      expect(await validate(bad)).not.toHaveLength(0);
+      const ok = plainToInstance(UpdateStatusDto, {
+        status: OrderStatus.PICKED_UP,
+        location: { latitude: 0, longitude: 0, accuracy: 5 },
+      });
+      expect(await validate(ok)).toHaveLength(0);
+    });
+
+    it('lets only riders reject, passing the optional reason', async () => {
+      mockOrdersService.riderRejectOrder.mockResolvedValue({
+        order: {},
+        reassigned: true,
+      });
+      await expect(
+        controller.rejectOrder(req, orderId, { reason: 'Flat tyre' }),
+      ).resolves.toEqual({ order: {}, reassigned: true });
+      expect(mockOrdersService.riderRejectOrder).toHaveBeenCalledWith(
+        orderId,
+        riderId,
+        'Flat tyre',
+      );
+
+      await expect(
+        controller.rejectOrder(
+          { user: { userId: riderId, role: UserRole.CUSTOMER } },
+          orderId,
+          {},
+        ),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 });

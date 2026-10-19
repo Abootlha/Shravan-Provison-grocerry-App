@@ -1,15 +1,15 @@
-import React, { useEffect, useRef } from 'react';
-import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { DarkTheme, DefaultTheme, NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { useSocket } from '../hooks/useSocket';
 import { useAppSelector } from '../hooks/useAuth';
+import { useRiderRuntime } from '../hooks/useRiderRuntime';
+import { useTheme } from '../theme';
 import type { RootStackParamList } from '../types/navigation';
 
 import { SplashScreen } from '../screens/SplashScreen';
 import { LoginScreen } from '../screens/LoginScreen';
 import { OTPScreen } from '../screens/OTPScreen';
 import { HomeScreen } from '../screens/HomeScreen';
-import { AvailableOrdersScreen } from '../screens/AvailableOrdersScreen';
 import { OrderDetailScreen } from '../screens/OrderDetailScreen';
 import { NavigationScreen } from '../screens/NavigationScreen';
 import { DeliveryCompleteScreen } from '../screens/DeliveryCompleteScreen';
@@ -20,7 +20,8 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
 export const AppNavigator: React.FC = () => {
-  useSocket();
+  useRiderRuntime();
+  const theme = useTheme();
   const isAuthenticated = useAppSelector((state) => state.auth.isAuthenticated);
   const wasAuthenticated = useRef(isAuthenticated);
 
@@ -32,72 +33,44 @@ export const AppNavigator: React.FC = () => {
     wasAuthenticated.current = isAuthenticated;
   }, [isAuthenticated]);
 
+  const navTheme = useMemo(() => {
+    const base = theme.dark ? DarkTheme : DefaultTheme;
+    return {
+      ...base,
+      colors: {
+        ...base.colors,
+        primary: theme.colors.brand,
+        background: theme.colors.bg,
+        card: theme.colors.surface,
+        text: theme.colors.text,
+        border: theme.colors.border,
+      },
+    };
+  }, [theme]);
+
   return (
-    <NavigationContainer ref={navigationRef}>
+    <NavigationContainer ref={navigationRef} theme={navTheme}>
       <Stack.Navigator
         initialRouteName="Splash"
         screenOptions={{
           headerShown: false,
           animation: 'slide_from_right',
+          contentStyle: { backgroundColor: theme.colors.bg },
         }}
       >
-        <Stack.Screen name="Splash" component={SplashScreen} />
-        {/* Auth screens - always present so SplashScreen can navigate.replace() to 'Login' */}
-        <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="Splash" component={SplashScreen} options={{ animation: 'fade' }} />
+        <Stack.Screen name="Login" component={LoginScreen} options={{ animation: 'fade' }} />
         <Stack.Screen name="OTP" component={OTPScreen} />
-        {/* Authenticated screens */}
-        <Stack.Screen name="Home" component={HomeScreen} />
-        <Stack.Screen
-          name="AvailableOrders"
-          component={AvailableOrdersScreen}
-          options={{
-            title: 'Available Orders',
-            headerShown: true,
-            headerTitleAlign: 'center',
-          }}
-        />
-        <Stack.Screen
-          name="OrderDetail"
-          component={OrderDetailScreen}
-          options={{
-            title: 'Order Details',
-            headerShown: true,
-            headerTitleAlign: 'center',
-          }}
-        />
-        <Stack.Screen
-          name="Navigation"
-          component={NavigationScreen}
-          options={{
-            animation: 'fade',
-          }}
-        />
+        <Stack.Screen name="Home" component={HomeScreen} options={{ animation: 'fade' }} />
+        <Stack.Screen name="OrderDetail" component={OrderDetailScreen} />
+        <Stack.Screen name="Navigation" component={NavigationScreen} />
         <Stack.Screen
           name="DeliveryComplete"
           component={DeliveryCompleteScreen}
-          options={{
-            animation: 'fade',
-            gestureEnabled: false,
-          }}
+          options={{ animation: 'fade', gestureEnabled: false }}
         />
-        <Stack.Screen
-          name="Earnings"
-          component={EarningsScreen}
-          options={{
-            title: 'My Earnings',
-            headerShown: true,
-            headerTitleAlign: 'center',
-          }}
-        />
-        <Stack.Screen
-          name="Profile"
-          component={ProfileScreen}
-          options={{
-            title: 'My Profile',
-            headerShown: true,
-            headerTitleAlign: 'center',
-          }}
-        />
+        <Stack.Screen name="Earnings" component={EarningsScreen} />
+        <Stack.Screen name="Profile" component={ProfileScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

@@ -177,6 +177,33 @@ describe('PaymentsService', () => {
       );
     });
 
+    it('defaults pg from the order method: net banking goes to PayU as NB', async () => {
+      const nb = seedOnlineOrder({ paymentMethod: PaymentMethod.NETBANKING });
+      const payload = await service.generateSeamlessPayload(userId.toString(), {
+        orderId: nb.orderId,
+      });
+      expect(payload.pg).toBe('NB');
+
+      const card = seedOnlineOrder({ paymentMethod: PaymentMethod.CARD });
+      expect(
+        (
+          await service.generateSeamlessPayload(userId.toString(), {
+            orderId: card.orderId,
+          })
+        ).pg,
+      ).toBe('CC');
+    });
+
+    it('keeps an explicit pg from the client', async () => {
+      const nb = seedOnlineOrder({ paymentMethod: PaymentMethod.NETBANKING });
+      const payload = await service.generateSeamlessPayload(userId.toString(), {
+        orderId: nb.orderId,
+        pg: 'NB',
+        bankcode: 'HDFB',
+      });
+      expect(payload).toMatchObject({ pg: 'NB', bankcode: 'HDFB' });
+    });
+
     it('accepts the Mongo _id as orderId too', async () => {
       const order = seedOnlineOrder();
       const payload = await service.generateSeamlessPayload(userId.toString(), {

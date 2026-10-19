@@ -154,6 +154,7 @@ export function OrdersToolbar({ filters, onChange }: OrdersToolbarProps) {
                     <SelectItem value="COD">Cash on delivery</SelectItem>
                     <SelectItem value="UPI">UPI</SelectItem>
                     <SelectItem value="CARD">Card</SelectItem>
+                    <SelectItem value="NETBANKING">Net banking</SelectItem>
                     <SelectItem value="WALLET">Wallet</SelectItem>
                 </SelectContent>
             </Select>

@@ -194,7 +194,7 @@ export const colors = {
     inkStrong: neutral[900], // headings, prices
     inkSecondary: neutral[700],
     inkMuted: neutral[600],
-    inkDisabled: neutral[400],
+    inkDisabled: '#878784', // disabled text / icons: 3.6:1 on white, 3.3:1 canvas, 3.2:1 sunken (≥3:1)
     inkInverse: neutral[0],
     onBrand: neutral[0], // white on violet (5.85:1)
     onAccent: neutral[0],
@@ -326,12 +326,32 @@ export const HEADER_THEMES = {
  * Font family per weight. On Android a custom font ignores `fontWeight`, so always
  * pick weight via fontFamily, never via fontWeight.
  */
+/**
+ * Hindi: neither Plus Jakarta nor Bricolage has Devanagari glyphs. Noto Sans Devanagari (loaded in
+ * App.js) carries them at the matching weight: regular → 400, medium → 500, semibold → 600,
+ * bold / extrabold → 700.
+ *   Web: every family below is a CSS stack "<Latin face>, <Noto weight>", so the browser takes Latin
+ *        glyphs from the brand face and Devanagari from Noto, per character — Text, Button,
+ *        TextInput and raw <Text> all get it, with no per-render work.
+ *   Native (no font stacks): <Text> / <Button> / form inputs swap to the Noto family while the app
+ *        language is Hindi (devanagariFamily below, via useScriptFamily in components/ui/Text).
+ */
+export const devanagariFamily = {
+    regular: 'NotoSansDevanagari_400Regular',
+    medium: 'NotoSansDevanagari_500Medium',
+    semibold: 'NotoSansDevanagari_600SemiBold',
+    bold: 'NotoSansDevanagari_700Bold',
+    extrabold: 'NotoSansDevanagari_700Bold',
+};
+const WEB_FONTS = Platform.OS === 'web';
+const withDevanagari = (latin, weight) => (WEB_FONTS ? `${latin}, ${devanagariFamily[weight]}` : latin);
+
 export const fontFamily = {
-    regular: 'PlusJakartaSans_400Regular',
-    medium: 'PlusJakartaSans_500Medium',
-    semibold: 'PlusJakartaSans_600SemiBold',
-    bold: 'PlusJakartaSans_700Bold',
-    extrabold: 'PlusJakartaSans_800ExtraBold',
+    regular: withDevanagari('PlusJakartaSans_400Regular', 'regular'),
+    medium: withDevanagari('PlusJakartaSans_500Medium', 'medium'),
+    semibold: withDevanagari('PlusJakartaSans_600SemiBold', 'semibold'),
+    bold: withDevanagari('PlusJakartaSans_700Bold', 'bold'),
+    extrabold: withDevanagari('PlusJakartaSans_800ExtraBold', 'extrabold'),
 };
 
 /**
@@ -339,10 +359,23 @@ export const fontFamily = {
  * ETA line, the wordmark). h2 and everything smaller is Plus Jakarta Sans.
  */
 export const displayFamily = {
-    semibold: 'BricolageGrotesque_600SemiBold',
-    bold: 'BricolageGrotesque_700Bold',
-    extrabold: 'BricolageGrotesque_800ExtraBold',
+    semibold: withDevanagari('BricolageGrotesque_600SemiBold', 'semibold'),
+    bold: withDevanagari('BricolageGrotesque_700Bold', 'bold'),
+    extrabold: withDevanagari('BricolageGrotesque_800ExtraBold', 'extrabold'),
 };
+
+/** Native + Hindi: the Noto Devanagari family for any brand family (matched by its weight). */
+const FAMILY_WEIGHT = {
+    PlusJakartaSans_400Regular: 'regular',
+    PlusJakartaSans_500Medium: 'medium',
+    PlusJakartaSans_600SemiBold: 'semibold',
+    PlusJakartaSans_700Bold: 'bold',
+    PlusJakartaSans_800ExtraBold: 'extrabold',
+    BricolageGrotesque_600SemiBold: 'semibold',
+    BricolageGrotesque_700Bold: 'bold',
+    BricolageGrotesque_800ExtraBold: 'extrabold',
+};
+export const toDevanagari = (family) => devanagariFamily[FAMILY_WEIGHT[family]] || family;
 
 /** Variants set in the display face. <Text weight> on these picks a displayFamily weight when one exists. */
 export const DISPLAY_VARIANTS = ['hero', 'display', 'h1'];
@@ -537,7 +570,9 @@ const D = {
     brandSoft: '#C4B2FF',
     brandTint: 'rgba(139,107,255,0.16)',
     savings: '#4CC26A',
-    savingsTint: 'rgba(76,194,106,0.14)',
+    // Opaque: the savings tint pre-blended over surface (#4CC26A @14% on #1A1A1A), so tint badges that
+    // sit on photos / image wells don't let the picture show through. Savings text on it: 6.0:1.
+    savingsTint: '#213225',
 };
 
 /** Dark semantic palette — mirrors EVERY key of `colors` (a dev check in ThemeProvider warns on drift). */
@@ -582,7 +617,7 @@ export const darkColors = {
     inkStrong: D.ink,
     inkSecondary: D.ink2,
     inkMuted: D.muted,
-    inkDisabled: '#5C5C5C',
+    inkDisabled: '#767676', // disabled text / icons: 3.8:1 surface, 3.5:1 raised, 4.2:1 canvas (≥3:1)
     inkInverse: D.surface,
     onBrand: '#FFFFFF',
     onAccent: '#FFFFFF',

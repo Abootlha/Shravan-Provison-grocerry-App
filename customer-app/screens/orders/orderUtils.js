@@ -53,10 +53,15 @@ export const getStepIndex = (status) => {
 };
 
 /**
- * Best ETA in whole minutes, or null. Order of trust: live tracking minutes from the socket,
- * the route duration, then the stored estimatedDeliveryTime timestamp.
+ * Minutes to the door, or null. The server's delivery time comes first: the live
+ * order.estimatedDeliveryTime (the slice folds socket etaUpdate / tracking updates
+ * events into it). Leg durations are only a fallback: while the order is packed the rider's leg is
+ * "to the store", and its 1-minute duration is not when the order reaches the customer.
  */
-export const getEtaMinutes = ({ order, durationRemaining, routeInfo } = {}) => {
+export const getEtaMinutes = ({ order, durationRemaining, routeInfo, now = Date.now() } = {}) => {
+    const dueIso = order?.estimatedDeliveryTime || order?.tracking?.estimatedDeliveryTime;
+    const due = dueIso ? new Date(dueIso).getTime() : NaN;
+    if (Number.isFinite(due)) return Math.max(1, Math.ceil((due - now) / 60000));
     if (Number.isFinite(durationRemaining)) return Math.max(1, Math.round(durationRemaining));
     const tracked = order?.tracking?.durationMinutes;
     if (Number.isFinite(tracked)) return Math.max(1, Math.round(tracked));
@@ -133,9 +138,10 @@ export const initialsOf = (name = '') =>
         .join('')
         .toUpperCase() || '?';
 
-const PAYMENT_LABELS = { UPI: 'UPI', COD: 'Cash on delivery', CARD: 'Card', ONLINE: 'Paid online', WALLET: 'Wallet' };
+const PAYMENT_LABELS = { UPI: 'UPI', COD: 'Cash on delivery', CARD: 'Card', NETBANKING: 'Net banking', ONLINE: 'Paid online', WALLET: 'Wallet' };
 export const paymentLabel = (method, isHi = false) => {
     if (isHi && String(method).toUpperCase() === 'COD') return 'कैश ऑन डिलीवरी';
+    if (isHi && String(method).toUpperCase() === 'NETBANKING') return 'नेट बैंकिंग';
     return PAYMENT_LABELS[String(method || '').toUpperCase()] || method || '—';
 };
 

@@ -1,6 +1,5 @@
-import React, { memo, useEffect, useMemo, useState } from 'react';
+import React, { memo, useMemo } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
-import { ProductService } from '../../services';
 import ProductCard, { PRODUCT_CARD_SIZES } from '../../components/ProductCard';
 import { AnimatedListItem, ContentSwap, SectionHeader, SkeletonGroup, SkeletonProductTile } from '../../components/ui';
 import { space } from '../../constants/theme';
@@ -11,27 +10,15 @@ const CARD_W = PRODUCT_CARD_SIZES.compact.width;
 const productId = (p) => String(p?._id || p?.id || '');
 
 /**
- * "You might also like": in-stock products that aren't in the cart yet. Skeleton tiles
- * crossfade into the rail (ContentSwap) and the first cards stagger in from the left.
+ * "You might also like": in-stock products that aren't in the cart yet (`products` from
+ * useCheckoutProducts, null while loading; `excludeIds` = the cart when checkout opened plus what
+ * the free-delivery rail already shows). Skeleton tiles crossfade into the rail (ContentSwap) and
+ * the first cards stagger in from the left. Products added here stay (their ADD morphs into a stepper).
  */
-function SuggestionsRailBase({ cartItems, onOpenProduct, isHi }) {
-    const [products, setProducts] = useState(null);
-
-    useEffect(() => {
-        let alive = true;
-        ProductService.getProducts({ limit: 24 })
-            .then((res) => { if (alive) setProducts(res?.products || []); })
-            .catch(() => { if (alive) setProducts([]); });
-        return () => { alive = false; };
-    }, []);
-
-    // Products already added stay in the rail (their ADD morphs into a stepper),
-    // so the list only filters against what was in the cart when it loaded.
-    const [initialCartIds] = useState(() => new Set(cartItems.map((i) => String(i.productId || i.id))));
+function SuggestionsRailBase({ products, excludeIds, onOpenProduct, isHi }) {
     const data = useMemo(() => (products || [])
-        .filter((p) => p.isAvailable !== false && (p.stock == null || p.stock > 0))
-        .filter((p) => !initialCartIds.has(productId(p)))
-        .slice(0, MAX), [products, initialCartIds]);
+        .filter((p) => !excludeIds.has(productId(p)))
+        .slice(0, MAX), [products, excludeIds]);
 
     if (products && data.length === 0) return null;
 

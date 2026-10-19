@@ -43,6 +43,7 @@ export class ETAService {
   private readonly logger = new Logger(ETAService.name);
   private readonly ETA_CACHE_TTL = 30; // 30 seconds
   private readonly TRACKING_ROUTE_CACHE_TTL = 15; // 15 seconds
+  private readonly TRACKING_ROUTE_CALL_INTERVAL = 20; // seconds between directions calls per destination
   private readonly mapplsApiKey: string;
   private readonly directionsUrl =
     'https://route.mappls.com/route/direction/route_adv/driving';
@@ -352,6 +353,40 @@ export class ETAService {
         };
       }
 
+      // The cache key moves with the rider (~11 m), so on its own it would call the
+      // paid directions API on almost every fix. Allow one call per destination per
+      // budget window and reuse the last route in between.
+      const destKey = this.getTrackingRouteDestKey(
+        destination.latitude,
+        destination.longitude,
+      );
+      const acquired = await this.redisService
+        .getClient()
+        .set(
+          `${destKey}:budget`,
+          '1',
+          'EX',
+          this.TRACKING_ROUTE_CALL_INTERVAL,
+          'NX',
+        );
+      if (!acquired) {
+        const last = await this.redisService.getJSON<{
+          routeCoordinates: RouteCoordinate[];
+          durationSeconds: number;
+          distanceRemaining: number;
+          cachedAt: string;
+        }>(`${destKey}:last`);
+        if (!last) return null;
+        const elapsed = (Date.now() - Date.parse(last.cachedAt)) / 1000;
+        const remaining = Math.max(60, last.durationSeconds - elapsed);
+        return {
+          routeCoordinates: last.routeCoordinates,
+          estimatedDeliveryTime: new Date(Date.now() + remaining * 1000),
+          durationMinutes: Math.ceil(remaining / 60),
+          distanceRemaining: last.distanceRemaining,
+        };
+      }
+
       const { durationSeconds, distanceMeters, routeCoordinates } =
         await this.callMapplsDirectionsAPI(riderLocation, destination);
 
@@ -362,16 +397,18 @@ export class ETAService {
         distanceRemaining: distanceMeters,
       };
 
+      const entry = {
+        routeCoordinates,
+        durationSeconds,
+        distanceRemaining: distanceMeters,
+        cachedAt: new Date().toISOString(),
+      };
       await this.redisService.setJSON(
         cacheKey,
-        {
-          routeCoordinates,
-          durationSeconds,
-          distanceRemaining: distanceMeters,
-          cachedAt: new Date().toISOString(),
-        },
+        entry,
         this.TRACKING_ROUTE_CACHE_TTL,
       );
+      await this.redisService.setJSON(`${destKey}:last`, entry, 60 * 60);
 
       return snapshot;
     } catch (error) {
@@ -412,5 +449,9 @@ export class ETAService {
     const roundedDestLng = destLng.toFixed(4);
 
     return `tracking-route:${roundedRiderLat}:${roundedRiderLng}:${roundedDestLat}:${roundedDestLng}`;
+  }
+
+  private getTrackingRouteDestKey(destLat: number, destLng: number): string {
+    return `tracking-route:dest:${destLat.toFixed(4)}:${destLng.toFixed(4)}`;
   }
 }

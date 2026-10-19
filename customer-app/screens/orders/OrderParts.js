@@ -13,6 +13,7 @@ import { radii, space } from '../../constants/theme';
 import { makeStyles, makeThemed, useTheme } from '../../theme';
 import { Divider, Text } from '../../components/ui';
 import { formatMoney, getBill, getStatusMeta } from './orderUtils';
+import { orderSavings } from '../checkout/bill';
 
 export const OrderItemRow = memo(function OrderItemRow({ item, index = 0 }) {
     const styles = useStyles();
@@ -23,6 +24,7 @@ export const OrderItemRow = memo(function OrderItemRow({ item, index = 0 }) {
             <View style={styles.itemText}>
                 <Text variant="label" numberOfLines={2}>{item.name}</Text>
                 <Text variant="caption" color="muted">
+                    {item.unit ? `${item.unit} · ` : ''}
                     {item.quantity} × {formatMoney(item.price)}
                 </Text>
             </View>
@@ -47,6 +49,7 @@ export function BillRows({ order, isHi, showGst = false }) {
     const bill = getBill(order);
     const gst = Number((bill.itemTotal * 0.05).toFixed(2));
     const free = isHi ? 'मुफ़्त' : 'Free';
+    const savings = orderSavings(bill); // same definition as the checkout "You saved" band
     return (
         <View style={styles.bill}>
             <Row label={isHi ? 'सामान का कुल' : 'Item total'} value={formatMoney(bill.itemTotal)} />
@@ -56,13 +59,13 @@ export function BillRows({ order, isHi, showGst = false }) {
             {bill.discount ? <Row label={isHi ? 'छूट' : 'Discount'} value={`− ${formatMoney(bill.discount)}`} tone="success" /> : null}
             <Divider variant="dashed" spacing={space.sm} />
             <Row label={isHi ? 'कुल भुगतान' : 'Grand total'} value={formatMoney(bill.totalAmount)} strong />
-            {bill.discount > 0 ? (
+            {savings > 0 ? (
                 <View style={styles.saved}>
                     <MaterialCommunityIcons name="tag-outline" size={16} color={colors.successInk} />
                     <Text variant="label" color={colors.successInk} style={styles.flex}>
                         {isHi ? 'इस ऑर्डर पर आपकी बचत' : 'You saved on this order'}
                     </Text>
-                    <Text variant="price" color={colors.successInk}>{formatMoney(bill.discount)}</Text>
+                    <Text variant="price" color={colors.successInk}>{formatMoney(savings)}</Text>
                 </View>
             ) : null}
         </View>

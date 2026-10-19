@@ -282,7 +282,7 @@ let targetSeq = 0;
  * Register a view as a cart target. Returns an animated style (the landing bump) to put on that
  * same view. `priority`: 3 cart bar, 2 dock, 1 PDP CTA (higher wins when several are on screen).
  */
-export function useCartTarget(ref, { priority = 1, enabled = true } = {}) {
+export function useCartTarget(ref, { priority = 1, enabled = true, peak: bumpPeak } = {}) {
     const ctx = useContext(FlyContext);
     const reduce = useReducedMotion();
     const isFocused = useLatestFocus();
@@ -291,12 +291,14 @@ export function useCartTarget(ref, { priority = 1, enabled = true } = {}) {
     if (idRef.current == null) idRef.current = `t${++targetSeq}`;
 
     const bump = useCallback(() => {
-        const peak = reduce ? 1.05 : 1.16;
+        // `peak` lets a wide target (the PDP's full-width CTA) bump less: 1.16 on a 214pt button
+        // spills 17pt each side and its bouncy settle reads as a squash.
+        const peak = reduce ? Math.min(1.05, bumpPeak || 1.05) : bumpPeak || 1.16;
         scale.value = withSequence(
             withTiming(peak, { duration: 90, easing: easings.out }),
-            withSpring(1, reduce ? springs.snappy : springs.bouncy),
+            withSpring(1, reduce || bumpPeak ? springs.snappy : springs.bouncy),
         );
-    }, [reduce]);
+    }, [reduce, bumpPeak]);
 
     useEffect(() => {
         if (!ctx) return undefined;

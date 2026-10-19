@@ -1,16 +1,18 @@
 import React, { memo, useEffect, useRef } from 'react';
 import { View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Badge, BottomSheet, Button, ContentSwap, Divider, EmptyState, SkeletonGroup, SkeletonListRow, Text } from '../../components/ui';
+import { Badge, BottomSheet, Button, ContentSwap, Divider, EmptyState, IconButton, SkeletonGroup, SkeletonListRow, Text } from '../../components/ui';
 import { radii, space } from '../../constants/theme';
-import { makeStyles } from '../../theme';
+import { makeStyles, useTheme } from '../../theme';
 import { RadioRow } from './RadioRow';
-import { addressIcon, formatAddressLine, isSameAddress } from '../address/addressUtils';
+import { addressIcon, formatFullAddress, isSameAddress, labelText } from '../address/addressUtils';
 
 const CLOSE_DELAY = 180;
 
-function AddressSheetBase({ visible, onClose, addresses, selected, onSelect, onAddNew, onOpenMap, loading, isHi }) {
+/** Saved addresses as radio rows, each with an edit (pencil) action; add new / pick on map below. */
+function AddressSheetBase({ visible, onClose, addresses, selected, onSelect, onAddNew, onEdit, onOpenMap, loading, isHi }) {
     const styles = useStyles();
+    const { colors } = useTheme();
     const state = loading && addresses.length === 0 ? 'loading' : addresses.length === 0 ? 'empty' : 'data';
     const timer = useRef(null);
     useEffect(() => () => clearTimeout(timer.current), []);
@@ -68,14 +70,31 @@ function AddressSheetBase({ visible, onClose, addresses, selected, onSelect, onA
                         {addresses.map((addr, i) => (
                             <View key={addr.id || i}>
                                 {i > 0 ? <Divider inset={space.md} /> : null}
-                                <RadioRow
-                                    icon={addressIcon(addr.type)}
-                                    title={addr.type || 'Home'}
-                                    subtitle={formatAddressLine(addr)}
-                                    badge={addr.isDefault ? <Badge tone="soft" size="sm" label={isHi ? 'डिफ़ॉल्ट' : 'Default'} /> : null}
-                                    selected={isSameAddress(addr, selected)}
-                                    onPress={() => choose(addr)}
-                                />
+                                <View style={styles.rowWrap}>
+                                    <View style={styles.flex}>
+                                        <RadioRow
+                                            icon={addressIcon(addr.type)}
+                                            title={labelText(addr.type || 'Home', isHi)}
+                                            subtitle={formatFullAddress(addr, isHi)}
+                                            badge={addr.isDefault ? <Badge tone="soft" size="sm" label={isHi ? 'डिफ़ॉल्ट' : 'Default'} /> : null}
+                                            selected={isSameAddress(addr, selected)}
+                                            onPress={() => choose(addr)}
+                                        />
+                                    </View>
+                                    {onEdit ? (
+                                        <IconButton
+                                            name="pencil-outline"
+                                            variant="ghost"
+                                            size="sm"
+                                            color={colors.inkSecondary}
+                                            accessibilityLabel={isHi
+                                                ? `${labelText(addr.type || 'Home', true)} पता संपादित करें`
+                                                : `Edit ${addr.type || 'Home'} address`}
+                                            onPress={() => onEdit(addr)}
+                                            style={styles.edit}
+                                        />
+                                    ) : null}
+                                </View>
                             </View>
                         ))}
                     </View>
@@ -89,7 +108,10 @@ function AddressSheetBase({ visible, onClose, addresses, selected, onSelect, onA
 export const AddressSheet = memo(AddressSheetBase);
 
 const useStyles = makeStyles((t) => ({
+    flex: { flex: 1 },
     footer: { gap: space.xs },
+    rowWrap: { flexDirection: 'row', alignItems: 'center' },
+    edit: { marginRight: space.xs },
     skeletons: { gap: space.md, paddingVertical: space.sm },
     group: { gap: space.sm, paddingBottom: space.sm },
     groupTitle: { marginLeft: space.xs },

@@ -114,7 +114,9 @@ const LanguageSelectionScreen = ({ navigation, route }) => {
                     <ContentSwap stateKey={selectedLanguage}>
                         <AuthHeading
                             title={isHi ? 'अपनी भाषा चुनें' : 'Choose your language'}
-                            subtitle={isHi ? 'आप इसे बाद में प्रोफ़ाइल में बदल सकते हैं' : 'You can change this later in your profile'}
+                            subtitle={fromSettings
+                                ? (isHi ? 'ऐप में दिखने वाली भाषा' : 'The language the app is shown in')
+                                : (isHi ? 'आप इसे बाद में अकाउंट में बदल सकते हैं' : 'You can change this later in Account')}
                         />
                     </ContentSwap>
                 </Animated.View>
@@ -154,7 +156,7 @@ const useStyles = makeStyles((t) => ({
     glyph: { width: 48, height: 48, borderRadius: radii.pill, backgroundColor: t.colors.surfaceSunken, alignItems: 'center', justifyContent: 'center' },
     cardText: { flex: 1, gap: space.xxs },
     checkBox: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
-    ring: { position: 'absolute', width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: t.colors.borderStrong },
+    ring: { position: 'absolute', width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: t.colors.inkMuted }, // control boundary: 3:1 (borderStrong is ~1.8:1)
     check: { width: 28, height: 28, borderRadius: 14, backgroundColor: t.colors.accent, alignItems: 'center', justifyContent: 'center' },
     footer: { paddingHorizontal: space.lg, paddingTop: space.md },
 }));

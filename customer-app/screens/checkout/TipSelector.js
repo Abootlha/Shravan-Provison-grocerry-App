@@ -13,7 +13,8 @@ const PRESETS = [20, 30, 50];
  * Tip for the delivery partner. The order API has no tip field, so the tip is
  * not charged online: it's added to the rider's instructions and paid at the door.
  */
-function TipSelectorBase({ tip, onChange, isHi }) {
+/** `bare`: only the chips (and custom input), for the collapsible extras card. */
+function TipSelectorBase({ tip, onChange, isHi, bare = false }) {
     const styles = useStyles();
     const { colors, isDark } = useTheme();
     const [custom, setCustom] = useState(false);
@@ -40,24 +41,8 @@ function TipSelectorBase({ tip, onChange, isHi }) {
         onChange(Number(clean) || 0);
     };
 
-    return (
-        <Card padding="lg" radius={GROUP_RADIUS} style={styles.card}>
-            <View style={styles.head}>
-                <View style={styles.icon}>
-                    <MaterialCommunityIcons name="hand-heart-outline" size={20} color={colors.inkSecondary} />
-                </View>
-                <View style={styles.texts}>
-                    <Text variant="title" accessibilityRole="header">
-                        {isHi ? 'डिलीवरी पार्टनर को टिप दें' : 'Tip your delivery partner'}
-                    </Text>
-                    <Text variant="caption" color="secondary">
-                        {isHi
-                            ? 'पूरी टिप पार्टनर को जाती है। दरवाज़े पर भुगतान करें।'
-                            : 'All of it goes to them. Paid at the door.'}
-                    </Text>
-                </View>
-            </View>
-
+    const options = (
+        <>
             <View style={styles.chips}>
                 {PRESETS.map((amt) => (
                     <Chip
@@ -94,6 +79,29 @@ function TipSelectorBase({ tip, onChange, isHi }) {
                     />
                 </Animated.View>
             ) : null}
+        </>
+    );
+    if (bare) return <View style={styles.bare}>{options}</View>;
+
+    return (
+        <Card padding="lg" radius={GROUP_RADIUS} style={styles.card}>
+            <View style={styles.head}>
+                <View style={styles.icon}>
+                    <MaterialCommunityIcons name="hand-heart-outline" size={20} color={colors.inkSecondary} />
+                </View>
+                <View style={styles.texts}>
+                    <Text variant="title" accessibilityRole="header">
+                        {isHi ? 'डिलीवरी पार्टनर को टिप दें' : 'Tip your delivery partner'}
+                    </Text>
+                    <Text variant="caption" color="secondary">
+                        {isHi
+                            ? 'ऑनलाइन नहीं ली जाती। दरवाज़े पर उन्हें दें, पूरी उन्हीं की है।'
+                            : 'Not charged online. Give it to them at the door; all of it is theirs.'}
+                    </Text>
+                </View>
+            </View>
+
+            {options}
         </Card>
     );
 }
@@ -102,6 +110,7 @@ export const TipSelector = memo(TipSelectorBase);
 
 const useStyles = makeStyles((t) => ({
     card: { gap: space.md },
+    bare: { gap: space.md },
     head: { flexDirection: 'row', alignItems: 'center', gap: space.md },
     icon: {
         width: ICON_CIRCLE + space.xs,

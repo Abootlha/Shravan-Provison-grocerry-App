@@ -12,6 +12,7 @@ export const KIND = {
     order: 'd0',
     user: 'e0',
     rider: 'f0',
+    address: 'ad',
 };
 
 export const unsplash = (photoId) => `https://images.unsplash.com/photo-${photoId}?w=400&q=70`;

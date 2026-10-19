@@ -11,12 +11,13 @@ import { TextInput, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { radii, space, type } from '../../constants/theme';
 import { makeStyles, useTheme } from '../../theme';
-import { Text } from '../../components/ui';
+import { Text, useScriptFamily } from '../../components/ui';
 
 export function FormField({ label, icon, value, onChangeText, editable = true, badge, help, ...rest }) {
     const styles = useStyles();
     const { colors, isDark } = useTheme();
     const [focused, setFocused] = useState(false);
+    const script = useScriptFamily(); // native + Hindi: Devanagari face for typed text
     return (
         <View style={styles.wrap}>
             <View style={styles.labelRow}>
@@ -34,7 +35,7 @@ export function FormField({ label, icon, value, onChangeText, editable = true, b
                     placeholderTextColor={colors.inkMuted}
                     selectionColor={colors.brand}
                     keyboardAppearance={isDark ? 'dark' : 'light'}
-                    style={[styles.text, !editable && styles.lockedText]}
+                    style={script([styles.text, !editable && styles.lockedText])}
                     accessibilityLabel={label}
                     {...rest}
                 />

@@ -27,6 +27,7 @@ const SORTS = [
     { id: 'discount', en: 'Biggest discount', hi: 'सबसे ज़्यादा छूट' },
 ];
 
+const GRID_CARD_STYLE = { marginRight: 0, marginBottom: 0 };
 const STAGGER_WINDOW = 600; // ms after a grid swap during which newly mounted cells stagger in
 
 /**
@@ -48,7 +49,7 @@ const GridItem = React.memo(({ item, index, width, language, onProductPress, ent
     const [entering] = useState(() => (enterAt && index <= stagger.maxItems ? layout.enterAt(index) : undefined));
     return (
         <Animated.View entering={entering} style={[styles.cell, { width }]}>
-            <ProductCard product={product} onPress={onPress} style={{ width }} />
+            <ProductCard product={product} variant="grid" width={width} onPress={onPress} style={GRID_CARD_STYLE} />
         </Animated.View>
     );
 });

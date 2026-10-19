@@ -10,6 +10,9 @@
  *   etaMinutes   number — optional override for the ETA
  *   onPress      () => void — usually navigation.navigate('OrderTracking', { orderId })
  *   style        container style (position it yourself, e.g. absolute above the tab bar)
+ *   compact      boolean — the slim 36pt strip used when the cart pill is also showing, so the two
+ *                read as one stacked unit ("Arriving in 7 mins · Order packed   Track ›") instead of
+ *                two full bars
  *
  * Hook
  *   const { order, refresh } = useActiveOrder();   // fetches the user's orders on screen focus
@@ -42,9 +45,15 @@ import { getEtaMinutes, getStatusMeta, isActiveOrder } from '../screens/orders/o
 
 /** Height of the order pill — screens stacking it above the cart pill import this. */
 export const ORDER_BAR_HEIGHT = 56;
+/** Height of the compact strip (shown above the cart pill when both exist). */
+export const ORDER_STRIP_HEIGHT = 36;
+/** Strip + its gap to the pill: what anything stacking above the cart pill should clear. */
+export const ORDER_STRIP_CLEARANCE = ORDER_STRIP_HEIGHT + 4;
 const PILL_HEIGHT = ORDER_BAR_HEIGHT;
 const PILL_RADIUS = 14; // matches the floating cart bar (rounded rect, not a pill)
 const DISC = 40;
+// The strip's "Track" link sits on the dark night surface in both themes: lifted violet (6.9:1 on #151515).
+const TRACK_INK = '#A68BFF';
 
 function Scooter() {
     const styles = useStyles();
@@ -56,7 +65,7 @@ function Scooter() {
     );
 }
 
-export function ActiveOrderBar({ order, etaMinutes, onPress, style }) {
+export function ActiveOrderBar({ order, etaMinutes, onPress, style, compact = false }) {
     const styles = useStyles();
     const { colors } = useTheme();
     const { isHi } = useTranslation();
@@ -66,8 +75,34 @@ export function ActiveOrderBar({ order, etaMinutes, onPress, style }) {
     const pending = order.orderStatus === 'PENDING';
     const subline = pending
         ? isHi ? 'स्टोर पुष्टि कर रहा है' : 'Store is confirming'
-        : isHi ? `ऑर्डर · ${status}` : `Order ${status.toLowerCase()}`;
+        : isHi ? `ऑर्डर: ${status}` : `Order ${status.toLowerCase()}`;
     const unit = isHi ? 'मिनट' : eta === 1 ? 'min' : 'mins';
+    const etaText = eta && !pending
+        ? (isHi ? `${eta} मिनट में पहुँचेगा` : `Arriving in ${eta} ${unit}`)
+        : (isHi ? 'ऑर्डर मिल गया' : 'Order received');
+
+    if (compact) {
+        return (
+            <Animated.View entering={FadeInDown.duration(durations.base)} exiting={FadeOutDown.duration(durations.fast)} style={style}>
+                <PressableScale
+                    onPress={onPress}
+                    haptic="light"
+                    scaleTo={press.subtle}
+                    style={styles.strip}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${etaText}. ${subline}. ${isHi ? 'ट्रैक करें' : 'Track order'}`}
+                >
+                    <MaterialCommunityIcons name="moped" size={18} color={colors.onNight} />
+                    <Text variant="label" color="onNight" numberOfLines={1} style={styles.stripText}>
+                        {etaText}
+                        <Text variant="caption" color="onNightSecondary">{`  ·  ${subline}`}</Text>
+                    </Text>
+                    <Text variant="label" color={TRACK_INK}>{isHi ? 'ट्रैक' : 'Track'}</Text>
+                    <MaterialCommunityIcons name="chevron-right" size={16} color={colors.onNight} />
+                </PressableScale>
+            </Animated.View>
+        );
+    }
 
     return (
         <Animated.View entering={FadeInDown.duration(durations.base)} exiting={FadeOutDown.duration(durations.fast)} style={style}>
@@ -149,6 +184,17 @@ const useStyles = makeStyles((t) => ({
         justifyContent: 'center',
     },
     text: { flex: 1, gap: 1 },
+    strip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: space.sm,
+        height: ORDER_STRIP_HEIGHT,
+        paddingHorizontal: space.md,
+        borderRadius: radii.button,
+        ...t.shadows.floating,
+        ...nightPill(t),
+    },
+    stripText: { flex: 1 },
     etaRow: { flexDirection: 'row', alignItems: 'center' },
     bold: { fontFamily: fontFamily.extrabold },
     cta: {

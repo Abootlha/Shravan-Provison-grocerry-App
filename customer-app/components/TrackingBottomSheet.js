@@ -24,7 +24,7 @@ import DeliveryOtpCard from '../screens/tracking/DeliveryOtpCard';
 import RiderCard from '../screens/tracking/RiderCard';
 import OrderSummaryCard from '../screens/tracking/OrderSummaryCard';
 import { CancelledHero, DeliveredHero, HelpRow } from '../screens/tracking/TrackingStates';
-import { LIVE_STATUSES, OTP_STATUSES, getRider } from '../screens/orders/orderUtils';
+import { LIVE_STATUSES, OTP_STATUSES, getRider, shortOrderCode } from '../screens/orders/orderUtils';
 
 const TrackingBottomSheet = ({ order, riderLocation, activeLeg, isHi, onHelp, onViewDetails, onShop }) => {
     const status = String(order?.orderStatus || '').toUpperCase();
@@ -36,15 +36,19 @@ const TrackingBottomSheet = ({ order, riderLocation, activeLeg, isHi, onHelp, on
     const stale = hasLive && lastFix != null && Date.now() - new Date(lastFix).getTime() > 30000;
     const showRider = rider && (LIVE_STATUSES.includes(status) || status === 'DELIVERED');
 
+    const delivered = status === 'DELIVERED';
+    const deliveredAt = delivered
+        ? order?.actualDeliveryTime || order?.deliveredAt || order?.timeline?.find?.((t) => t.status === 'DELIVERED')?.timestamp || true
+        : null;
+
     const cards = [];
-    if (status === 'DELIVERED') {
-        const deliveredAt = order?.deliveredAt || order?.timeline?.find?.((t) => t.status === 'DELIVERED')?.timestamp;
-        cards.push(<DeliveredHero key="delivered" isHi={isHi} deliveredAt={deliveredAt} />);
+    if (delivered) {
+        cards.push(<DeliveredHero key="delivered" isHi={isHi} deliveredAt={deliveredAt === true ? null : deliveredAt} orderCode={shortOrderCode(order)} />);
     } else if (status === 'CANCELLED') {
         cards.push(<CancelledHero key="cancelled" isHi={isHi} onShop={onShop} />);
     }
     if (showOtp) cards.push(<DeliveryOtpCard key="otp" otp={otp} isHi={isHi} />);
-    if (showRider) cards.push(<RiderCard key="rider" rider={rider} stale={stale} activeLeg={activeLeg} isHi={isHi} />);
+    if (showRider) cards.push(<RiderCard key="rider" rider={rider} stale={stale} activeLeg={activeLeg} deliveredAt={deliveredAt} isHi={isHi} />);
     cards.push(<OrderSummaryCard key="summary" order={order} isHi={isHi} onViewDetails={onViewDetails} />);
     cards.push(<HelpRow key="help" isHi={isHi} onPress={onHelp} />);
 

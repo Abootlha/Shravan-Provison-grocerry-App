@@ -15,7 +15,7 @@
  *                default 'primary'
  *   size         'sm' (36) | 'md' (48) | 'lg' (56) — default 'md'
  *   loading      boolean — label fades out, a small spinner takes its place; width never changes
- *   disabled     boolean
+ *   disabled     boolean — a neutral grey fill with readable ink (not a faded variant)
  *   leftIcon / rightIcon   element, or ({ color, size }) => element
  *   fullWidth    boolean — alignSelf: 'stretch'
  *   align        'start' | 'center' | 'end' | 'stretch' — optional alignSelf. Omit it and the button
@@ -23,6 +23,8 @@
  *   glow         @deprecated — ignored (DESIGN.md: no glow)
  *   haptic       haptic kind fired on press (default 'light'; false to disable)
  *   style        container style
+ *   labelStyle   optional TextStyle for the label (e.g. a script-specific fontFamily); omit it and the
+ *                label looks exactly as before
  *   accessibilityLabel  defaults to label
  *
  * Shape: radius 10 (radii.button) — never a pill. Flat fill, no gradient, no shadow, no inner highlight.
@@ -39,6 +41,7 @@ import { radii, type, space } from '../../constants/theme';
 import { durations, easings } from '../../theme/motion';
 import { makeStyles, makeThemed } from '../../theme';
 import { PressableScale } from './PressableScale';
+import { useScriptFamily } from './Text';
 
 const useVariants = makeThemed(({ colors: c }) => {
     const night = { bg: c.surfaceNight, fg: c.onNight, border: c.surfaceNight };
@@ -52,6 +55,10 @@ const useVariants = makeThemed(({ colors: c }) => {
         // sits ON a violet / ink block, which doesn't change with the theme → fixed white + violet ink
         light: { bg: c.neutral[0], fg: c.violet[700], border: c.neutral[0] },
         danger: { bg: c.error, fg: c.onError, border: c.error },
+        // disabled: a neutral fill with readable ink (≥6:1) instead of a faded violet the label is lost on
+        disabledFilled: { bg: c.hairline, fg: c.inkSecondary, border: c.hairline },
+        disabledOutline: { bg: c.surface, fg: c.inkMuted, border: c.border },
+        disabledGhost: { bg: 'transparent', fg: c.inkMuted, border: 'transparent' },
     };
 });
 
@@ -79,12 +86,21 @@ export function Button({
     glow, // eslint-disable-line no-unused-vars -- deprecated, ignored
     haptic = 'light',
     style,
+    labelStyle,
     accessibilityLabel,
     ...rest
 }) {
     const VARIANTS = useVariants();
     const styles = useStyles();
-    const v = VARIANTS[variant] || VARIANTS.primary;
+    const off = disabled && !loading;
+    const v = off
+        ? variant === 'outline'
+            ? VARIANTS.disabledOutline
+            : variant === 'ghost'
+              ? VARIANTS.disabledGhost
+              : VARIANTS.disabledFilled
+        : VARIANTS[variant] || VARIANTS.primary;
+    const script = useScriptFamily();
     const sz = SIZES[size] || SIZES.md;
     const reduce = useReducedMotion();
     const busy = useSharedValue(loading ? 1 : 0);
@@ -107,7 +123,7 @@ export function Button({
         <PressableScale
             onPress={onPress}
             disabled={isDisabled}
-            disabledOpacity={loading ? 1 : 0.45}
+            disabledOpacity={1}
             haptic={haptic}
             accessibilityLabel={accessibilityLabel || label}
             accessibilityState={{ busy: loading }}
@@ -128,7 +144,7 @@ export function Button({
         >
             <Animated.View style={[styles.row, contentStyle]}>
                 {leftIcon ? <View style={styles.iconLeft}>{renderIcon(leftIcon, v.fg, sz.icon)}</View> : null}
-                <Animated.Text numberOfLines={1} maxFontSizeMultiplier={1.3} style={[sz.text, { color: v.fg }]}>
+                <Animated.Text numberOfLines={1} maxFontSizeMultiplier={1.3} style={script([sz.text, { color: v.fg }, labelStyle])}>
                     {label}
                 </Animated.Text>
                 {rightIcon ? <View style={styles.iconRight}>{renderIcon(rightIcon, v.fg, sz.icon)}</View> : null}

@@ -7,6 +7,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { FlatList, Modal, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { useSelector } from 'react-redux';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
     interpolate,
@@ -28,6 +29,7 @@ const DISMISS_DISTANCE = 120;
 const DISMISS_VELOCITY = 900;
 
 export default function ImageViewer({ visible, images = [], initialIndex = 0, onClose, productName = 'Product' }) {
+    const hi = useSelector((s) => (s.language?.currentLanguage || s.auth?.language) === 'hi');
     const styles = useStyles();
     const { width, height } = useWindowDimensions();
     const insets = useSafeAreaInsets();
@@ -116,7 +118,7 @@ export default function ImageViewer({ visible, images = [], initialIndex = 0, on
                     </Animated.View>
                 </GestureDetector>
                 <Animated.View style={[styles.top, { paddingTop: insets.top + space.sm }, chrome, { pointerEvents: 'box-none' }]}>
-                    <IconButton name="close" variant="scrim" onPress={close} accessibilityLabel="Close image viewer" />
+                    <IconButton name="close" variant="scrim" onPress={close} accessibilityLabel={hi ? 'तस्वीरें बंद करें' : 'Close image viewer'} />
                     {images.length > 1 ? (
                         <View style={styles.counter}>
                             <Text variant="label" color="onNight">

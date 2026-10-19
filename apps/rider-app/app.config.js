@@ -60,7 +60,9 @@ module.exports = ({ config }) => {
 
   // react-native-maps 1.20 has no config plugin; Expo prebuild reads the key
   // from ios.config / android.config below.
-  const googleMapsApiKey = loadEnvValue('GOOGLE_MAPS_API_KEY');
+  const rawGoogleKey = loadEnvValue('GOOGLE_MAPS_API_KEY');
+  // Ignore the .env.example placeholder so the app falls back cleanly.
+  const googleMapsApiKey = /^your-/i.test(rawGoogleKey) ? '' : rawGoogleKey;
 
   return {
     ...config,
@@ -91,7 +93,9 @@ module.exports = ({ config }) => {
       TRACKING_URL: trackingUrl,
       // Public (client) key only. Secrets such as MAPMYINDIA_CLIENT_SECRET must
       // never be embedded in the app bundle.
-      MAPMYINDIA_API_KEY: loadEnvValue('MAPMYINDIA_API_KEY', loadEnvValue('MAPPLS_API_KEY')),
+      // Same key as the native Maps SDK above (already inside the app binary);
+      // used only as a fallback for route lines when the backend sends none.
+      GOOGLE_MAPS_API_KEY: googleMapsApiKey,
     },
   };
 };

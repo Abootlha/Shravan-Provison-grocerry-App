@@ -109,6 +109,7 @@ const OrderTrackingMap = ({
     const layers = useRef({});
     const riderPos = useRef(null);
     const lastFixAt = useRef(0);
+    const lastFixKey = useRef(null);
     const frame = useRef(null);
     const angle = useRef(0);
     const onReadyRef = useRef(onMapReady);
@@ -255,11 +256,19 @@ const OrderTrackingMap = ({
                 keyboard: false,
             }).addTo(map);
             lastFixAt.current = Date.now();
+            lastFixKey.current = `${riderLocation.latitude},${riderLocation.longitude}`;
             return;
         }
         const now = Date.now();
-        const duration = Math.min(Math.max(now - lastFixAt.current, 500), 2500);
-        lastFixAt.current = now;
+        // Glide over the measured gap between fixes (riders report every ~5 s), capped for
+        // signal loss; a route refresh without a new fix does not reset the interval.
+        const fixKey = `${riderLocation.latitude},${riderLocation.longitude}`;
+        const isNewFix = fixKey !== lastFixKey.current;
+        const duration = isNewFix ? Math.min(Math.max(now - lastFixAt.current, 500), 6000) : 500;
+        if (isNewFix) {
+            lastFixKey.current = fixKey;
+            lastFixAt.current = now;
+        }
         const from = riderPos.current || target;
         const startedAt = performance.now();
         if (frame.current) cancelAnimationFrame(frame.current);

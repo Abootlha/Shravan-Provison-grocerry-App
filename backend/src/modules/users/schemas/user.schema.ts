@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Types } from 'mongoose';
 
 export type UserDocument = User & Document;
 
@@ -20,10 +20,20 @@ export const STAFF_ROLES: readonly string[] = [
 export const isStaffRole = (role: unknown): boolean =>
   typeof role === 'string' && STAFF_ROLES.includes(role);
 
+/**
+ * A saved delivery address. `_id` is declared without a default on purpose:
+ * addresses stored before ids existed must read back WITHOUT one (a default
+ * would invent a new random id on every read), so UsersService can tell them
+ * apart and persist a stable id once (see UsersService.ensureAddressIds).
+ * New addresses get their id when they are created.
+ */
 @Schema({ _id: false })
 export class Address {
+  @Prop({ type: Types.ObjectId })
+  _id?: Types.ObjectId;
+
   @Prop({ required: true })
-  type!: string; // home, office, other
+  type!: string; // Home, Work, Other (older entries: Office, free text)
 
   @Prop({ required: true })
   address!: string;
@@ -42,6 +52,23 @@ export class Address {
 
   @Prop()
   longitude?: number;
+
+  /** House / flat number. */
+  @Prop()
+  houseNo?: string;
+
+  @Prop()
+  floor?: string;
+
+  @Prop()
+  landmark?: string;
+
+  /** Who receives the order when it is not the account holder. */
+  @Prop()
+  receiverName?: string;
+
+  @Prop()
+  receiverPhone?: string;
 }
 
 @Schema({ timestamps: true, collection: 'users' })

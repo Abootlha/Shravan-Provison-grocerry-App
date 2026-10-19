@@ -6,6 +6,7 @@ import { StyleSheet, View } from 'react-native';
 import { Text } from '../ui';
 import { space } from '../../constants/theme';
 import { InfoRow } from './AccordionSection';
+import { unitPriceLabel } from './productUtils';
 
 /** Short lines without trailing punctuation read as sub-headings (legacy CMS format). */
 export const DescriptionText = memo(({ text }) => {
@@ -85,3 +86,52 @@ const styles = StyleSheet.create({
     subhead: { marginTop: space.md, marginBottom: space.xs },
     note: { marginTop: space.sm },
 });
+
+const STORAGE = {
+    Refrigerated: ['Keep refrigerated', 'फ़्रिज में रखें'],
+    Frozen: ['Keep frozen', 'फ़्रीज़र में रखें'],
+    Ambient: ['Room temperature', 'सामान्य तापमान पर'],
+};
+const DIET = { Veg: 'शाकाहारी', 'Non-Veg': 'मांसाहारी', Vegan: 'वीगन', 'Gluten Free': 'ग्लूटेन फ़्री', Organic: 'ऑर्गेनिक' };
+
+const shelfLifeHi = (days) => {
+    const d = Number(days);
+    if (!d) return null;
+    if (d >= 60) return `${Math.round(d / 30)} महीने`;
+    return `${d} दिन`;
+};
+
+/**
+ * PDP "Highlights": only facts the product record carries (brand, pack size + unit price, storage,
+ * shelf life, diet, fat profile), then any highlight lines the store wrote in the admin. A row
+ * whose field is empty is left out; nothing is generic copy.
+ */
+export const productHighlights = (p, isHi = false) => {
+    const L = (en, hi) => (isHi ? hi : en);
+    const per = unitPriceLabel(p.price, p.unit, isHi);
+    const storage = p.attributes?.storage;
+    const fat = p.attributes?.fatProfile;
+    const diet = p.attributes?.dietary || [];
+    const rows = [
+        p.brand ? [L('Brand', 'ब्रांड'), p.brand] : null,
+        p.unit ? [L('Pack size', 'पैक साइज़'), per ? `${p.unit} (${per})` : p.unit] : null,
+        storage && STORAGE[storage] ? [L('Storage', 'रखरखाव'), STORAGE[storage][isHi ? 1 : 0]] : null,
+        Number(p.shelfLife) > 0 ? [L('Shelf life', 'इस्तेमाल की अवधि'), isHi ? shelfLifeHi(p.shelfLife) : shelfLifeLabel(p.shelfLife)] : null,
+        diet.length ? [L('Diet', 'आहार'), diet.map((d) => (isHi && DIET[d]) || d).join(', ')] : null,
+        fat && fat !== 'NA' ? [L('Fat', 'फ़ैट'), fat] : null,
+    ].filter(Boolean);
+    // The store's own highlight text ("Key\nValue" pairs or sentences), after the record's facts.
+    const lines = String(p.highlights || '')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+    for (let i = 0; i < lines.length; i += 1) {
+        if (i + 1 < lines.length && lines[i].length < 40 && !/[.!]$/.test(lines[i])) {
+            rows.push([lines[i], lines[i + 1]]);
+            i += 1;
+        } else {
+            rows.push([null, lines[i]]);
+        }
+    }
+    return rows;
+};

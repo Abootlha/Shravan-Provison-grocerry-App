@@ -20,7 +20,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useDispatch, useSelector } from 'react-redux';
 import { addToCart, incrementQuantity, decrementQuantity } from '../store/slices/cartSlice';
 import { toggleWishlistItem } from '../store/slices/wishlistSlice';
-import { Screen, Text, Badge, Chip, Divider, PriceTag, useFlyToCart, useHeroTarget } from '../components/ui';
+import { Screen, Text, Badge, Chip, Divider, PriceTag, toast, useFlyToCart, useHeroTarget } from '../components/ui';
+import { unwatchProduct, useRestockWatch } from '../services/restockWatch';
 import { radii, space } from '../constants/theme';
 import { useTheme, makeStyles } from '../theme';
 import { useTranslation } from '../hooks/useTranslation';
@@ -32,13 +33,7 @@ import ImageViewer from '../components/product/ImageViewer';
 import AccordionSection, { sectionLayout } from '../components/product/AccordionSection';
 import ProductRail from '../components/product/ProductRail';
 import { PdpHeader, PdpBottomBar } from '../components/product/PdpChrome';
-import {
-    DescriptionText,
-    HighlightsList,
-    NutritionTable,
-    hasNutrition,
-    productInfoRows,
-} from '../components/product/PdpDetails';
+import { DescriptionText, NutritionTable, hasNutrition, productHighlights } from '../components/product/PdpDetails';
 import { InfoRow } from '../components/product/AccordionSection';
 import { contentColumn, useContentWidth } from '../hooks/useContentWidth';
 import {
@@ -49,9 +44,15 @@ import {
     getMrp,
     getPrice,
     getProductId,
+    getStock,
+    getSubcategoryId,
     getUnit,
     isInStock,
     normalizeProduct,
+    activeVariants,
+    defaultVariantOf,
+    unitPriceLabel,
+    variantLineOf,
 } from '../components/product/productUtils';
 
 const BOTTOM_BAR_SPACE = 104;
@@ -110,16 +111,28 @@ const ProductDetailScreen = ({ route, navigation }) => {
     const [similar, setSimilar] = useState([]);
     const [similarLoading, setSimilarLoading] = useState(true);
     const [viewer, setViewer] = useState({ visible: false, index: 0 });
-    const [expanded, setExpanded] = useState({ highlights: true, details: true, nutrition: false, info: false });
+    const [expanded, setExpanded] = useState({ highlights: true, details: false, nutrition: false });
+    const [sameShelf, setSameShelf] = useState([]); // in-stock items from the same subcategory (shown when this one is sold out)
 
     const product = useMemo(() => ({ ...routeProduct, ...(fetched || {}), id: productId }), [routeProduct, fetched, productId]);
     const shown = useTranslatedProduct(product, currentLanguage);
 
-    const price = getPrice(product);
-    const mrp = getMrp(product);
-    const unit = getUnit(product);
-    const discount = getDiscountPercent(product);
-    const inStock = isInStock(product);
+    // Pack sizes: the chips pick one, and price / MRP / stock / the cart line follow it. The
+    // default pack is the product's own line (same id as the cards use).
+    const variants = useMemo(() => activeVariants(product), [product]);
+    const [pickedSku, setPickedSku] = useState(null);
+    const selectedVariant =
+        variants.length > 1 ? variants.find((v) => v.sku === pickedSku) || variants.find((v) => v.sku === defaultVariantOf(product)?.sku) || variants[0] : null;
+    const variantLine = useMemo(
+        () => (selectedVariant ? variantLineOf(product, selectedVariant, product.name) : null),
+        [product, selectedVariant],
+    );
+    const lineId = variantLine ? variantLine.id : productId;
+    const price = variantLine ? variantLine.price : getPrice(product);
+    const mrp = variantLine ? variantLine.originalPrice : getMrp(product);
+    const unit = variantLine ? variantLine.unit : getUnit(product);
+    const discount = mrp > price && mrp > 0 ? Math.round(((mrp - price) / mrp) * 100) : getDiscountPercent(product);
+    const inStock = variantLine ? variantLine.inStock && product.isAvailable !== false : isInStock(product);
     const images = useMemo(() => getImages(product), [product]);
     const categoryId = getCategoryId(product);
     const reviewCount = Number(product.reviewCount ?? product.reviews) || 0;
@@ -127,9 +140,13 @@ const ProductDetailScreen = ({ route, navigation }) => {
     const dietary = product.attributes?.dietary || [];
     const isVeg = dietary.some((d) => /^veg/i.test(String(d))) || product.isVeg === true;
     const fresh = product.isPerishable === true || (Number(product.shelfLife) > 0 && Number(product.shelfLife) <= 7);
-    const cartProduct = useMemo(() => ({ ...product, ...normalizeProduct(product), name: product.name }), [product]);
+    const stock = variantLine ? variantLine.stock : getStock(product);
+    const subcategoryId = getSubcategoryId(product);
+    const cartProduct = useMemo(() => ({ ...product, ...normalizeProduct(product), variants: undefined, name: product.name }), [product]);
+    const watch = useRestockWatch();
+    const watching = !inStock && watch.isWatching(productId);
 
-    const quantity = useSelector((s) => s.cart.items.find((it) => it.id === productId)?.quantity || 0);
+    const quantity = useSelector((s) => s.cart.items.find((it) => it.id === lineId)?.quantity || 0);
     const wishlisted = useSelector((s) => (s.wishlist?.items || []).some((it) => it.id === productId));
 
     // Refresh the full product (wishlist/cart entries only carry the card fields).
@@ -155,8 +172,9 @@ const ProductDetailScreen = ({ route, navigation }) => {
         ProductService.getProducts({ categoryId, limit: 12 })
             .then((res) => {
                 if (!alive) return;
-                const list = (res?.products || []).filter((p) => getProductId(p) !== productId).slice(0, 10);
-                setSimilar(list);
+                // in-stock first, so the rail leads with things that can be added right now
+                const list = (res?.products || []).filter((p) => getProductId(p) !== productId);
+                setSimilar([...list.filter(isInStock), ...list.filter((p) => !isInStock(p))].slice(0, 10));
             })
             .catch(() => alive && setSimilar([]))
             .finally(() => alive && setSimilarLoading(false));
@@ -165,7 +183,23 @@ const ProductDetailScreen = ({ route, navigation }) => {
         };
     }, [categoryId, productId]);
 
-    const heroHeight = Math.round(Math.min(Math.max(width, 320) * 0.92, 420));
+    // Sold out: offer what IS on the same shelf (same subcategory, in stock).
+    useEffect(() => {
+        let alive = true;
+        if (inStock || !subcategoryId) {
+            setSameShelf([]);
+            return undefined;
+        }
+        ProductService.getProducts({ subcategoryId, limit: 20 })
+            .then((res) => alive && setSameShelf((res?.products || []).filter((p) => getProductId(p) !== productId && isInStock(p)).slice(0, 10)))
+            .catch(() => alive && setSameShelf([]));
+        return () => {
+            alive = false;
+        };
+    }, [inStock, subcategoryId, productId]);
+
+    // A square-ish hero: the pack shot is the page (Part C section 8), capped so the name stays above the fold.
+    const heroHeight = Math.round(Math.min(Math.max(width, 320) * 1.02, 440));
     const scrollY = useSharedValue(0);
     const onScroll = useAnimatedScrollHandler((e) => {
         scrollY.value = e.contentOffset.y;
@@ -198,10 +232,24 @@ const ProductDetailScreen = ({ route, navigation }) => {
     const heroUri = images[0];
     const onAdd = useCallback(() => {
         fly({ fromRef: heroTarget.ref, uri: heroUri, inset: 0.1 }); // fire-and-forget
-        dispatch(addToCart(cartProduct));
-    }, [dispatch, cartProduct, fly, heroUri, heroTarget.ref]);
-    const onInc = useCallback(() => dispatch(incrementQuantity(productId)), [dispatch, productId]);
-    const onDec = useCallback(() => dispatch(decrementQuantity(productId)), [dispatch, productId]);
+        dispatch(addToCart(variantLine || cartProduct));
+        unwatchProduct(productId);
+    }, [dispatch, cartProduct, variantLine, fly, heroUri, heroTarget.ref, productId]);
+    const onNotify = useCallback(() => {
+        const on = watch.toggle({ id: productId, name: product.name });
+        if (on) {
+            toast.show({
+                message: isHi ? 'वापस आने पर यह यहीं दिखेगा' : 'We’ll show it here when it’s back',
+                description: isHi ? 'होम पर "फिर से स्टॉक में" देखें। यह सूचना सिर्फ़ इस फ़ोन पर है।' : 'Look for it under “Back in stock” on Home. Saved on this phone only.',
+            });
+        }
+    }, [watch, productId, product.name, isHi]);
+    const onMaxReached = useCallback(
+        () => toast.info(isHi ? `सिर्फ़ ${stock} बचे हैं` : `Only ${stock} left in stock`),
+        [isHi, stock],
+    );
+    const onInc = useCallback(() => dispatch(incrementQuantity(lineId)), [dispatch, lineId]);
+    const onDec = useCallback(() => dispatch(decrementQuantity(lineId)), [dispatch, lineId]);
     const onWishlist = useCallback(() => dispatch(toggleWishlistItem(normalizeProduct(product))), [dispatch, product]);
     const onShare = useCallback(() => {
         Share.share({ message: `${shown.name}${unit ? ` (${unit})` : ''} for ₹${formatINR(price)} on Shravan Kirana` }).catch(() => {});
@@ -216,8 +264,7 @@ const ProductDetailScreen = ({ route, navigation }) => {
     const openCart = useCallback(() => navigation.navigate('Main', { screen: 'Cart' }), [navigation]);
     const openSimilar = useCallback((item) => navigation.push('ProductDetail', { product: item }), [navigation]);
 
-    const variants = (product.variants || []).filter((v) => v && v.isActive !== false);
-    const infoRows = productInfoRows({ ...product, brand: shown.brand, unit });
+    const highlights = productHighlights({ ...product, brand: shown.brand, unit, price, highlights: shown.highlights }, isHi);
     const showNutrition = hasNutrition(product.nutrition);
 
     return (
@@ -232,6 +279,7 @@ const ProductDetailScreen = ({ route, navigation }) => {
                 <ImageGallery
                     images={images}
                     height={heroHeight + insets.top}
+                    topInset={insets.top}
                     onOpen={openViewer}
                     productName={shown.name}
                     heroRef={heroTarget.ref}
@@ -269,7 +317,7 @@ const ProductDetailScreen = ({ route, navigation }) => {
                             </Text>
                         ) : null}
                         {rating > 0 ? (
-                            <View style={styles.rating} accessibilityLabel={`Rated ${rating} out of 5 from ${reviewCount} reviews`}>
+                            <View style={styles.rating} accessibilityLabel={isHi ? `${reviewCount} समीक्षाओं से 5 में से ${rating} रेटिंग` : `Rated ${rating} out of 5 from ${reviewCount} reviews`}>
                                 {unit ? <View style={styles.sep} /> : null}
                                 <MaterialCommunityIcons name="star" size={14} color={colors.rating} />
                                 <Text variant="label">{rating.toFixed(1)}</Text>
@@ -285,15 +333,18 @@ const ProductDetailScreen = ({ route, navigation }) => {
                     {variants.length > 1 ? (
                         <View style={styles.variants}>
                             {variants.map((v) => {
-                                const current = v.unit === unit || (v.isDefault && !variants.some((x) => x.unit === unit));
+                                const current = v.sku === selectedVariant?.sku;
+                                const out = !(Number(v.stock) > 0);
+                                const per = unitPriceLabel(v.sellingPrice, v.unit, isHi);
                                 return (
                                     <Chip
                                         key={v.sku || v.unit}
                                         size="md"
                                         label={v.unit}
-                                        caption={`₹${formatINR(v.sellingPrice)}`}
+                                        caption={out ? (isHi ? 'स्टॉक ख़त्म' : 'Sold out') : `₹${formatINR(v.sellingPrice)}${per ? ` · ${per}` : ''}`}
                                         selected={current}
-                                        disabled={!current}
+                                        onPress={() => setPickedSku(v.sku)}
+                                        accessibilityState={{ selected: current }}
                                     />
                                 );
                             })}
@@ -318,9 +369,11 @@ const ProductDetailScreen = ({ route, navigation }) => {
 
                     <Divider spacing={space.lg} />
 
-                    {shown.highlights ? (
+                    {highlights.length ? (
                         <AccordionSection title={isHi ? 'मुख्य बातें' : 'Highlights'} expanded={expanded.highlights} animateLayout={lastToggled !== 'highlights'} onToggle={() => toggle('highlights')}>
-                            <HighlightsList text={shown.highlights} />
+                            {highlights.map(([label, value], i) => (
+                                <InfoRow key={`${label}-${i}`} label={label} value={value} last={i === highlights.length - 1} />
+                            ))}
                         </AccordionSection>
                     ) : null}
                     {shown.description ? (
@@ -329,24 +382,25 @@ const ProductDetailScreen = ({ route, navigation }) => {
                         </AccordionSection>
                     ) : null}
                     {showNutrition ? (
-                        <AccordionSection title={isHi ? 'पोषण जानकारी' : 'Nutritional information'} expanded={expanded.nutrition} animateLayout={lastToggled !== 'nutrition'} onToggle={() => toggle('nutrition')}>
+                        <AccordionSection title={isHi ? 'पोषण जानकारी' : 'Nutritional information'} expanded={expanded.nutrition} animateLayout={lastToggled !== 'nutrition'} onToggle={() => toggle('nutrition')} last>
                             <NutritionTable nutrition={product.nutrition} />
                         </AccordionSection>
                     ) : null}
-                    {infoRows.length ? (
-                        <AccordionSection title={isHi ? 'अन्य जानकारी' : 'More info'} expanded={expanded.info} animateLayout={lastToggled !== 'info'} onToggle={() => toggle('info')} last>
-                            {infoRows.map(([label, value], i) => (
-                                <InfoRow key={label} label={label} value={value} last={i === infoRows.length - 1} />
-                            ))}
-                        </AccordionSection>
-                    ) : null}
                 </View>
+
+                {!inStock && sameShelf.length ? (
+                    <ProductRail
+                        title={isHi ? 'इसी तरह के सामान, स्टॉक में' : 'Similar items in stock'}
+                        products={sameShelf}
+                        onProductPress={openSimilar}
+                    />
+                ) : null}
 
                 {settled ? (
                     <Animated.View layout={sectionLayout}>
                         <ProductRail
                             title={isHi ? 'आपको यह भी पसंद आ सकता है' : 'You might also like'}
-                            products={similar}
+                            products={sameShelf.length ? similar.filter((p) => !sameShelf.some((x) => getProductId(x) === getProductId(p))) : similar}
                             loading={similarLoading}
                             onProductPress={openSimilar}
                         />
@@ -371,6 +425,10 @@ const ProductDetailScreen = ({ route, navigation }) => {
                 mrp={mrp}
                 quantity={quantity}
                 inStock={inStock}
+                max={stock != null && stock > 0 ? stock : undefined}
+                onMaxReached={onMaxReached}
+                watching={watching}
+                onNotify={onNotify}
                 bottomInset={insets.bottom}
                 productName={shown.name}
                 isHi={isHi}

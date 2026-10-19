@@ -28,6 +28,7 @@
  */
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { useSelector } from 'react-redux';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
     cancelAnimation,
@@ -55,10 +56,11 @@ function useShimmerClock() {
 }
 
 export function SkeletonGroup({ children, style, gap = 0, ...rest }) {
+    const hi = useSelector((s) => (s.language?.currentLanguage || s.auth?.language) === 'hi');
     const clock = useShimmerClock();
     return (
         <ClockContext.Provider value={clock}>
-            <View style={[gap ? { gap } : null, style]} accessibilityLabel="Loading" accessibilityRole="progressbar" {...rest}>
+            <View style={[gap ? { gap } : null, style]} accessibilityLabel={hi ? 'लोड हो रहा है' : 'Loading'} accessibilityRole="progressbar" {...rest}>
                 {children}
             </View>
         </ClockContext.Provider>

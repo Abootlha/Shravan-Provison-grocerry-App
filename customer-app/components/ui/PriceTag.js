@@ -19,6 +19,7 @@
  */
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
+import { useSelector } from 'react-redux';
 import { fontFamily, space } from '../../constants/theme';
 import { Text } from './Text';
 import { RollingNumber } from './RollingNumber';
@@ -34,6 +35,7 @@ const inr = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigit
 
 export function PriceTag({ price, mrp, size = 'sm', showSave = false, layout = 'row', color = 'strong', rolling = false, labels, style }) {
     const sz = SIZES[size] || SIZES.sm;
+    const hi = useSelector((s) => (s.language?.currentLanguage || s.auth?.language) === 'hi');
     const hasMrp = mrp != null && Number(mrp) > Number(price);
     const off = hasMrp ? Math.round((1 - price / mrp) * 100) : 0;
     const words = { save: 'Save', off: 'off', ...labels };
@@ -44,7 +46,7 @@ export function PriceTag({ price, mrp, size = 'sm', showSave = false, layout = '
         <View
             style={[layout === 'row' ? styles.row : styles.stack, layout === 'row' && !saveLabel && styles.baseline, style]}
             accessible
-            accessibilityLabel={`₹${inr(price)}${hasMrp ? `, MRP ₹${inr(mrp)}, ${off}% off` : ''}`}
+            accessibilityLabel={`₹${inr(price)}${hasMrp ? (hi ? `, MRP ₹${inr(mrp)}, ${off}% छूट` : `, MRP ₹${inr(mrp)}, ${off}% off`) : ''}`}
         >
             {rolling ? (
                 <RollingNumber value={Number(price)} prefix="₹" variant={sz.price} color={color} style={size === 'sm' ? styles.priceSm : null} />

@@ -9,6 +9,7 @@ import cookieParser from 'cookie-parser';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { RedisIoAdapter } from './sockets/redis-io.adapter';
 
 // Origins allowed in development only (admin dev server, Expo web, LAN testing).
 const DEV_ORIGIN_PATTERN =
@@ -100,6 +101,11 @@ async function bootstrap() {
 
   // API prefix
   app.setGlobalPrefix('api/v1');
+
+  // Socket.IO rooms shared across instances via Redis (in-memory fallback).
+  const ioAdapter = new RedisIoAdapter(app, configService);
+  await ioAdapter.connectToRedis();
+  app.useWebSocketAdapter(ioAdapter);
 
   // Close Mongo/Redis/BullMQ cleanly on SIGINT/SIGTERM (PM2 reloads, deploys).
   app.enableShutdownHooks();

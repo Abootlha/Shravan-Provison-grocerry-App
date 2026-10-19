@@ -4,7 +4,7 @@
  * Docs: components/ui/README.md · Tokens: constants/theme.js · Motion: theme/motion.js
  * Theme runtime (light / dark): theme/ThemeProvider.js — import { useTheme, makeStyles } from '../theme'
  */
-export { Text, TEXT_COLORS, Em, Headline, resolveTextColor } from './Text';
+export { Text, TEXT_COLORS, Em, Headline, resolveTextColor, useScriptFamily } from './Text';
 export { PressableScale } from './PressableScale';
 export { PressableHighlight } from './PressableHighlight';
 export { Button } from './Button';

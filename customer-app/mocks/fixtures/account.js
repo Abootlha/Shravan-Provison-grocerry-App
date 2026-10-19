@@ -2,11 +2,11 @@ import { oid, KIND } from './ids';
 
 // GET /settings/store shape (settings.controller.ts).
 export const storeSettings = {
-    storeName: 'Shravan Provision Store',
+    storeName: 'Shravan Kirana',
     location: {
         latitude: 26.6965,
         longitude: 83.4627,
-        address: 'Shravan Provision Store, Kauriram Road, Gorakhpur, Uttar Pradesh 273016',
+        address: 'Shravan Kirana, Kauriram Road, Gorakhpur, Uttar Pradesh 273016',
     },
     storeTimings: { openTime: '07:00', closeTime: '23:00' },
     contactPhone: '+919876543210',
@@ -26,8 +26,13 @@ export const MOCK_USER_ID = oid(KIND.user, 1);
 // Address subdocuments (users/schemas/user.schema.ts Address).
 export const addresses = [
     {
+        _id: oid(KIND.address, 1),
         type: 'Home',
-        address: 'H.No. 214, Gali No. 3, Shivpuri Colony, Near Hanuman Mandir, Rapti Nagar',
+        houseNo: 'H.No. 214',
+        landmark: 'Hanuman Mandir',
+        receiverName: 'Aarav Mishra',
+        receiverPhone: '9876501234',
+        address: 'Gali No. 3, Shivpuri Colony, Rapti Nagar',
         city: 'Gorakhpur',
         pincode: '273016',
         isDefault: true,
@@ -35,8 +40,10 @@ export const addresses = [
         longitude: 83.4496,
     },
     {
+        _id: oid(KIND.address, 2),
         type: 'Work',
-        address: '2nd Floor, Shubham Complex, Gorakhnath Road, Opp. Union Bank',
+        floor: '2',
+        address: 'Shubham Complex, Gorakhnath Road, Opp. Union Bank',
         city: 'Gorakhpur',
         pincode: '273015',
         isDefault: false,

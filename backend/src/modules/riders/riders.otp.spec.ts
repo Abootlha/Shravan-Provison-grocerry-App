@@ -10,6 +10,7 @@ describe('RidersService.ensureOtpRider', () => {
     {} as any,
     {} as any,
     {} as any,
+    {} as any,
   );
 
   beforeEach(() => jest.clearAllMocks());
