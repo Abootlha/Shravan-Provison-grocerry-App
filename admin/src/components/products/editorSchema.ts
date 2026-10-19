@@ -53,6 +53,28 @@ const optionalNumber = (label: string, opts: { min?: number; max?: number; int?:
         .refine((n) => !opts.int || Number.isInteger(n), `${label} must be a whole number`)
         .optional();
 
+/** One pack size row in the Variants table (mirrors backend ProductVariantDto). */
+export const variantSchema = z.object({
+    sku: z
+        .string()
+        .trim()
+        .min(1, 'Enter a SKU')
+        .max(100, 'SKU must be 100 characters or fewer')
+        .regex(/^[\w./-]+$/, 'SKU may only use letters, digits, . _ / -'),
+    unit: z.string().trim().min(1, 'Enter the pack size').max(50, 'Pack size must be 50 characters or fewer'),
+    mrp: z.number({ invalid_type_error: 'Enter the MRP' }).refine((n) => Number.isFinite(n) && n > 0, 'MRP must be above ₹0'),
+    sellingPrice: z
+        .number({ invalid_type_error: 'Enter the price' })
+        .refine((n) => Number.isFinite(n) && n > 0, 'Price must be above ₹0'),
+    stock: z
+        .number({ invalid_type_error: 'Enter the stock' })
+        .refine((n) => Number.isInteger(n) && n >= 0 && n <= 100_000, 'Stock must be a whole number from 0'),
+    isDefault: z.boolean(),
+    isActive: z.boolean(),
+});
+export type VariantFormValues = z.output<typeof variantSchema>;
+export const MAX_VARIANTS = 20;
+
 const optionalText = (label: string, max: number) =>
     z.string().trim().max(max, `${label} must be ${max} characters or fewer`).optional().default('');
 
@@ -99,6 +121,8 @@ export const productSchema = z
             transFat: optionalNumber('Trans fat', { min: 0 }),
             servingSize: optionalText('Serving size', 50),
         }),
+        /** Pack sizes. Empty = the product is sold as one pack (price / unit / stock above). */
+        variants: z.array(variantSchema).max(MAX_VARIANTS, `Up to ${MAX_VARIANTS} pack sizes`),
         /** Create only: the editor hides stock on edit (changes go through stock adjustments). */
         isNew: z.boolean(),
     })
@@ -125,6 +149,16 @@ export const productSchema = z
             const err = imageSourceError(src);
             if (err) ctx.addIssue({ code: 'custom', path: ['images'], message: `Image ${i + 1}: ${err}` });
         });
+        const skus = new Set<string>();
+        v.variants.forEach((row, i) => {
+            const key = row.sku.trim().toLowerCase();
+            if (key && skus.has(key)) ctx.addIssue({ code: 'custom', path: ['variants', i, 'sku'], message: 'This SKU is already used above' });
+            skus.add(key);
+            if (row.sellingPrice > row.mrp) ctx.addIssue({ code: 'custom', path: ['variants', i, 'sellingPrice'], message: 'Price can’t be above the MRP' });
+        });
+        if (v.variants.filter((row) => row.isDefault).length > 1) {
+            ctx.addIssue({ code: 'custom', path: ['variants'], message: 'Only one pack size can be the default' });
+        }
         if (v.itemGroupId && !v.subcategoryId) {
             ctx.addIssue({ code: 'custom', path: ['itemGroupId'], message: 'Choose a subcategory before the item group' });
         }
@@ -157,6 +191,7 @@ export const FIELD_SECTION: Record<string, SectionId> = {
     status: 'organisation',
     isAvailable: 'organisation',
     nutrition: 'nutrition',
+    variants: 'variants',
 };
 
 export type SectionId = 'basics' | 'pricing' | 'media' | 'inventory' | 'organisation' | 'nutrition' | 'variants';
@@ -191,6 +226,7 @@ export function emptyProductForm(status: ProductStatus = 'active'): ProductFormI
         status,
         isAvailable: true,
         nutrition: { protein: undefined, carbs: undefined, sugar: undefined, fat: undefined, transFat: undefined, servingSize: '' },
+        variants: [],
         isNew: true,
     };
 }
@@ -227,13 +263,23 @@ export function productToForm(p: AdminProduct): ProductFormInput {
             transFat: num(p.nutrition?.transFat),
             servingSize: p.nutrition?.servingSize ?? '',
         },
+        variants: (p.variants ?? []).map((v) => ({
+            sku: v.sku ?? '',
+            unit: v.unit ?? '',
+            mrp: Number(v.mrp),
+            sellingPrice: Number(v.sellingPrice),
+            stock: Number(v.stock) || 0,
+            isDefault: !!v.isDefault,
+            isActive: v.isActive !== false,
+        })),
         isNew: false,
     };
 }
 
 /** A copy for "Duplicate": new identity (no barcode), no stock, saved as a draft. */
 export function duplicateToForm(p: AdminProduct): ProductFormInput {
-    return { ...productToForm(p), name: `${p.name} (copy)`, barcode: '', stock: 0, status: 'draft', isNew: true };
+    // SKUs are unique per pack, so a duplicate starts without the original's pack sizes.
+    return { ...productToForm(p), name: `${p.name} (copy)`, barcode: '', stock: 0, status: 'draft', variants: [], isNew: true };
 }
 
 type Dirty = Partial<Record<keyof ProductFormValues, unknown>>;
@@ -304,6 +350,19 @@ export function toProductPayload(v: ProductFormValues, dirty?: Dirty): Record<st
     if (changed('nutrition')) {
         const n = cleanNutrition(v.nutrition);
         if (n) body.nutrition = n;
+    }
+    // Pack sizes go as the whole list (the server replaces it and mirrors the default pack onto
+    // the product's own price / unit / stock).
+    if (isCreate ? v.variants.length > 0 : !!dirty?.variants) {
+        body.variants = v.variants.map((row) => ({
+            sku: row.sku.trim(),
+            unit: row.unit.trim(),
+            mrp: row.mrp,
+            sellingPrice: row.sellingPrice,
+            stock: row.stock,
+            isDefault: row.isDefault,
+            isActive: row.isActive,
+        }));
     }
     return body;
 }

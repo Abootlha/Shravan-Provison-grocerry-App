@@ -41,10 +41,7 @@ import { ETAService } from './eta.service';
 import { calculateBill, OrderBill } from './pricing';
 import { resolveFees } from '../settings/fees';
 import { computeStoreOpenState } from '../settings/store-hours';
-import {
-  checkoutPriceOf,
-  isProductSellable,
-} from '../products/schemas/product.schema';
+import { sellableLine, StockLine } from '../products/sellable-line';
 import { isStaffRole } from '../users/schemas/user.schema';
 import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
 import { escapeRegex, pageMeta } from '../../common/dto/query-transforms';
@@ -66,7 +63,23 @@ export interface OrderLineInput {
   productId: string;
   quantity: number;
   name?: string;
+  /** Pack-size variant; optional (see products/sellable-line.ts). */
+  variantSku?: string;
 }
+
+/** The stock reservation for one order line (variant lines reserve on the variant). */
+export const stockLineOf = (item: {
+  productId: any;
+  quantity: number;
+  variantSku?: string;
+  mirrorsTopLevel?: boolean;
+}): StockLine => ({
+  productId: item.productId.toString(),
+  quantity: item.quantity,
+  ...(item.variantSku
+    ? { variantSku: item.variantSku, mirror: !!item.mirrorsTopLevel }
+    : {}),
+});
 
 export interface OrderQuote extends OrderBill {
   isOpen: boolean;
@@ -78,6 +91,9 @@ export interface OrderQuote extends OrderBill {
     price: number;
     lineTotal: number;
     image?: string;
+    variantSku?: string;
+    unit?: string;
+    mrp?: number;
   }[];
 }
 
@@ -97,6 +113,17 @@ export class StoreClosedException extends ConflictException {
 }
 
 export const MAX_DELIVERY_OTP_ATTEMPTS = 5;
+
+/** Fallback delivery promise when the store settings don't carry one. */
+export const DEFAULT_DELIVERY_MINUTES = 15;
+
+/** The store's delivery promise in minutes (whole, 1–240), else the default. */
+export const estimatedDeliveryMinutesOf = (settings: any): number => {
+  const n = Number(settings?.estimatedDeliveryMinutes);
+  return Number.isFinite(n) && n >= 1 && n <= 240
+    ? Math.round(n)
+    : DEFAULT_DELIVERY_MINUTES;
+};
 
 // Statuses after which the goods have physically left the store.
 const GOODS_LEFT_STORE_STATUSES: OrderStatus[] = [
@@ -222,25 +249,36 @@ export class OrdersService {
     if (items && items.length > 0) {
       for (const item of items) {
         const product = await this.productsService.findById(item.productId);
-        if (!product || !isProductSellable(product)) {
+        const line = product ? sellableLine(product, item.variantSku) : null;
+        if (!product || !line) {
           throw new BadRequestException(
-            `Product ${item.name || item.productId} is no longer available`,
+            item.variantSku && product
+              ? `${product.name} (${item.variantSku}) is no longer available`
+              : `Product ${item.name || item.productId} is no longer available`,
           );
         }
-        if (product.stock < item.quantity) {
+        if (line.stock < item.quantity) {
           throw new BadRequestException(
-            `Insufficient stock for ${product.name}`,
+            `Insufficient stock for ${product.name}${line.variantSku && line.unit ? ` ${line.unit}` : ''}`,
           );
         }
-        const price = checkoutPriceOf(product) as number;
         orderItems.push({
           productId: product._id,
           name: product.name,
           quantity: item.quantity,
-          price,
-          image: product.image,
+          price: line.price,
+          image: product.image || product.images?.[0],
+          sku: line.sku,
+          unit: line.unit,
+          mrp: line.mrp,
+          ...(line.variantSku
+            ? {
+                variantSku: line.variantSku,
+                mirrorsTopLevel: line.mirrorsTopLevel,
+              }
+            : {}),
         });
-        itemTotal += price * item.quantity;
+        itemTotal += line.price * item.quantity;
       }
       return { orderItems, itemTotal };
     }
@@ -257,6 +295,15 @@ export class OrdersService {
         quantity: item.quantity,
         price: item.price,
         image: item.image,
+        sku: item.sku,
+        unit: item.unit,
+        mrp: item.mrp,
+        ...(item.variantSku
+          ? {
+              variantSku: item.variantSku,
+              mirrorsTopLevel: !!item.mirrorsTopLevel,
+            }
+          : {}),
       })),
       itemTotal: cart.total,
     };
@@ -281,6 +328,9 @@ export class OrdersService {
         price: item.price,
         lineTotal: Math.round(item.price * item.quantity * 100) / 100,
         image: item.image,
+        ...(item.variantSku ? { variantSku: item.variantSku } : {}),
+        unit: item.unit,
+        mrp: item.mrp,
       })),
     };
   }
@@ -307,10 +357,7 @@ export class OrdersService {
     );
 
     // Lock stock atomically
-    const stockItems = orderItems.map((item: any) => ({
-      productId: item.productId.toString(),
-      quantity: item.quantity,
-    }));
+    const stockItems = orderItems.map(stockLineOf);
 
     const stockLocked =
       await this.productsService.checkAndLockStock(stockItems);
@@ -357,7 +404,11 @@ export class OrdersService {
       // online methods settle only when PayU confirms via a verified callback.
       paymentStatus: PaymentStatus.PENDING,
       orderStatus: OrderStatus.PENDING,
-      estimatedDeliveryTime: dayjs().add(15, 'minutes').toDate(),
+      // The store's own promise (settings.estimatedDeliveryMinutes, the number Home and
+      // checkout show), so tracking starts from the same figure; 15 only if unset.
+      estimatedDeliveryTime: dayjs()
+        .add(estimatedDeliveryMinutesOf(settings), 'minutes')
+        .toDate(),
       deliveryInstructions: data.deliveryInstructions,
       deliveryOtp,
     });
@@ -804,7 +855,12 @@ export class OrdersService {
    */
   async releaseOrderStock(order: {
     _id: any;
-    items: { productId: any; quantity: number }[];
+    items: {
+      productId: any;
+      quantity: number;
+      variantSku?: string;
+      mirrorsTopLevel?: boolean;
+    }[];
   }): Promise<boolean> {
     const claimed = await this.orderModel
       .findOneAndUpdate(
@@ -818,10 +874,7 @@ export class OrdersService {
       return false;
     }
 
-    const stockItems = (claimed.items || order.items).map((item) => ({
-      productId: item.productId.toString(),
-      quantity: item.quantity,
-    }));
+    const stockItems = (claimed.items || order.items).map(stockLineOf);
     await this.productsService.releaseStock(stockItems);
     return true;
   }

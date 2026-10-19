@@ -79,3 +79,53 @@ describe('helpers', () => {
         expect(looksFreshCategory(undefined)).toBe(false);
     });
 });
+
+describe('pack sizes (variants)', () => {
+    const withVariants: AdminProduct = {
+        ...product,
+        variants: [
+            { sku: 'DAL-1', unit: '1 kg', mrp: 160, sellingPrice: 140, stock: 12, isDefault: true, isActive: true },
+            { sku: 'DAL-5', unit: '5 kg', mrp: 760, sellingPrice: 650, stock: 4, isDefault: false },
+        ],
+    };
+
+    it('loads the stored pack sizes into the form', () => {
+        expect(productToForm(withVariants).variants).toEqual([
+            { sku: 'DAL-1', unit: '1 kg', mrp: 160, sellingPrice: 140, stock: 12, isDefault: true, isActive: true },
+            { sku: 'DAL-5', unit: '5 kg', mrp: 760, sellingPrice: 650, stock: 4, isDefault: false, isActive: true },
+        ]);
+    });
+
+    it('rejects duplicate SKUs, a price above MRP and two defaults', () => {
+        const form = productToForm(withVariants);
+        const res = productSchema.safeParse({
+            ...form,
+            variants: [form.variants[0], { ...form.variants[1], sku: 'dal-1', sellingPrice: 800, isDefault: true }],
+        });
+        expect(res.success).toBe(false);
+        const paths = res.error!.issues.map((i) => i.path.join('.'));
+        expect(paths).toEqual(expect.arrayContaining(['variants.1.sku', 'variants.1.sellingPrice', 'variants']));
+    });
+
+    it('sends the whole list only when it changed', () => {
+        const values = productSchema.parse({ ...productToForm(withVariants) });
+        expect(toProductPayload(values, { price: true })).not.toHaveProperty('variants');
+        const body = toProductPayload(values, { variants: true });
+        expect(body.variants).toEqual([
+            { sku: 'DAL-1', unit: '1 kg', mrp: 160, sellingPrice: 140, stock: 12, isDefault: true, isActive: true },
+            { sku: 'DAL-5', unit: '5 kg', mrp: 760, sellingPrice: 650, stock: 4, isDefault: false, isActive: true },
+        ]);
+    });
+
+    it('creates a product with pack sizes', () => {
+        const values = productSchema.parse({
+            ...emptyProductForm('draft'),
+            name: 'Atta',
+            categoryId: CAT,
+            price: 249,
+            unit: '5 kg',
+            variants: [{ sku: 'ATTA-5', unit: '5 kg', mrp: 295, sellingPrice: 249, stock: 50, isDefault: true, isActive: true }],
+        });
+        expect(toProductPayload(values).variants).toHaveLength(1);
+    });
+});

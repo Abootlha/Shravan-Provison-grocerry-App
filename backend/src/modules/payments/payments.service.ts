@@ -15,6 +15,7 @@ import {
   OrderDocument,
   OrderStatus,
   PaymentMethod,
+  PAYU_PG_FOR_METHOD,
   PaymentStatus,
 } from '../orders/schemas/order.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
@@ -313,7 +314,7 @@ export class PaymentsService {
       surl,
       furl,
       hash,
-      pg: dto.pg,
+      pg: dto.pg || PAYU_PG_FOR_METHOD[order.paymentMethod as PaymentMethod],
       bankcode: dto.bankcode,
       environment: this.getPayuEnvironment(),
     };

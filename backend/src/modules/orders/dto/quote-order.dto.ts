@@ -8,6 +8,7 @@ import {
   IsMongoId,
   IsOptional,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -37,6 +38,16 @@ export class QuoteItemDto {
   @IsOptional()
   @IsString()
   image?: string;
+
+  /**
+   * Pack-size variant (ProductVariant.sku). Optional: products without
+   * variants ignore it; products with variants default to their default pack.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Matches(/^[\w./-]+$/, { message: 'variantSku has invalid characters' })
+  variantSku?: string;
 }
 
 /** POST /orders/quote: the same items payload POST /orders takes. */

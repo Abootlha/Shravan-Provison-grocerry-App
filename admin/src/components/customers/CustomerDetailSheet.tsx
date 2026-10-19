@@ -12,7 +12,7 @@ import { queryKeys } from '@/lib/query';
 import { formatPhone } from '@/components/riders/types';
 import { type Customer, type CustomerDetailResponse, customerName } from './types';
 
-const PAYMENT_METHOD: Record<string, string> = { COD: 'Cash on delivery', UPI: 'UPI', CARD: 'Card', WALLET: 'Wallet' };
+const PAYMENT_METHOD: Record<string, string> = { COD: 'Cash on delivery', UPI: 'UPI', CARD: 'Card', NETBANKING: 'Net banking', WALLET: 'Wallet' };
 
 function Figure({ label, children }: { label: string; children: React.ReactNode }) {
     return (

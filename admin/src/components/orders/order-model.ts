@@ -222,7 +222,8 @@ export const PAYMENT_METHOD_LABEL: Record<string, string> = {
     COD: 'Cash on delivery',
     UPI: 'UPI',
     CARD: 'Card',
+    NETBANKING: 'Net banking',
     WALLET: 'Wallet',
 };
 
-export const PAYMENT_METHOD_SHORT: Record<string, string> = { COD: 'COD', UPI: 'UPI', CARD: 'Card', WALLET: 'Wallet' };
+export const PAYMENT_METHOD_SHORT: Record<string, string> = { COD: 'COD', UPI: 'UPI', CARD: 'Card', NETBANKING: 'Net banking', WALLET: 'Wallet' };

@@ -13,6 +13,10 @@ export class CartItem {
 
   @Prop({ required: true })
   price!: number; // Snapshot price at time of adding
+
+  /** Pack-size variant; a product can sit in the cart once per variant. */
+  @Prop()
+  variantSku?: string;
 }
 
 @Schema({ timestamps: true })

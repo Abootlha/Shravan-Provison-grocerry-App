@@ -1,4 +1,13 @@
-import { IsInt, IsMongoId, IsOptional, Max, Min } from 'class-validator';
+import {
+  IsInt,
+  IsMongoId,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export const MAX_CART_ITEM_QUANTITY = 50;
 
@@ -11,6 +20,13 @@ export class AddToCartDto {
   @Min(1)
   @Max(MAX_CART_ITEM_QUANTITY)
   quantity?: number;
+
+  /** Pack-size variant (ProductVariant.sku); optional. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Matches(/^[\w./-]+$/, { message: 'variantSku has invalid characters' })
+  variantSku?: string;
 }
 
 export class UpdateCartItemDto {
@@ -22,4 +38,11 @@ export class UpdateCartItemDto {
   @Min(0)
   @Max(MAX_CART_ITEM_QUANTITY)
   quantity!: number;
+
+  /** Pack-size variant (ProductVariant.sku); optional. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Matches(/^[\w./-]+$/, { message: 'variantSku has invalid characters' })
+  variantSku?: string;
 }

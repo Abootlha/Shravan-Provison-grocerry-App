@@ -11,7 +11,7 @@ export type OrderStatus =
     | 'CANCELLED';
 
 export type PaymentStatus = 'PENDING' | 'COMPLETED' | 'FAILED' | 'REFUNDED';
-export type PaymentMethod = 'COD' | 'UPI' | 'CARD' | 'WALLET';
+export type PaymentMethod = 'COD' | 'UPI' | 'CARD' | 'NETBANKING' | 'WALLET';
 
 export interface OrderItem {
     productId?: string | { _id: string; name?: string; image?: string };
@@ -19,6 +19,11 @@ export interface OrderItem {
     quantity: number;
     price: number;
     image?: string;
+    /** Snapshots at order time (pack-size variants carry variantSku). */
+    variantSku?: string;
+    sku?: string;
+    unit?: string;
+    mrp?: number;
 }
 
 export interface OrderAddress {

@@ -9,6 +9,9 @@ import {
 import { RedisService } from '../../common/utils/redis.service';
 import { CatalogCacheService } from '../../common/utils/catalog-cache.service';
 import { ConfigService } from '@nestjs/config';
+import { expandSearchTerms } from './search-synonyms';
+import type { StockLine } from './sellable-line';
+import { normalizeVariants } from './dto/variant.dto';
 import {
   Category,
   CategoryDocument,
@@ -158,9 +161,12 @@ export class ProductsService {
       if (cached) return cached;
     }
 
-    // Text search if provided
+    // Text search if provided. Hindi / Hinglish words also search for the English word the
+    // catalogue uses ("doodh" -> "doodh milk"); $text matches any of the words.
     if (query.search) {
-      filter.$text = { $search: query.search };
+      filter.$text = {
+        $search: expandSearchTerms(query.search) || query.search,
+      };
     }
 
     const [products, total] = await Promise.all([
@@ -332,6 +338,11 @@ export class ProductsService {
       data.barcode = undefined;
     }
 
+    if (Array.isArray((data as any).variants)) {
+      (data as any).variants = normalizeVariants(
+        (data as any).variants,
+      ).variants;
+    }
     const product = new this.productModel(data);
     await product.save();
 
@@ -373,6 +384,13 @@ export class ProductsService {
       $set['pricing.gst'] = $set.gst;
       delete $set.gst;
     }
+    // Pack sizes: one default, and the product's own price / unit / stock mirror it
+    // (findByIdAndUpdate skips the pre('save') sync).
+    if (Array.isArray($set.variants)) {
+      const { variants, mirror } = normalizeVariants($set.variants);
+      $set.variants = variants;
+      if (mirror) Object.assign($set, mirror);
+    }
     if (Array.isArray($set.images) && $set.image === undefined) {
       if ($set.images.length > 0) $set.image = $set.images[0];
       else $unset.image = 1;
@@ -410,11 +428,13 @@ export class ProductsService {
    * Atomically reserves stock for every item. Each decrement only succeeds if
    * enough stock remains (conditional update), and if any item fails the
    * items already decremented are rolled back.
+   *
+   * A variant line (`variantSku`) reserves on that variant with a positional
+   * `$inc` guarded by `$elemMatch: { sku, stock: { $gte } }`; `mirror` also
+   * moves the top-level stock that copies the default variant.
    */
-  async checkAndLockStock(
-    items: { productId: string; quantity: number }[],
-  ): Promise<boolean> {
-    const locked: { productId: string; quantity: number }[] = [];
+  async checkAndLockStock(items: StockLine[]): Promise<boolean> {
+    const locked: StockLine[] = [];
 
     for (const item of items) {
       if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
@@ -422,10 +442,30 @@ export class ProductsService {
         return false;
       }
 
-      const result = await this.productModel.updateOne(
-        { _id: item.productId, stock: { $gte: item.quantity } },
-        { $inc: { stock: -item.quantity, soldCount: item.quantity } },
-      );
+      const result = item.variantSku
+        ? await this.productModel.updateOne(
+            {
+              _id: item.productId,
+              variants: {
+                $elemMatch: {
+                  sku: item.variantSku,
+                  isActive: { $ne: false },
+                  stock: { $gte: item.quantity },
+                },
+              },
+            },
+            {
+              $inc: {
+                'variants.$.stock': -item.quantity,
+                soldCount: item.quantity,
+                ...(item.mirror ? { stock: -item.quantity } : {}),
+              },
+            },
+          )
+        : await this.productModel.updateOne(
+            { _id: item.productId, stock: { $gte: item.quantity } },
+            { $inc: { stock: -item.quantity, soldCount: item.quantity } },
+          );
 
       if (!result || result.modifiedCount !== 1) {
         await this.releaseStock(locked);
@@ -443,14 +483,25 @@ export class ProductsService {
    * Returns stock for the given items. Callers are responsible for making sure
    * this runs at most once per order (see Order.stockReleased).
    */
-  async releaseStock(
-    items: { productId: string; quantity: number }[],
-  ): Promise<void> {
+  async releaseStock(items: StockLine[]): Promise<void> {
     for (const item of items) {
-      await this.productModel.updateOne(
-        { _id: item.productId },
-        { $inc: { stock: item.quantity, soldCount: -item.quantity } },
-      );
+      if (item.variantSku) {
+        await this.productModel.updateOne(
+          { _id: item.productId, 'variants.sku': item.variantSku },
+          {
+            $inc: {
+              'variants.$.stock': item.quantity,
+              soldCount: -item.quantity,
+              ...(item.mirror ? { stock: item.quantity } : {}),
+            },
+          },
+        );
+      } else {
+        await this.productModel.updateOne(
+          { _id: item.productId },
+          { $inc: { stock: item.quantity, soldCount: -item.quantity } },
+        );
+      }
       await this.redisService.del(RedisService.Keys.product(item.productId));
     }
   }

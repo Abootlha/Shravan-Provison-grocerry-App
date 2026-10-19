@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Controller, type UseFormReturn } from 'react-hook-form';
+import { Controller, useFieldArray, type UseFormReturn } from 'react-hook-form';
 import { AlertTriangle, Loader2, PackagePlus, ScanBarcode, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { confirm, ErrorState, Money, StatusBadge, TextareaField, TextField, useZodForm } from '@/components/shared';
@@ -19,6 +19,7 @@ import {
     emptyProductForm,
     FIELD_SECTION,
     looksFreshCategory,
+    MAX_VARIANTS,
     mapServerMessage,
     productSchema,
     productToForm,
@@ -43,7 +44,7 @@ const SECTIONS: { id: SectionId; label: string }[] = [
     { id: 'inventory', label: 'Inventory' },
     { id: 'organisation', label: 'Organisation' },
     { id: 'nutrition', label: 'Nutrition' },
-    { id: 'variants', label: 'Variants' },
+    { id: 'variants', label: 'Pack sizes' },
 ];
 
 const NONE = '__none__';
@@ -125,8 +126,7 @@ function EditorBody({
 
     const scrollRef = React.useRef<HTMLDivElement>(null);
     const [active, setActive] = React.useState<SectionId>('basics');
-    const showVariants = !!product?.variants?.length;
-    const sections = SECTIONS.filter((s) => s.id !== 'variants' || showVariants);
+    const sections = SECTIONS;
 
     React.useEffect(() => {
         const root = scrollRef.current;
@@ -140,7 +140,7 @@ function EditorBody({
         );
         root.querySelectorAll('section[id^="section-"]').forEach((el) => observer.observe(el));
         return () => observer.disconnect();
-    }, [ready, showVariants]);
+    }, [ready]);
 
     const goTo = (id: SectionId) => {
         const el = scrollRef.current?.querySelector(`#section-${id}`);
@@ -292,7 +292,7 @@ function EditorBody({
                             <InventorySection form={form} product={product} isCreate={isCreate} onAdjustStock={onAdjustStock} />
                             <OrganisationSection form={form} isCreate={isCreate} />
                             <NutritionSection form={form} />
-                            {showVariants && product ? <VariantsSection product={product} /> : null}
+                            <VariantsSection form={form} />
                         </div>
                     )}
                 </div>
@@ -799,41 +799,104 @@ function NutritionSection({ form }: { form: Form }) {
     );
 }
 
-/* ---------------------------------------------------------------- Variants (read-only) */
+/* ---------------------------------------------------------------- Variants */
 
-function VariantsSection({ product }: { product: AdminProduct }) {
+/**
+ * Pack sizes. Each row is sold and stocked on its own (the app's pack chooser, the cart and
+ * orders carry its SKU). The default pack is what the product's own price, unit and stock show;
+ * the server mirrors it on save. Leave the list empty for a product sold in one pack.
+ */
+function VariantsSection({ form }: { form: Form }) {
+    const { fields, append, remove } = useFieldArray({ control: form.control, name: 'variants' });
+    const rows = form.watch('variants') ?? [];
+    const listError = (form.formState.errors.variants as { message?: string; root?: { message?: string } } | undefined);
+    const addRow = () => {
+        const v = form.getValues();
+        const base = (product: string) => product.replace(/[^\w./-]+/g, '-').replace(/^-+|-+$/g, '').toUpperCase();
+        append({
+            sku: rows.length ? '' : base(`${v.name || 'SKU'}-${v.unit || '1'}`).slice(0, 60),
+            unit: rows.length ? '' : v.unit,
+            mrp: (rows.length ? undefined : v.mrp ?? v.price) as number,
+            sellingPrice: (rows.length ? undefined : v.price) as number,
+            stock: rows.length ? 0 : (v.stock ?? 0),
+            isDefault: rows.length === 0,
+            isActive: true,
+        });
+    };
+    const makeDefault = (index: number) => {
+        rows.forEach((_, i) => form.setValue(`variants.${i}.isDefault`, i === index, { shouldDirty: true }));
+    };
     return (
-        <Section id="variants" title="Variants" description="Pack sizes stored on this product. The API does not accept variant edits yet, so they are shown read-only.">
-            <div className="overflow-x-auto rounded-xl border">
-                <table className="w-full text-sm tabular-nums">
-                    <thead className="text-xs text-muted-foreground">
-                        <tr className="border-b">
-                            <th className="px-3 py-2 text-left font-medium">Unit</th>
-                            <th className="px-3 py-2 text-left font-medium">SKU</th>
-                            <th className="px-3 py-2 text-right font-medium">Price</th>
-                            <th className="px-3 py-2 text-right font-medium">MRP</th>
-                            <th className="px-3 py-2 text-right font-medium">Stock</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {product.variants!.map((v) => (
-                            <tr key={v.sku} className="border-b last:border-0">
-                                <td className="px-3 py-2 font-medium">
-                                    {v.unit}
-                                    {v.isDefault ? <span className="ml-1.5 text-xs text-muted-foreground">default</span> : null}
-                                </td>
-                                <td className="px-3 py-2 text-muted-foreground">{v.sku}</td>
-                                <td className="px-3 py-2 text-right">
-                                    <Money value={v.sellingPrice} />
-                                </td>
-                                <td className="px-3 py-2 text-right">
-                                    <Money value={v.mrp} />
-                                </td>
-                                <td className="px-3 py-2 text-right">{formatNumber(v.stock)}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+        <Section
+            id="variants"
+            title="Pack sizes"
+            description="Sell the same product in several sizes (500 g, 1 kg, 5 kg). Each size has its own SKU, price and stock. The default size is what lists show first."
+        >
+            {fields.length === 0 ? (
+                <p className="text-sm text-muted-foreground">One pack only: price, unit and stock come from the sections above.</p>
+            ) : null}
+            <div className="grid gap-3">
+                {fields.map((field, i) => (
+                    <div key={field.id} className="grid gap-3 rounded-xl border p-3" aria-label={`Pack size ${i + 1}`} role="group">
+                        <div className="grid gap-3 sm:grid-cols-[1.2fr_1.4fr]">
+                            <TextField form={form} name={`variants.${i}.unit`} label="Pack size" placeholder="1 kg" autoComplete="off" />
+                            <TextField form={form} name={`variants.${i}.sku`} label="SKU" placeholder="ATTA-1KG" autoComplete="off" />
+                        </div>
+                        <div className="grid grid-cols-3 gap-3">
+                            <TextField form={form} name={`variants.${i}.sellingPrice`} label="Price (₹)" type="number" inputMode="decimal" min={0} step="0.01" />
+                            <TextField form={form} name={`variants.${i}.mrp`} label="MRP (₹)" type="number" inputMode="decimal" min={0} step="0.01" />
+                            <TextField form={form} name={`variants.${i}.stock`} label="Stock" type="number" inputMode="numeric" min={0} step={1} />
+                        </div>
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-4">
+                                <label className="flex items-center gap-2 text-sm">
+                                    <input
+                                        type="radio"
+                                        name="variant-default"
+                                        className="size-4 accent-[var(--primary)]"
+                                        checked={!!rows[i]?.isDefault}
+                                        onChange={() => makeDefault(i)}
+                                    />
+                                    Default size
+                                </label>
+                                <Controller
+                                    control={form.control}
+                                    name={`variants.${i}.isActive`}
+                                    render={({ field: f }) => (
+                                        <label className="flex items-center gap-2 text-sm">
+                                            <Switch checked={!!f.value} onCheckedChange={f.onChange} aria-label={`Pack size ${i + 1} on sale`} />
+                                            On sale
+                                        </label>
+                                    )}
+                                />
+                            </div>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="text-destructive"
+                                onClick={() => {
+                                    const wasDefault = rows[i]?.isDefault;
+                                    remove(i);
+                                    if (wasDefault) requestAnimationFrame(() => form.getValues('variants')?.length && form.setValue('variants.0.isDefault', true, { shouldDirty: true }));
+                                }}
+                            >
+                                Remove
+                            </Button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+            {listError?.message || listError?.root?.message ? (
+                <p className="text-sm text-destructive" role="alert">
+                    {listError.message || listError.root?.message}
+                </p>
+            ) : null}
+            <div>
+                <Button type="button" variant="outline" size="sm" onClick={addRow} disabled={fields.length >= MAX_VARIANTS}>
+                    <PackagePlus className="size-4" aria-hidden />
+                    Add pack size
+                </Button>
             </div>
         </Section>
     );

@@ -26,7 +26,7 @@ export interface OrderItem {
 export type OrderStatus =
   'confirmed' | 'assigned' | 'packed' | 'picked_up' | 'out_for_delivery' | 'delivered' | 'cancelled';
 
-export type PaymentMethod = 'COD' | 'UPI' | 'CARD' | 'WALLET';
+export type PaymentMethod = 'COD' | 'UPI' | 'CARD' | 'NETBANKING' | 'WALLET';
 
 export interface TimelineEntry {
   status: OrderStatus;
