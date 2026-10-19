@@ -212,4 +212,6 @@ backend's `local` provider), normalise it the same way, then add a row below.
 (`orders/pricing.ts`), so the slide-to-pay amount and the created order always match.
 A cart line whose product is missing, not `active`, unavailable or unpriced is refused
 with the backend's 400 message. Web flags: `?store=closed` previews the closed store,
-`?mockQuote=fail` makes the quote fail (payment is blocked behind a Retry).
+`?mockQuote=fail` makes the quote fail (payment is blocked behind a Retry),
+`?mockProducts=slow` delays `GET /products` by 4 s and `?mockProducts=fail` makes it a network
+error (the onboarding and login collages then use their bundled pictures).

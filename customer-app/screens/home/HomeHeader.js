@@ -121,15 +121,19 @@ const HomeHeader = ({
                                     onPress={onAddressPress}
                                     haptic="selection"
                                     scaleTo={press.subtle}
-                                    accessibilityLabel={`${labels.deliverTo} ${addressType}, ${addressLine}`}
+                                    accessibilityLabel={addressType ? `${labels.deliverTo} ${addressType}, ${addressLine}` : addressLine}
                                     style={styles.address}
                                     hitSlop={{ top: 8, bottom: 8 }}
                                 >
                                     <Text variant="label" weight="medium" color={theme.ink} numberOfLines={1} style={styles.addressText}>
-                                        <Text variant="label" weight="bold" color={theme.ink}>
-                                            {addressType}
-                                        </Text>
-                                        {'  ·  '}
+                                        {addressType ? (
+                                            <>
+                                                <Text variant="label" weight="bold" color={theme.ink}>
+                                                    {addressType}
+                                                </Text>
+                                                {'  ·  '}
+                                            </>
+                                        ) : null}
                                         {addressLine}
                                     </Text>
                                     <MaterialCommunityIcons name="chevron-down" size={18} color={theme.ink} />

@@ -221,7 +221,7 @@ const CheckoutScreen = ({ navigation, route }) => {
                 <IconButton name="arrow-left" variant="ghost" accessibilityLabel={isHi ? 'वापस जाएं' : 'Go back'} onPress={goBack} />
             )}
             <Text variant="h3" accessibilityRole="header" style={styles.headerTitle}>
-                {isHi ? 'चेकआउट' : 'Checkout'}
+                {c.hasItems ? (isHi ? 'चेकआउट' : 'Checkout') : (isHi ? 'कार्ट' : 'Cart')}
             </Text>
             <View style={styles.headerSpacer} />
         </View>

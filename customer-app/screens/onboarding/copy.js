@@ -1,119 +1,147 @@
 /**
- * Onboarding copy, English + Hindi. Short on purpose: one headline (two lines at most on a 390pt
- * phone) and one line of body per step.
+ * Onboarding copy, English + Hindi. Two-line headlines (the "\n" is the intended break), one line of
+ * body. Numbers (delivery time, radius, distance) always come from the store settings or the user's
+ * point — never typed in here.
  *   onboardingCopy(isHi) -> the strings for the active language
  */
 const en = {
     welcome: {
-        title: 'Your kirana,\ndelivered in minutes',
-        body: 'Vegetables, fruit, dairy and daily staples from a store near you.',
-        etaFact: (min) => `About ${min} min delivery`,
-        etaFactUnknown: 'Fast local delivery',
-        trackFact: 'Live rider tracking',
-        payFact: 'UPI, card or cash',
+        title: (min) => (min ? `Groceries in\n${min} minutes.` : 'Groceries,\ndelivered fast.'),
+        // `kinds`: what the live catalogue actually stocks (stockKinds), most-stocked first
+        body: (kinds) => {
+            const k = kinds.slice(0, 2).map((x) => x.en);
+            const line = k.length ? `${k.join(', ')} and daily staples` : 'Daily staples';
+            return `${line[0].toUpperCase()}${line.slice(1)} from Shravan Kirana.`;
+        },
+        facts: 'UPI, card or cash  ·  Live rider tracking',
         cta: 'Get started',
         haveAccount: 'Already have an account?',
         logIn: 'Log in',
     },
-    fresh: {
-        title: 'Packed fresh,\nthe moment you order',
-        body: 'We pick from our own shelves, so what you see is what arrives.',
+    pack: {
+        title: 'Packed as\nyou order.',
+        body: 'Picked from our own shelves, checked, and bagged for the rider.',
     },
     track: {
-        title: 'Watch your order\nride to your door',
-        body: 'Follow the rider live on the map, from our store to your gate.',
+        title: 'Track it to\nyour door.',
+        body: 'Follow your rider live on the map, from our store to your gate.',
+        mapLabel: 'Map: a rider on the way from the store to a home',
     },
     location: {
         title: 'Where should\nwe deliver?',
-        storeLabel: 'Our store',
-        homeLabel: 'Your door',
-        benefitEta: 'An exact delivery time for your address',
-        benefitItems: 'Only items we can deliver to you',
-        reassure: 'We only use your location to show what we can deliver.',
-        mapLabel: (radius) => `Map of the store and its ${radius} km delivery area`,
-        useCurrent: 'Use current location',
-        locating: 'Finding you…',
-        manual: 'Enter address manually',
-        change: 'Change location',
+        body: 'We show the exact delivery time and only what we can bring you.',
+        useCurrent: 'Use my current location',
+        manual: 'Enter address',
+        change: 'Change address',
         tryAnother: 'Try another address',
         continue: 'Continue',
         tryAgain: 'Try again',
         browse: 'Continue browsing',
         notNow: 'Skip for now',
+        reassure: 'Your location is used only to check delivery.',
         currentLabel: 'Your current location',
-        inArea: 'We deliver here',
-        inAreaEta: (min) => `About ${min} min from our store`,
-        inAreaKm: (km) => `${km} km from our store`,
-        outArea: 'Not in our delivery area yet',
+        inAreaTitle: 'We deliver\nhere.',
+        inAreaLine: (min, where) => [min ? `~${min} min` : null, where].filter(Boolean).join('  ·  '),
+        outAreaTitle: 'Not in our\narea yet.',
         outAreaBody: (radius, km) =>
             km != null
-                ? `We deliver within ${radius} km of the store, and this spot is ${km} km away. You can still look around.`
+                ? `We deliver within ${radius} km of the store; this spot is ${km} km away. You can still look around.`
                 : `We deliver within ${radius} km of the store. You can still look around.`,
-        deniedTitle: 'Location is off',
+        deniedTitle: 'Location\nis off.',
         deniedBody: 'No problem. Type your address instead, or turn location on later in Settings.',
-        errorTitle: "We couldn't find you",
+        errorTitle: "We couldn't\nfind you.",
         errorBody: 'Check that location is on and try again, or type your address.',
+        mapLabel: (radius) => `Map of the store and its ${radius} km delivery area`,
     },
     skip: 'Skip',
     next: 'Next',
+    back: 'Back',
     step: (i, n) => `Step ${i} of ${n}`,
 };
 
 const hi = {
     welcome: {
-        title: 'आपकी किराना,\nमिनटों में घर पर',
-        body: 'पास की दुकान से सब्ज़ियाँ, फल, डेयरी और रोज़ का सामान।',
-        etaFact: (min) => `लगभग ${min} मिनट में डिलीवरी`,
-        etaFactUnknown: 'तेज़ लोकल डिलीवरी',
-        trackFact: 'राइडर की लाइव ट्रैकिंग',
-        payFact: 'UPI, कार्ड या कैश',
+        title: (min) => (min ? `${min} मिनट में\nराशन घर पर।` : 'राशन,\nझटपट घर पर।'),
+        body: (kinds) => {
+            const k = kinds.slice(0, 2).map((x) => x.hi);
+            return k.length ? `${k.join(', ')} और रोज़ का सामान, श्रवण किराना से।` : 'रोज़ का सामान, श्रवण किराना से।';
+        },
+        facts: 'UPI, कार्ड या कैश  ·  राइडर की लाइव ट्रैकिंग',
         cta: 'शुरू करें',
         haveAccount: 'पहले से अकाउंट है?',
         logIn: 'लॉग इन करें',
     },
-    fresh: {
-        title: 'ऑर्डर करते ही\nताज़ा पैकिंग',
-        body: 'हम अपनी ही दुकान से सामान चुनते हैं, जो दिखता है वही पहुँचता है।',
+    pack: {
+        title: 'ऑर्डर करते ही\nपैकिंग शुरू।',
+        body: 'हमारी अपनी दुकान से चुना, जाँचा और राइडर के लिए पैक किया।',
     },
     track: {
-        title: 'अपना ऑर्डर\nघर आते देखें',
+        title: 'दरवाज़े तक\nलाइव ट्रैक करें।',
         body: 'दुकान से आपके दरवाज़े तक राइडर को मैप पर लाइव देखें।',
+        mapLabel: 'मैप: दुकान से घर की ओर जाता राइडर',
     },
     location: {
         title: 'डिलीवरी\nकहाँ करें?',
-        storeLabel: 'हमारी दुकान',
-        homeLabel: 'आपका घर',
-        benefitEta: 'आपके पते के लिए डिलीवरी का सही समय',
-        benefitItems: 'सिर्फ़ वही सामान जो हम आप तक पहुँचा सकें',
-        reassure: 'आपका स्थान सिर्फ़ यह दिखाने के लिए है कि हम क्या डिलीवर कर सकते हैं।',
-        mapLabel: (radius) => `दुकान और उसके ${radius} किमी डिलीवरी क्षेत्र का मैप`,
-        useCurrent: 'मौजूदा स्थान इस्तेमाल करें',
-        locating: 'आपको ढूँढ रहे हैं…',
-        manual: 'पता खुद लिखें',
-        change: 'स्थान बदलें',
+        body: 'हम डिलीवरी का सही समय और सिर्फ़ वही सामान दिखाएँगे जो हम ला सकें।',
+        useCurrent: 'मेरा मौजूदा स्थान इस्तेमाल करें',
+        manual: 'पता लिखें',
+        change: 'पता बदलें',
         tryAnother: 'दूसरा पता आज़माएँ',
         continue: 'आगे बढ़ें',
         tryAgain: 'फिर से कोशिश करें',
         browse: 'फिर भी देखें',
         notNow: 'अभी नहीं',
+        reassure: 'आपका स्थान सिर्फ़ डिलीवरी जाँचने के लिए लिया जाता है।',
         currentLabel: 'आपका मौजूदा स्थान',
-        inArea: 'हम यहाँ डिलीवर करते हैं',
-        inAreaEta: (min) => `दुकान से लगभग ${min} मिनट`,
-        inAreaKm: (km) => `दुकान से ${km} किमी`,
-        outArea: 'यह जगह अभी डिलीवरी क्षेत्र में नहीं है',
+        inAreaTitle: 'हम यहाँ\nडिलीवर करते हैं।',
+        inAreaLine: (min, where) => [min ? `~${min} मिनट` : null, where].filter(Boolean).join('  ·  '),
+        outAreaTitle: 'यह जगह अभी\nक्षेत्र में नहीं।',
         outAreaBody: (radius, km) =>
             km != null
-                ? `हम दुकान से ${radius} किमी तक डिलीवर करते हैं, यह जगह ${km} किमी दूर है। आप फिर भी सामान देख सकते हैं।`
+                ? `हम दुकान से ${radius} किमी तक डिलीवर करते हैं; यह जगह ${km} किमी दूर है। आप फिर भी सामान देख सकते हैं।`
                 : `हम दुकान से ${radius} किमी तक डिलीवर करते हैं। आप फिर भी सामान देख सकते हैं।`,
-        deniedTitle: 'स्थान की अनुमति बंद है',
+        deniedTitle: 'स्थान की अनुमति\nबंद है।',
         deniedBody: 'कोई बात नहीं। पता खुद लिखें, या बाद में सेटिंग्स में स्थान चालू करें।',
-        errorTitle: 'आपका स्थान नहीं मिला',
+        errorTitle: 'आपका स्थान\nनहीं मिला।',
         errorBody: 'देखें कि स्थान चालू है और फिर से कोशिश करें, या पता खुद लिखें।',
+        mapLabel: (radius) => `दुकान और उसके ${radius} किमी डिलीवरी क्षेत्र का मैप`,
     },
     skip: 'छोड़ें',
     next: 'आगे',
+    back: 'पीछे',
     step: (i, n) => `चरण ${i} / ${n}`,
 };
+
+// Kinds of things a kirana stocks, matched against subcategory (preferred) or category names.
+const KINDS = [
+    [/fruit|vegetable|\bveg\b|produce|sabzi/i, 'fresh produce', 'ताज़ी सब्ज़ियाँ'],
+    [/tea|coffee/i, 'tea and coffee', 'चाय-कॉफ़ी'],
+    [/dairy|milk|paneer|curd|dahi|butter|cheese/i, 'dairy', 'डेयरी'],
+    [/ghee/i, 'ghee', 'घी'],
+    [/biscuit|cookie|bakery|rusk/i, 'biscuits', 'बिस्कुट'],
+    [/atta|flour|rice|\bdaa?l\b|pulse/i, 'atta and rice', 'आटा-चावल'],
+    [/spice|masala/i, 'spices', 'मसाले'],
+    [/\boils?\b/i, 'cooking oil', 'तेल'],
+    [/chips|namkeen|snack/i, 'snacks', 'नमकीन'],
+    [/instant|frozen|noodle/i, 'instant food', 'इंस्टेंट फ़ूड'],
+    [/clean|detergent|laundry/i, 'cleaning essentials', 'सफ़ाई का सामान'],
+    [/personal|soap|shampoo|tooth/i, 'personal care', 'पर्सनल केयर'],
+];
+const nameOf = (v) => (v && typeof v === 'object' ? v.name : '') || '';
+
+/** What the catalogue actually stocks, most-stocked first: [{ en, hi, count }]. Empty when unknown. */
+export function stockKinds(products) {
+    const counts = new Map();
+    (products || []).forEach((p) => {
+        const label = nameOf(p.subcategoryId) || nameOf(p.subcategory) || nameOf(p.categoryId) || nameOf(p.category);
+        const hit = KINDS.find(([re]) => re.test(label)) || KINDS.find(([re]) => re.test(nameOf(p.categoryId)));
+        if (!hit) return;
+        const cur = counts.get(hit[1]) || { en: hit[1], hi: hit[2], count: 0 };
+        cur.count += 1;
+        counts.set(hit[1], cur);
+    });
+    return [...counts.values()].sort((a, b) => b.count - a.count);
+}
 
 export const onboardingCopy = (isHi) => (isHi ? hi : en);
 

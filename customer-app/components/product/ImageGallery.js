@@ -17,6 +17,7 @@
  */
 import React, { memo, useCallback, useState } from 'react';
 import { Pressable, View } from 'react-native';
+import { useSelector } from 'react-redux';
 import Animated, { interpolate, useAnimatedScrollHandler, useAnimatedStyle, useReducedMotion, useSharedValue } from 'react-native-reanimated';
 import ProductImage from './ProductImage';
 import { space } from '../../constants/theme';
@@ -26,6 +27,10 @@ const DOT = 6;
 const DOT_GAP = space.md; // 12
 const REST = 2.4; // the active dot at rest is a short pill (scaleX)
 const STRIDE = DOT + DOT_GAP;
+// Room above the pack shot for the floating back / share / heart buttons, and below it for the
+// sheet's overlap and the page dots. Everything between is the product.
+const HERO_TOP = space['5xl'] + space.sm; // 56
+const HERO_BOTTOM = space['3xl']; // 32
 
 /** The sliding, stretching active indicator. */
 function Worm({ x, width, count }) {
@@ -54,10 +59,11 @@ function Page({ index, x, width, reduce, children }) {
     return <Animated.View style={style}>{children}</Animated.View>;
 }
 
-function ImageGallery({ images, height, tint, onOpen, onIndexChange, productName = 'Product', heroRef, heroStyle, onHeroLayout, onHeroLoad }) {
+function ImageGallery({ images, height, topInset = 0, tint, onOpen, onIndexChange, productName = 'Product', heroRef, heroStyle, onHeroLayout, onHeroLoad }) {
     const styles = useStyles();
     const { colors } = useTheme();
     const reduce = useReducedMotion();
+    const hi = useSelector((s) => (s.language?.currentLanguage || s.auth?.language) === 'hi');
     // The page paints the well; the image boxes stay transparent so there is no square seam.
     const imageTint = 'transparent';
     const [width, setWidth] = useState(0);
@@ -78,22 +84,26 @@ function ImageGallery({ images, height, tint, onOpen, onIndexChange, productName
         ({ item, index }) => (
             <Pressable
                 onPress={() => onOpen?.(index)}
-                style={[styles.page, { width, height }]}
+                style={[styles.page, { width, height, paddingTop: HERO_TOP + topInset }]}
                 accessibilityRole="imagebutton"
-                accessibilityLabel={`${productName}, image ${index + 1} of ${images.length}. Opens full screen`}
+                accessibilityLabel={
+                    hi
+                        ? `${productName}, ${images.length} में से तस्वीर ${index + 1}. पूरी स्क्रीन पर खुलती है`
+                        : `${productName}, image ${index + 1} of ${images.length}. Opens full screen`
+                }
             >
                 <Page index={index} x={x} width={width} reduce={reduce}>
                     {index === 0 ? (
                         <Animated.View ref={heroRef} collapsable={false} onLayout={onHeroLayout} style={heroStyle}>
-                            <ProductImage uri={item} variant="hero" size={Math.min(width * 0.86, height - space['5xl'] - space['4xl'])} tint={imageTint} radius={0} priority="high" onLoad={onHeroLoad} />
+                            <ProductImage uri={item} variant="hero" size={Math.min(width * 0.92, height - HERO_TOP - topInset - HERO_BOTTOM)} tint={imageTint} radius={0} priority="high" onLoad={onHeroLoad} />
                         </Animated.View>
                     ) : (
-                        <ProductImage uri={item} variant="hero" size={Math.min(width * 0.86, height - space['5xl'] - space['4xl'])} tint={imageTint} radius={0} priority="normal" />
+                        <ProductImage uri={item} variant="hero" size={Math.min(width * 0.92, height - HERO_TOP - topInset - HERO_BOTTOM)} tint={imageTint} radius={0} priority="normal" />
                     )}
                 </Page>
             </Pressable>
         ),
-        [width, height, imageTint, onOpen, images.length, productName, heroRef, heroStyle, onHeroLayout, onHeroLoad, x, reduce, styles]
+        [width, height, topInset, imageTint, onOpen, images.length, productName, heroRef, heroStyle, onHeroLayout, onHeroLoad, x, reduce, styles, hi]
     );
 
     return (
@@ -139,8 +149,8 @@ const useStyles = makeStyles((t) => ({
     page: {
         alignItems: 'center',
         justifyContent: 'center',
-        paddingTop: space['5xl'],
-        paddingBottom: space['4xl'],
+        paddingTop: HERO_TOP,
+        paddingBottom: HERO_BOTTOM,
     },
     empty: {
         flex: 1,
@@ -149,7 +159,7 @@ const useStyles = makeStyles((t) => ({
     },
     dots: {
         position: 'absolute',
-        bottom: space['3xl'] + space.sm,
+        bottom: space.xl + space.xs,
         left: 0,
         right: 0,
         alignItems: 'center',

@@ -30,6 +30,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
+import { useSelector } from 'react-redux';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
     interpolate,
@@ -81,6 +82,7 @@ export function BottomSheet({
 }) {
     const insets = useSafeAreaInsets();
     const styles = useStyles();
+    const hi = useSelector((s) => (s.language?.currentLanguage || s.auth?.language) === 'hi');
     const { height: winH } = useWindowDimensions();
     const reduce = useReducedMotion();
     const kb = useKeyboardHeight();
@@ -207,7 +209,7 @@ export function BottomSheet({
                         style={StyleSheet.absoluteFill}
                         onPress={requestClose}
                         accessibilityRole="button"
-                        accessibilityLabel="Close sheet"
+                        accessibilityLabel={hi ? 'शीट बंद करें' : 'Close sheet'}
                     />
                 </Animated.View>
                 {scrollable ? sheet : <GestureDetector gesture={pan}>{sheet}</GestureDetector>}

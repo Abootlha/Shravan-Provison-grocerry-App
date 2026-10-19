@@ -36,6 +36,7 @@ import { FloatingInput } from './address/FloatingInput';
 import { PlaceSuggestions } from './address/PlaceSuggestions';
 import { useServiceArea } from './address/useServiceArea';
 import { ADDRESS_LABELS, findSavedMatch, normaliseLabel, toClientAddresses } from './address/addressUtils';
+import { isValidMobile, mobileError, normalizeMobile } from '../utils/phone';
 
 const { width, height } = Dimensions.get('window');
 const SAVED_BEAT = 480; // ms the green check shows before navigating back
@@ -46,11 +47,11 @@ const LONGITUDE_DELTA = LATITUDE_DELTA * ASPECT_RATIO;
 const ADDRESS_TYPES = ADDRESS_LABELS;
 const normaliseType = normaliseLabel;
 
-/** 10-digit Indian mobile from whatever was typed ('' when empty, null when invalid). */
+/** 10-digit Indian mobile from whatever was typed ('' when empty, null when invalid). Shared rule: utils/phone. */
 const cleanPhone = (raw) => {
-    const digits = String(raw || '').replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
+    const digits = normalizeMobile(raw);
     if (!digits) return '';
-    return /^[6-9]\d{9}$/.test(digits) ? digits : null;
+    return isValidMobile(digits) ? digits : null;
 };
 
 /** A backend without the optional address fields rejects them (forbidNonWhitelisted). */
@@ -177,7 +178,9 @@ const AddAddressScreen = ({ navigation, route }) => {
             setDetails((d) => ({
                 ...d,
                 receiverName: d.receiverName || p.name || '',
-                receiverPhone: d.receiverPhone || String(p.phone || '').replace(/^\+91/, ''),
+                // Only prefill a number the form will accept (normalised: +91 / 0 / spaces dropped),
+                // so it never suggests a value and then rejects it.
+                receiverPhone: d.receiverPhone || (isValidMobile(p.phone) ? normalizeMobile(p.phone) : ''),
             }));
         };
         if (profileUser?.name && profileUser?.phone) fill(profileUser);
@@ -252,7 +255,7 @@ const AddAddressScreen = ({ navigation, route }) => {
         try {
             let addressStr = '';
             let cityStr = 'Gorakhpur';
-            let pincodeStr = '273010';
+            let pincodeStr = ''; // never guessed: an unknown pincode is typed in
 
             // 1. Try Mappls reverse geocode
             try {
@@ -260,7 +263,7 @@ const AddAddressScreen = ({ navigation, route }) => {
                 if (address && (address.formattedAddress || address.city)) {
                     addressStr = address.formattedAddress || address.address || '';
                     cityStr = address.city || address.district || 'Gorakhpur';
-                    pincodeStr = address.pincode || '273010';
+                    pincodeStr = address.pincode || '';
                 }
             } catch (e) {
                 console.log('Mappls reverse geocode failed:', e);
@@ -283,7 +286,7 @@ const AddAddressScreen = ({ navigation, route }) => {
 
                         addressStr = parts.join(', ');
                         cityStr = fallbackAddress.city || fallbackAddress.subregion || 'Gorakhpur';
-                        pincodeStr = fallbackAddress.postalCode || '273010';
+                        pincodeStr = fallbackAddress.postalCode || '';
                     }
                 } catch (e) {
                     console.log('Expo reverse geocode failed:', e);
@@ -459,9 +462,8 @@ const AddAddressScreen = ({ navigation, route }) => {
         if (!/^\d{6}$/.test(String(addressDetails.pincode || '').trim())) {
             next.pincode = isHi ? '6 अंकों का पिनकोड दर्ज करें' : 'Enter a 6-digit pincode';
         }
-        if (cleanPhone(details.receiverPhone) === null) {
-            next.receiverPhone = isHi ? '10 अंकों का मोबाइल नंबर दर्ज करें' : 'Enter a 10-digit mobile number';
-        }
+        const phoneProblem = mobileError(details.receiverPhone, isHi);
+        if (phoneProblem) next.receiverPhone = phoneProblem;
         setErrors(next);
         return Object.keys(next).length === 0;
     };
@@ -744,7 +746,7 @@ const AddAddressScreen = ({ navigation, route }) => {
                                 hint={isHi ? 'डिलीवरी पार्टनर इस नंबर पर कॉल करेगा' : 'The delivery partner calls this number'}
                                 keyboardType="phone-pad"
                                 autoComplete="tel"
-                                maxLength={14}
+                                maxLength={16} // room for "+91 98765 43210"; normalised on save (utils/phone)
                             />
                         </View>
 

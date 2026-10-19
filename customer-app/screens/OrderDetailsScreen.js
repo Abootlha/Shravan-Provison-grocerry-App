@@ -7,7 +7,7 @@
  * rises in once the order is there. Theme: tokens / useTheme() only.
  */
 import React, { useEffect, useState } from 'react';
-import { Linking, View } from 'react-native';
+import { View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useDispatch, useSelector } from 'react-redux';
@@ -47,7 +47,18 @@ import {
     isActiveOrder,
     paymentLabel,
     reorderToCart,
+    shortOrderCode,
 } from './orders/orderUtils';
+import { contactStore } from './tracking/storeContact';
+import { formatPhone } from './address/addressUtils';
+
+const PAYMENT_STATUS_HI = { PENDING: 'बाकी', FAILED: 'विफल', REFUNDED: 'वापस किया गया', CANCELLED: 'रद्द' };
+/** "Pending" / "बाकी" for a payment status that isn't a success. */
+const paymentStatusLabel = (status, isHi) => {
+    const key = String(status).toUpperCase();
+    if (isHi && PAYMENT_STATUS_HI[key]) return PAYMENT_STATUS_HI[key];
+    return key.charAt(0) + key.slice(1).toLowerCase();
+};
 
 const TIMELINE_LABELS = {
     PENDING: ['Order placed', 'ऑर्डर दिया गया'],
@@ -221,17 +232,17 @@ const OrderDetailsScreen = ({ navigation, route }) => {
     const address = getAddressText(order);
     const timeline = Array.isArray(order.timeline) ? order.timeline.filter((t) => t?.status) : [];
 
-    const onHelp = () => {
-        if (store?.contactPhone) Linking.openURL(`tel:${store.contactPhone}`);
-        else toast.info(isHi ? 'सहायता जल्द उपलब्ध होगी' : 'Support will be available shortly');
-    };
+    const onHelp = () => contactStore(
+        { phone: store?.contactPhone, email: store?.contactEmail },
+        { orderCode: shortOrderCode(order), isHi },
+    );
     const onReorder = () => {
         const units = reorderToCart(dispatch, order, cartItems);
         if (!units) {
             toast.error(isHi ? 'ये सामान अभी उपलब्ध नहीं हैं' : "These items aren't available right now");
             return;
         }
-        toast.success(isHi ? `${units} सामान कार्ट में जोड़े गए` : `${units} items added to cart`);
+        toast.success(isHi ? `${units} सामान कार्ट में जोड़े गए` : `${units} ${units === 1 ? 'item' : 'items'} added to cart`);
         navigation.navigate('Main', { screen: 'Cart' });
     };
 
@@ -275,7 +286,7 @@ const OrderDetailsScreen = ({ navigation, route }) => {
                             <MaterialCommunityIcons name="storefront-outline" size={20} color={colors.inkSecondary} />
                         </View>
                         <View style={styles.flex}>
-                            <Text variant="title" numberOfLines={1}>{store?.storeName || 'Shravan Kirana Store'}</Text>
+                            <Text variant="title" numberOfLines={1}>{store?.storeName || 'Shravan Kirana'}</Text>
                             <Text variant="caption" color="muted" numberOfLines={2}>
                                 {store?.location?.address || (isHi ? 'स्टोर का पता उपलब्ध नहीं' : 'Store address unavailable')}
                             </Text>
@@ -288,7 +299,7 @@ const OrderDetailsScreen = ({ navigation, route }) => {
                 <Section icon="map-marker-outline" title={isHi ? 'डिलीवरी पता' : 'Delivery address'}>
                     <Text variant="bodyStrong">{order.userId?.name || order.deliveryAddress?.type || (isHi ? 'ग्राहक' : 'Customer')}</Text>
                     <Text variant="body" color="secondary">{address || '—'}</Text>
-                    {order.userId?.phone ? <Text variant="caption" color="muted">{order.userId.phone}</Text> : null}
+                    {order.userId?.phone ? <Text variant="caption" color="muted">{formatPhone(order.userId.phone)}</Text> : null}
                 </Section>
                 </Rise>
 
@@ -300,7 +311,7 @@ const OrderDetailsScreen = ({ navigation, route }) => {
                             ['PAID', 'COMPLETED', 'SUCCESS'].includes(String(order.paymentStatus).toUpperCase()) ? (
                                 <Badge tone="success" label={isHi ? 'भुगतान हुआ' : 'Paid'} />
                             ) : (
-                                <Badge tone="neutral" label={String(order.paymentStatus).charAt(0).toUpperCase() + String(order.paymentStatus).slice(1).toLowerCase()} />
+                                <Badge tone="neutral" label={paymentStatusLabel(order.paymentStatus, isHi)} />
                             )
                         ) : null}
                     </View>

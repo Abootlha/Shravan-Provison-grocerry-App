@@ -7,7 +7,9 @@ import { buildRoute, routeLength, bearing } from './geo';
 
 const STORAGE_KEY = 'shravan.mockApi.v1';
 const TRIP_MS = 60 * 1000; // rider covers the route in 60s (30 points, 2s ticks)
-const ETA_START_MIN = 8;
+// Demo clock: a created order is confirmed -> packed (12s) -> dispatched (24s) -> delivered
+// (24s + TRIP_MS). The ETA maps that compressed run onto the store's promise
+// (settings.estimatedDeliveryMinutes), so it starts at the promise and only counts down.
 const ROUTE_POINTS = 30;
 
 // Created (non-seed) orders: CONFIRMED -> PACKED -> OUT_FOR_DELIVERY timings.
@@ -108,6 +110,23 @@ export const tick = (order, now = Date.now()) => {
     return order;
 };
 
+/**
+ * Minutes until delivery, never above the promise and never counting up:
+ *   created orders: the share of the demo run that's left, scaled onto the promise;
+ *   seed orders (the looping demo rider): real time left to order.estimatedDeliveryTime.
+ */
+const etaMinutesFor = (order, now) => {
+    const promise = storeSettings.estimatedDeliveryMinutes || 10;
+    const meta = order._mock || {};
+    if (meta.created && meta.confirmedAt) {
+        const total = DISPATCH_AFTER_MS + TRIP_MS;
+        const left = Math.min(1, Math.max(0, (meta.confirmedAt + total - now) / total));
+        return Math.max(1, Math.ceil(left * promise));
+    }
+    const due = order.estimatedDeliveryTime ? new Date(order.estimatedDeliveryTime).getTime() : now + promise * 60000;
+    return Math.max(1, Math.min(promise, Math.ceil((due - now) / 60000)));
+};
+
 /** Rider position + ETA for an order, or null when no rider is moving. */
 export const liveTracking = (order, now = Date.now()) => {
     tick(order, now);
@@ -122,7 +141,9 @@ export const liveTracking = (order, now = Date.now()) => {
             activeLeg,
             riderLocation: null,
             routeCoordinates: [],
-            estimatedDeliveryTime: order.estimatedDeliveryTime || null,
+            estimatedDeliveryTime: meta.created && meta.confirmedAt && status !== 'DELIVERED' && status !== 'CANCELLED'
+                ? new Date(now + etaMinutesFor(order, now) * 60000).toISOString()
+                : order.estimatedDeliveryTime || null,
             durationMinutes: null,
             distanceRemaining: null,
             lastLocationUpdateAt: null,
@@ -132,13 +153,13 @@ export const liveTracking = (order, now = Date.now()) => {
     if (activeLeg === 'to_store') {
         // Rider waiting at the store while the order is packed.
         const store = storePoint();
-        const eta = new Date(now + (ETA_START_MIN + 2) * 60000).toISOString();
+        const minutes = etaMinutesFor(order, now);
         return {
             activeLeg,
             riderLocation: { ...store, heading: 0, speed: 0 },
             routeCoordinates: [],
-            estimatedDeliveryTime: eta,
-            durationMinutes: 1,
+            estimatedDeliveryTime: new Date(now + minutes * 60000).toISOString(),
+            durationMinutes: minutes,
             distanceRemaining: 0,
             lastLocationUpdateAt: new Date(now).toISOString(),
         };
@@ -152,11 +173,7 @@ export const liveTracking = (order, now = Date.now()) => {
     const here = route[idx];
     const next = route[idx + 1];
     const remaining = route.slice(idx);
-    // Looping demo order: keep the ETA in the 8..6 min range so it always reads
-    // "about 8 min" instead of jumping from 1 back to 8 each lap.
-    const durationMinutes = meta.loop
-        ? Math.round(ETA_START_MIN - progress * 2)
-        : Math.max(1, Math.ceil(ETA_START_MIN * (1 - progress)));
+    const durationMinutes = etaMinutesFor(order, now);
     const eta = new Date(now + durationMinutes * 60000).toISOString();
 
     return {

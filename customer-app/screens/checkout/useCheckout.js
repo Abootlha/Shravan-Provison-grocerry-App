@@ -35,7 +35,8 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { toast, haptic } from '../../components/ui';
 import { billFromQuote, estimateBill } from './bill';
 import { useOrderQuote } from './useOrderQuote';
-import { findPaymentOption } from './paymentMethods';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DEFAULT_PAYMENT, findPaymentOption, isPaymentOption } from './paymentMethods';
 import { isSameAddress, orderAddressLine, resolveCoords, toClientAddresses } from '../address/addressUtils';
 import { useServiceArea } from '../address/useServiceArea';
 import { markStoreClosed, useStoreFees, useStoreStatus } from '../../hooks/useStoreSettings';
@@ -48,6 +49,8 @@ const storeClosedError = (error) => {
     const code = data?.code || data?.error?.code;
     return code === 'STORE_CLOSED' ? { nextOpenAt: data?.nextOpenAt ?? data?.error?.nextOpenAt ?? null } : null;
 };
+
+const LAST_PAYMENT_KEY = 'checkout.lastPaymentMethod';
 
 /** Overlay steps. 0-3 are the existing flow; 4 is the failure screen. */
 export const PAYMENT_STEP = {
@@ -84,7 +87,18 @@ export function useCheckout({ navigation, route }) {
     const fees = useStoreFees();
     const { savedAddresses, selectedAddress } = useSelector((state) => state.location);
 
-    const [selectedPayment, setSelectedPayment] = useState('phonepe');
+    const [selectedPayment, setSelectedPaymentState] = useState(DEFAULT_PAYMENT);
+    // The last method the customer picked is remembered (ids the sheet no longer offers, like the
+    // old wallets, fall back to the default).
+    const setSelectedPayment = (id) => {
+        setSelectedPaymentState(id);
+        AsyncStorage.setItem(LAST_PAYMENT_KEY, id).catch(() => {});
+    };
+    useEffect(() => {
+        AsyncStorage.getItem(LAST_PAYMENT_KEY)
+            .then((id) => { if (id && isPaymentOption(id) && isMountedRef.current) setSelectedPaymentState(id); })
+            .catch(() => {});
+    }, []);
     const [selectedInstructions, setSelectedInstructions] = useState(['call']);
     const [customInstruction, setCustomInstruction] = useState('');
     const [tip, setTip] = useState(0);
@@ -236,6 +250,7 @@ export function useCheckout({ navigation, route }) {
                 quantity: item.quantity,
                 price: item.price,
                 image: item.image || undefined,
+                ...(item.variantSku ? { variantSku: item.variantSku } : {}),
             })),
             // Informational: the server prices the order itself, with the same calculation as the quote.
             itemTotal: quote.quote.itemTotal,

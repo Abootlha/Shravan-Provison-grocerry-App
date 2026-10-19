@@ -142,7 +142,7 @@ const useStyles = makeStyles((t) => ({
     },
     sticker: { width: STICKER, height: STICKER },
     stickerIdle: { opacity: 0.8, transform: [{ scale: 0.86 }] },
-    label: { marginTop: space.xs, maxWidth: 96, fontFamily: fontFamily.semibold }, // one weight for all tabs so selection never reflows the row
+    label: { marginTop: space.xs, maxWidth: 96, paddingHorizontal: 2, fontFamily: fontFamily.semibold }, // one weight for all tabs so selection never reflows the row
     tail: { width: space.xs },
     underline: {
         position: 'absolute',

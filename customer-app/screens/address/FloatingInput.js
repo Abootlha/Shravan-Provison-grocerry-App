@@ -19,7 +19,7 @@ import Animated, {
     withSpring,
     withTiming,
 } from 'react-native-reanimated';
-import { Text, haptic } from '../../components/ui';
+import { Text, haptic, useScriptFamily } from '../../components/ui';
 import { radii, space, type } from '../../constants/theme';
 import { makeStyles, useTheme } from '../../theme';
 import { durations, easings, springs } from '../../theme/motion';
@@ -87,6 +87,7 @@ export const FloatingInput = forwardRef(function FloatingInput(
         opacity: err.value > 0.5 ? 0 : focus.value,
         transform: [{ scale: ringScale.value }],
     }));
+    const script = useScriptFamily(); // native + Hindi: Devanagari face for the typed text and label
     const labelColor = useAnimatedStyle(() => ({
         color: interpolateColor(focus.value, [0, 1], [colors.inkMuted, colors.accentStrong]),
     }));
@@ -97,7 +98,7 @@ export const FloatingInput = forwardRef(function FloatingInput(
             <Animated.View style={[styles.ring, ringStyle, { pointerEvents: 'none' }]} />
             <Animated.View style={[styles.box, boxStyle]}>
                 <Animated.View style={[styles.labelWrap, labelStyle, { pointerEvents: 'none' }]}>
-                    <Animated.Text numberOfLines={1} maxFontSizeMultiplier={1.3} style={[type.body, labelColor]}>
+                    <Animated.Text numberOfLines={1} maxFontSizeMultiplier={1.3} style={[script(type.body), labelColor]}>
                         {label}
                     </Animated.Text>
                 </Animated.View>
@@ -114,7 +115,7 @@ export const FloatingInput = forwardRef(function FloatingInput(
                     cursorColor={colors.brandText}
                     keyboardAppearance={isDark ? 'dark' : 'light'}
                     maxFontSizeMultiplier={1.3}
-                    style={styles.input}
+                    style={script(styles.input)}
                     {...rest}
                 />
             </Animated.View>

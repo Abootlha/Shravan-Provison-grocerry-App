@@ -4,7 +4,7 @@
  *   <MapChrome orderCode live showLive onBack onHelp topInset isHi />
  *       Round back / help buttons over the map (IconButton glass + allowBlur — the one place blur is
  *       allowed on this screen), with a solid surface label "#CODE · Live" between them.
- *   <EtaHead copy stateKey etaMinutes onTime isHi />
+ *   <EtaHead copy stateKey etaMinutes onTime delayNote isHi />
  *       Top of the sheet: status line + "On time" note, then the screen's ONE mixed-weight headline:
  *       "Arriving in **8 mins**" (Headline display, emphasis in brand violet). Statuses without an ETA
  *       show copy.title as a plain h1 instead. When `stateKey` (the order status) changes, the copy
@@ -42,7 +42,7 @@ export function MapChrome({ orderCode, live, showLive = true, onBack, onHelp, to
     );
 }
 
-export function EtaHead({ copy, stateKey, etaMinutes, onTime, isHi }) {
+export function EtaHead({ copy, stateKey, etaMinutes, onTime, delayNote = null, isHi }) {
     const styles = useStyles();
     const { colors } = useTheme();
     const showEta = copy?.eta && Number.isFinite(etaMinutes);
@@ -78,6 +78,12 @@ export function EtaHead({ copy, stateKey, etaMinutes, onTime, isHi }) {
             )}
 
             {copy?.sub ? <Text variant="body" color="secondary" numberOfLines={2}>{copy.sub}</Text> : null}
+            {showEta && delayNote ? (
+                <View style={styles.delay}>
+                    <MaterialCommunityIcons name="clock-alert-outline" size={16} color={colors.warning} />
+                    <Text variant="caption" color="secondary" style={styles.flex}>{delayNote}</Text>
+                </View>
+            ) : null}
         </View>
         </ContentSwap>
     );
@@ -124,6 +130,7 @@ const useStyles = makeStyles((t) => ({
     head: { gap: space.xxs },
     metaRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 24 },
     onTime: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+    delay: { flexDirection: 'row', alignItems: 'flex-start', gap: space.xs, marginTop: space.xxs },
     title: { marginTop: space.xxs },
     bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: space.xs, minHeight: 56 },
 }));

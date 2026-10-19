@@ -53,7 +53,7 @@ function ExpandRow({ icon, title, subtitle, open, onToggle, children }) {
 }
 
 /**
- * Tip and delivery instructions, after the bill: two single rows ("Add a tip for your partner ›",
+ * Tip and delivery instructions, after the bill: two single rows ("Add a tip for your delivery partner ›",
  * "Delivery instructions ›") that expand inline. A chosen tip / instruction shows as the row's
  * summary while collapsed.
  */
@@ -70,9 +70,9 @@ function ExtrasCardBase({ tip, onChangeTip, selected, onToggle, note, onChangeNo
             <ExpandRow
                 icon="hand-heart-outline"
                 title={tip > 0
-                    ? (isHi ? `पार्टनर के लिए ₹${tip} टिप` : `₹${tip} tip for your partner`)
-                    : (isHi ? 'पार्टनर के लिए टिप जोड़ें' : 'Add a tip for your partner')}
-                subtitle={isHi ? 'पूरी टिप पार्टनर को, दरवाज़े पर भुगतान' : 'All of it goes to them, paid at the door'}
+                    ? (isHi ? `डिलीवरी पार्टनर के लिए ₹${tip} टिप` : `₹${tip} tip for your delivery partner`)
+                    : (isHi ? 'डिलीवरी पार्टनर के लिए टिप जोड़ें' : 'Add a tip for your delivery partner')}
+                subtitle={isHi ? 'बिल में नहीं जुड़ती। दरवाज़े पर उन्हें दें, पूरी उन्हीं की है' : 'Not added to your bill. Give it to them at the door; all of it is theirs'}
                 open={openTip}
                 onToggle={() => setOpenTip((v) => !v)}
             >
@@ -82,7 +82,7 @@ function ExtrasCardBase({ tip, onChangeTip, selected, onToggle, note, onChangeNo
             <ExpandRow
                 icon="message-text-outline"
                 title={isHi ? 'डिलीवरी निर्देश' : 'Delivery instructions'}
-                subtitle={chosen.length ? chosen.join(', ') : (isHi ? 'पार्टनर को बताएं कि कैसे पहुँचाना है' : 'Tell your partner how to hand it over')}
+                subtitle={chosen.length ? chosen.join(', ') : (isHi ? 'डिलीवरी पार्टनर को बताएं कि कैसे पहुँचाना है' : 'Tell your delivery partner how to hand it over')}
                 open={openNotes}
                 onToggle={() => setOpenNotes((v) => !v)}
             >

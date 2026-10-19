@@ -21,7 +21,8 @@ export const Radio = ({ selected }) => {
     const styles = useStyles();
     const { colors } = useTheme();
     // stops captured per scheme, so a theme switch mid-session repaints the ring correctly
-    const off = colors.borderStrong;
+    // unselected ring is a control boundary: needs 3:1 (borderStrong is ~1.8:1), so use muted ink
+    const off = colors.inkMuted;
     const on = colors.brand;
     const offFill = colors.surface;
     const reduce = useReducedMotion();

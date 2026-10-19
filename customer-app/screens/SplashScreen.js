@@ -2,9 +2,11 @@
  * SplashScreen — the brand moment, continuous with the native splash (app.json → expo-splash-screen):
  * the same violet bag mark, centred, on the same flat background (white; dark: canvas #0F0F0F). The
  * wordmark rises in under it once, then the lockup hands over to the next screen. Going to Login /
- * Onboarding, the mark FLIES to where that screen's AuthBar logo sits (shared position) while the
- * wordmark dissolves; the next screen opens with a fade and its own logo settles in from the same spot
- * (screens/auth/authMotion → useFromSplashHandoff). Anywhere else it fades out.
+ * Onboarding, the mark FLIES to where that screen's logo sits (shared position) while the wordmark
+ * dissolves — into Login's centred AuthBar, or to Onboarding's top-left, where the violet panel fades
+ * in under it and the mark turns white as it lands. The next screen opens with a fade and its own logo
+ * takes over from the same spot (screens/auth/authMotion → useFromSplashHandoff). Anywhere else it
+ * fades out.
  * No gradient, no ring bloom, no tile, no loops (DESIGN.md). Init and redirect logic is unchanged:
  * saved language → saved session (→ Main, or Checkout on a web PayU return) → language
  * selection / onboarding / login. Total time ≈ 1.1 s.
@@ -31,7 +33,7 @@ import { parsePaymentReturnUrl } from '../services/paymentService';
 import { loginSuccess } from '../store/slices/authSlice';
 import { store } from '../store';
 import { loadLanguage } from '../store/slices/languageSlice';
-import { AUTH_BAR, authBarMarkCentre } from './auth/authMotion';
+import { AUTH_BAR, ONBOARDING_BAR, authBarMarkCentre, onboardingBarMarkCentre } from './auth/authMotion';
 
 const MIN_SPLASH_MS = 900;
 const FLIGHT_MS = 280; // the hand-over starts once the mark has (nearly) landed
@@ -40,28 +42,53 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const SplashScreen = ({ navigation }) => {
     const styles = useStyles();
-    const { isDark } = useTheme();
+    const { isDark, colors } = useTheme();
     const dispatch = useDispatch();
     const reduce = useReducedMotion();
     const insets = useSafeAreaInsets();
-    const { width: W } = useWindowDimensions();
+    const { width: W, height: WH } = useWindowDimensions();
 
     const word = useSharedValue(0);
     const exit = useSharedValue(0);
     const fly = useSharedValue(0);
+    // Onboarding opens on a violet panel with a white logo: the panel fades in under the flying mark
+    // and the mark turns white as it lands, so the hand-over is seamless.
+    const panel = useSharedValue(0);
     // Where the destination's AuthBar logo MARK sits, as an offset from the screen centre.
     const flyTo = useSharedValue({ dx: 0, dy: 0, s: 1 });
     const heightRef = useRef(0);
+    // Web: coming back from PayU reloads the page. That isn't an app launch, so no brand moment:
+    // a plain surface, then straight to Checkout, which shows "Confirming your payment…" and the
+    // same "Order placed" beat as cash on delivery.
+    const paymentReturnRef = useRef(null);
+    if (paymentReturnRef.current === null) {
+        paymentReturnRef.current = Platform.OS === 'web' && typeof window !== 'undefined'
+            && !!parsePaymentReturnUrl(window.location.href);
+    }
+    const quiet = paymentReturnRef.current;
 
     useEffect(() => {
-        word.value = withDelay(120, withSpring(1, springs.gentle));
+        if (!quiet) word.value = withDelay(120, withSpring(1, springs.gentle));
 
         const startedAt = Date.now();
         // Hand over to the next screen: fly the mark into its AuthBar (Login / Onboarding) or fade out.
         const go = async (fn, target) => {
+            if (quiet) {
+                fn();
+                return;
+            }
             const wait = MIN_SPLASH_MS - (Date.now() - startedAt);
             if (wait > 0) await sleep(wait);
             const H = heightRef.current;
+            if (target === 'onboarding' && H && !reduce) {
+                const o = onboardingBarMarkCentre();
+                flyTo.value = { dx: o.x - W / 2, dy: insets.top + o.y - H / 2, s: ONBOARDING_BAR.LOGO / MARK };
+                fly.value = withSpring(1, springs.snappy);
+                panel.value = withTiming(1, { duration: FLIGHT_MS, easing: easings.out });
+                await sleep(FLIGHT_MS);
+                fn();
+                return;
+            }
             if (target && H && !reduce) {
                 const c = authBarMarkCentre();
                 flyTo.value = { dx: c.dx, dy: insets.top + c.dy - H / 2, s: AUTH_BAR.LOGO / MARK };
@@ -162,6 +189,7 @@ const SplashScreen = ({ navigation }) => {
             transform: [{ translateX: dx * f }, { translateY: dy * f }, { scale: 1 - (1 - sc) * f }],
         };
     });
+    const panelStyle = useAnimatedStyle(() => ({ opacity: panel.value }));
     const wordStyle = useAnimatedStyle(() => ({
         opacity: word.value * (1 - Math.min(1, fly.value * 2.2)) * (1 - exit.value),
         transform: [{ translateY: reduce ? 0 : (1 - word.value) * 12 }],
@@ -175,15 +203,31 @@ const SplashScreen = ({ navigation }) => {
                     heightRef.current = e.nativeEvent.layout.height;
                 }}
             >
+                {quiet ? null : (
+                <Animated.View
+                    style={[
+                        styles.panel,
+                        { height: Math.round(WH * ONBOARDING_BAR.PANEL_RATIO), backgroundColor: colors.brand },
+                        panelStyle,
+                    ]}
+                />
+                )}
+                {quiet ? null : (
                 <Animated.View style={[styles.mark, markStyle]}>
                     <LogoMark size={MARK} />
+                    <Animated.View style={[styles.markOver, panelStyle]}>
+                        <LogoMark size={MARK} tone="brand" />
+                    </Animated.View>
                 </Animated.View>
+                )}
+                {quiet ? null : (
                 <Animated.View style={[styles.words, wordStyle]}>
                     <Logo variant="wordmark" size={30} />
                     <Text variant="body" color="secondary" align="center">
                         Your neighbourhood kirana, delivered
                     </Text>
                 </Animated.View>
+                )}
             </View>
         </Screen>
     );
@@ -192,6 +236,15 @@ const SplashScreen = ({ navigation }) => {
 const useStyles = makeStyles(() => ({
     fill: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     mark: { width: MARK, height: MARK },
+    markOver: { position: 'absolute', top: 0, left: 0 },
+    panel: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        borderBottomLeftRadius: ONBOARDING_BAR.PANEL_RADIUS,
+        borderBottomRightRadius: ONBOARDING_BAR.PANEL_RADIUS,
+    },
     // Hangs under the centred mark so the mark stays exactly where the native splash drew it.
     words: { position: 'absolute', top: '50%', left: 0, right: 0, marginTop: MARK / 2 + space.xl, alignItems: 'center', gap: space.sm },
 }));

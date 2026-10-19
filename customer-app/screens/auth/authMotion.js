@@ -31,7 +31,20 @@ export function authBarMarkCentre() {
     return { dx: -lockupW / 2 + size / 2, dy: AUTH_BAR.PAD_TOP + AUTH_BAR.MIN_H / 2 };
 }
 
-export const useAuthGradient = makeThemed((t) => [t.colors.canvas, t.colors.canvas, t.colors.canvas]);
+/**
+ * The onboarding top bar sits on a flat violet panel: white lockup at the top-left, SIDE in from the
+ * edge, vertically centred in a ROW-tall row PAD_TOP under the safe-area top. The panel is
+ * PANEL_RATIO of the window tall with PANEL_RADIUS bottom corners. The Splash flies its mark here.
+ */
+export const ONBOARDING_BAR = { SIDE: 20, PAD_TOP: 6, ROW: 44, LOGO: 24, PANEL_RATIO: 0.58, PANEL_RADIUS: 28 };
+
+/** Where the onboarding bar's logo MARK centre sits: x from the left edge, y below the safe-area top. */
+export function onboardingBarMarkCentre() {
+    const b = ONBOARDING_BAR;
+    return { x: b.SIDE + b.LOGO / 2, y: b.PAD_TOP + b.ROW / 2 };
+}
+
+export const useAuthGradient =makeThemed((t) => [t.colors.canvas, t.colors.canvas, t.colors.canvas]);
 
 export const useAuthSheetStyle = () => null;
 

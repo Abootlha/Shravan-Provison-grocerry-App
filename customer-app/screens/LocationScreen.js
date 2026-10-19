@@ -14,7 +14,7 @@ import {
     setSavedAddresses,
     removeSavedAddress,
 } from '../store/slices/locationSlice';
-import { UserService, searchPlaces } from '../services';
+import { UserService, reverseGeocode, searchPlaces } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
 import MapViewContainer from '../components/MapViewContainer';
 import {
@@ -40,7 +40,7 @@ import { PlaceSuggestions } from './address/PlaceSuggestions';
 import { SavedAddressCard } from './address/SavedAddressCard';
 import { CurrentLocationRow } from './address/CurrentLocationRow';
 import { useServiceArea } from './address/useServiceArea';
-import { formatAddressLine, toClientAddresses } from './address/addressUtils';
+import { formatAddressLine, formatFullAddress, toClientAddresses } from './address/addressUtils';
 
 /** Reverse geocoding found no street address for a GPS fix. */
 class AddressLookupError extends Error {
@@ -51,6 +51,29 @@ class AddressLookupError extends Error {
 const UNDO_MS = 4000;
 // Reanimated web scales a container whose size changes (text distorts): native-only there.
 const sizeLayout = Platform.OS === 'web' ? undefined : layout.list;
+
+/**
+ * Street address for a point: the app's geocoder first (Google / the backend proxy), then the
+ * device geocoder (native only; expo-location has none on web). Null when neither knows the spot.
+ */
+async function lookupAddress(latitude, longitude) {
+    try {
+        const r = await reverseGeocode(latitude, longitude);
+        const line = r ? r.formattedAddress || [r.houseNumber, r.houseName, r.street].filter(Boolean).join(', ') : '';
+        if (line) return { address: line, city: r.city || '', pincode: r.pincode || '' };
+    } catch (e) {
+        // fall through to the device geocoder
+    }
+    if (Platform.OS === 'web') return null;
+    try {
+        const [a] = await Location.reverseGeocodeAsync({ latitude, longitude });
+        const line = a ? [a.name, a.street, a.district].filter(Boolean).join(', ') : '';
+        if (line) return { address: line, city: a.city || a.subregion || '', pincode: a.postalCode || '' };
+    } catch (e) {
+        if (__DEV__) console.log('Reverse geocode error:', e);
+    }
+    return null;
+}
 
 const LocationScreen = ({ navigation }) => {
     const styles = useStyles();
@@ -110,7 +133,7 @@ const LocationScreen = ({ navigation }) => {
             id: item.placeId || `search-${Date.now()}`,
             type: 'Searched Location',
             address: fullAddrStr,
-            city: item.city || 'Gorakhpur',
+            city: item.city || '',
             pincode: item.pincode || '',
             isDefault: false,
             latitude: item.latitude,
@@ -195,20 +218,9 @@ const LocationScreen = ({ navigation }) => {
         const { latitude, longitude } = location.coords;
 
         // No invented fallback: without a real street address this spot can't be used as-is.
-        let addressText = '';
-        let city = '';
-        let pincode = '';
-        try {
-            const [address] = await Location.reverseGeocodeAsync({ latitude, longitude });
-            if (address) {
-                addressText = `${address.name || ''} ${address.street || ''}`.trim();
-                city = address.city || address.subregion || '';
-                pincode = address.postalCode || '';
-            }
-        } catch (err) {
-            if (__DEV__) console.log('Reverse geocode error during location detect:', err);
-        }
-        if (!addressText) throw new AddressLookupError();
+        const found = await lookupAddress(latitude, longitude);
+        if (!found) throw new AddressLookupError();
+        const { address: addressText, city, pincode } = found;
 
         return {
             id: `current-${Date.now()}`,
@@ -301,14 +313,12 @@ const LocationScreen = ({ navigation }) => {
         if (!coords) return;
         const { latitude, longitude } = coords;
         try {
-            const [res] = await Location.reverseGeocodeAsync({ latitude, longitude });
-            const addressText = res ? [res.name, res.street, res.district].filter(Boolean).join(', ') : '';
-            if (!addressText) {
+            const found = await lookupAddress(latitude, longitude);
+            if (!found) {
                 showLookupFailed();
                 return;
             }
-            const city = res?.city || res?.subregion || '';
-            const pincode = res?.postalCode || '';
+            const { address: addressText, city, pincode } = found;
 
             const formattedAddress = {
                 id: `map-${Date.now()}`,
@@ -343,8 +353,12 @@ const LocationScreen = ({ navigation }) => {
             }
         }
 
-        const current = selectedAddress;
-        if (current && current.latitude && current.longitude) {
+        // The bar shows (and confirms) the selected address, else the first saved one.
+        const current = selectedAddress || currentDisplayAddr;
+        if (!current) return; // the button is disabled with a hint in this case
+        if (!selectedAddress) dispatch(setSelectedAddress(current));
+        // Only a complete address is saved to the account (no made-up city / pincode).
+        if (current.latitude && current.longitude && current.city && current.pincode) {
             const alreadySaved = savedAddresses.some(
                 (a) =>
                     (a.address || '').toLowerCase() === (current.address || '').toLowerCase() &&
@@ -360,8 +374,8 @@ const LocationScreen = ({ navigation }) => {
                     await UserService.addAddress({
                         type,
                         address: current.address,
-                        city: current.city || 'Gorakhpur',
-                        pincode: current.pincode || '273001',
+                        city: current.city,
+                        pincode: current.pincode,
                         isDefault: savedAddresses.length === 0,
                         latitude: current.latitude,
                         longitude: current.longitude,
@@ -388,12 +402,10 @@ const LocationScreen = ({ navigation }) => {
             if (results && results.length > 0) {
                 const { latitude, longitude } = results[0];
 
-                const [address] = await Location.reverseGeocodeAsync({ latitude, longitude });
-                const addressText = address
-                    ? [address.name, address.street, address.district].filter(Boolean).join(', ')
-                    : searchQuery.trim();
-                const city = address?.city || address?.subregion || 'Gorakhpur';
-                const pincode = address?.postalCode || '273001';
+                const found = await lookupAddress(latitude, longitude);
+                const addressText = found?.address || searchQuery.trim();
+                const city = found?.city || '';
+                const pincode = found?.pincode || '';
 
                 const formattedAddress = {
                     id: `search-${Date.now()}`,
@@ -521,7 +533,10 @@ const LocationScreen = ({ navigation }) => {
     const displayAddresses = savedAddresses || [];
 
     const currentDisplayAddr = selectedAddress || displayAddresses[0] || null;
-    const deliverable = serviceArea.isServiceable(currentDisplayAddr);
+    // Nothing chosen yet (no saved address, location off): Confirm stays disabled with a hint
+    // instead of silently going back (which looped onboarding → location → onboarding).
+    const hasLocation = !!(currentDisplayAddr && (currentDisplayAddr.latitude || currentDisplayAddr.coords || currentDisplayAddr.address));
+    const deliverable = hasLocation && serviceArea.isServiceable(currentDisplayAddr);
     const currentDistance = serviceArea.distanceKm(currentDisplayAddr);
 
     const addrState = isFetchingAddresses && displayAddresses.length === 0
@@ -606,7 +621,7 @@ const LocationScreen = ({ navigation }) => {
                                 </View>
                             </Card>
 
-                            {!deliverable ? (
+                            {hasLocation && !deliverable ? (
                                 <Animated.View entering={layout.enter} exiting={layout.exit}>
                                     <Card padding="md">
                                         <EmptyState
@@ -694,11 +709,11 @@ const LocationScreen = ({ navigation }) => {
                             style={[styles.bar, { paddingBottom: insets.bottom + space.md }]}
                         >
                             <View style={styles.barRow}>
-                                <View style={[styles.barIcon, !deliverable && styles.barIconOff]}>
+                                <View style={[styles.barIcon, hasLocation && !deliverable && styles.barIconOff]}>
                                     <MaterialCommunityIcons
-                                        name={deliverable ? 'map-marker-check-outline' : 'map-marker-off-outline'}
+                                        name={!hasLocation ? 'map-marker-question-outline' : deliverable ? 'map-marker-check-outline' : 'map-marker-off-outline'}
                                         size={20}
-                                        color={deliverable ? colors.inkSecondary : colors.errorInk}
+                                        color={!hasLocation || deliverable ? colors.inkSecondary : colors.errorInk}
                                     />
                                 </View>
                                 <View style={styles.barTexts}>
@@ -706,10 +721,19 @@ const LocationScreen = ({ navigation }) => {
                                     <Text variant="bodyStrong" numberOfLines={1}>
                                         {formatAddressLine(currentDisplayAddr, { pincode: false }) || (isHi ? 'कोई स्थान नहीं चुना गया' : 'No location selected')}
                                     </Text>
+                                    {!hasLocation ? (
+                                        <Text variant="caption" color="secondary" numberOfLines={2}>
+                                            {isHi
+                                                ? 'ऊपर खोजें, मैप पर टैप करें या नया पता जोड़ें'
+                                                : 'Search above, tap the map or add a new address'}
+                                        </Text>
+                                    ) : null}
                                 </View>
                             </View>
                             <Button
-                                label={deliverable ? (isHi ? 'स्थान की पुष्टि करें' : 'Confirm location') : (isHi ? 'डिलीवरी उपलब्ध नहीं' : 'Not deliverable')}
+                                label={!hasLocation
+                                    ? (isHi ? 'पहले स्थान चुनें' : 'Choose a location first')
+                                    : deliverable ? (isHi ? 'स्थान की पुष्टि करें' : 'Confirm location') : (isHi ? 'डिलीवरी उपलब्ध नहीं' : 'Not deliverable')}
                                 size="lg"
                                 fullWidth
                                 disabled={!deliverable}
@@ -724,7 +748,7 @@ const LocationScreen = ({ navigation }) => {
                 visible={!!pendingDelete}
                 onClose={() => setPendingDelete(null)}
                 title={isHi ? 'यह पता हटाएं?' : 'Delete this address?'}
-                subtitle={pendingDelete ? formatAddressLine(pendingDelete) : undefined}
+                subtitle={pendingDelete ? formatFullAddress(pendingDelete, isHi) : undefined}
                 floating
                 footer={(
                     <View style={styles.sheetActions}>

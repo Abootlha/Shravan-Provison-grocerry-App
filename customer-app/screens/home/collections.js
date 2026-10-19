@@ -20,6 +20,7 @@
  * shelves from that slice so Home still lists every category it can see.
  */
 import { isFreshCategory } from '../../services/normalize';
+import { freshnessOf as cardFreshness } from '../../components/product/productUtils';
 import { discountOf, idOf, nameOf } from './catalog';
 
 // ---------------------------------------------------------------------------
@@ -29,9 +30,12 @@ import { discountOf, idOf, nameOf } from './catalog';
 /** Page order. `type` picks the renderer in HomeScreen; `style` is the visual treatment. */
 export const SECTION_ORDER = [
     { id: 'banners', type: 'banners', style: 'carousel' },
+    // returning shoppers: what they buy, first (Baymard grocery 2026); then anything they asked to
+    // be told about that is back on the shelf
+    { id: 'again', type: 'rail', source: 'orders', style: 'rail', min: 2, limit: 12 },
+    { id: 'back', type: 'rail', source: 'watch', style: 'rail', min: 1, limit: 12 },
     { id: 'fresh', type: 'fresh', style: 'tiles2up', min: 2, limit: 4 },
     { id: 'moment', type: 'moment', style: 'editorial', min: 4, limit: 12 },
-    { id: 'again', type: 'rail', source: 'orders', style: 'rail', min: 3, limit: 10 },
     { id: 'grid', type: 'grid', style: 'grid' },
     { id: 'price', type: 'priceStore', style: 'chips', min: 4, limit: 12 },
     { id: 'deals', type: 'rail', source: 'discount', style: 'rail', minDiscount: 10, min: 4, limit: 10 },
@@ -223,26 +227,31 @@ export const shelvesFrom = (products, categories) => {
         .filter(Boolean);
 };
 
-/** Freshness facts the record actually carries (storage + shelf life). Null when it has neither. */
-export const freshnessOf = (p) => {
-    const storage = p.attributes?.storage || p.storage;
-    if (/refrigerat|chill|frozen/i.test(storage || '')) return { kind: 'chilled' };
-    const days = Number(p.shelfLife);
-    if (p.isPerishable && days > 0 && days <= 7) return { kind: 'shelf', days };
-    return null;
-};
+/** Freshness facts the record carries; one definition shared with ProductCard's tag rule. */
+export const freshnessOf = cardFreshness;
 
-const buyAgain = (available, orders) => {
+/**
+ * Products from delivered orders, most-bought first (ties: most recent order first), keeping only
+ * what is in stock now so every card can be added with one tap.
+ */
+export const buyAgain = (available, orders) => {
     const counts = new Map();
+    const last = new Map();
     orders
-        .filter((o) => o.orderStatus === 'DELIVERED')
+        .filter((o) => String(o.orderStatus || '').toUpperCase() === 'DELIVERED')
         .forEach((o) =>
             (o.items || []).forEach((it) => {
                 const pid = String(it.productId?._id || it.productId || it.product?._id || '');
-                if (pid) counts.set(pid, (counts.get(pid) || 0) + (it.quantity || 1));
+                if (!pid) return;
+                counts.set(pid, (counts.get(pid) || 0) + (it.quantity || 1));
+                const at = Date.parse(o.createdAt) || 0;
+                if (at > (last.get(pid) || 0)) last.set(pid, at);
             }),
         );
-    return available.filter((p) => counts.has(String(p._id))).sort((a, b) => counts.get(String(b._id)) - counts.get(String(a._id)));
+    const id = (p) => String(p._id || p.id);
+    return available
+        .filter((p) => counts.has(id(p)))
+        .sort((a, b) => counts.get(id(b)) - counts.get(id(a)) || (last.get(id(b)) || 0) - (last.get(id(a)) || 0));
 };
 
 // ---------------------------------------------------------------------------
@@ -255,7 +264,7 @@ const buyAgain = (available, orders) => {
  * Each descriptor carries its data plus translated, mixed-weight title parts. Renderers live in
  * HomeScreen / EditorialSections; this stays pure so it is easy to test and reorder.
  */
-export function buildHomeSections({ products = [], categories = [], shelves, orders = [], now = new Date(), language = 'en', t, eta = null }) {
+export function buildHomeSections({ products = [], categories = [], shelves, orders = [], watched = [], now = new Date(), language = 'en', t, eta = null }) {
     const tr = (key, vars) => fmt(t(key), vars);
     const title = (key, vars) => ({ lead: tr(`${key}.lead`, vars), emphasis: tr(`${key}.emphasis`, vars), trail: optional(t, `${key}.trail`, vars) });
     const count = (n) => tr(n === 1 ? 'homeFeed.itemOne' : 'homeFeed.items', { n });
@@ -296,6 +305,18 @@ export function buildHomeSections({ products = [], categories = [], shelves, ord
                     const list = buyAgain(available, orders).slice(0, cfg.limit);
                     if (list.length < cfg.min) break;
                     out.push({ key: cfg.id, type: 'rail', ...title('homeFeed.buyAgain'), subtitle: t('homeFeed.buyAgain.subtitle'), products: list });
+                } else if (cfg.source === 'watch') {
+                    if (!watched.length) break;
+                    const want = new Set(watched.map(String));
+                    const list = available.filter((p) => want.has(String(p._id || p.id))).slice(0, cfg.limit);
+                    if (list.length < cfg.min) break;
+                    out.push({
+                        key: cfg.id,
+                        type: 'rail',
+                        title: language === 'hi' ? 'फिर से स्टॉक में' : 'Back in stock',
+                        subtitle: language === 'hi' ? 'जिनके लिए आपने सूचना माँगी थी' : 'Items you asked us to watch',
+                        products: list,
+                    });
                 } else if (cfg.source === 'discount') {
                     const list = available
                         .filter((p) => discountOf(p) >= cfg.minDiscount)

@@ -53,6 +53,6 @@ Trigger-based only (tap, scroll, navigation, data change). **No endless loops** 
 ## Surfaces per screen (summary)
 - Home header: solid surface (white / dark surface), no gradient; per-category re-tint removed — the selected tab indicator (violet underline) is the only state colour.
 - Banners: real product photography on a flat neutral or flat brand-violet block; legibility scrim only if text sits on the photo.
-- Auth/onboarding: white (dark: canvas) screens with the logo, a clear headline, real product photography; no gradient backgrounds.
+- Auth/onboarding: white (dark: canvas) screens with the logo, a clear headline, real product photography; no gradient backgrounds. The welcome screen may scatter real catalogue products around the headline (free-standing, soft contact shadow; white-background photos become white rounded "stickers" in dark mode) — this is the one place a product cluster is allowed, and it uses catalogue images, never 3D icons.
 - Payment success: surface background, violet check, one confetti burst.
 - Tracking: map + surface sheet; status header is surface with ink text and a violet ETA number.

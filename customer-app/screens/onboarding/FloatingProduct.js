@@ -23,7 +23,8 @@ const STICKER_RADIUS = 14;
  * Props
  *   source   { uri, cutout } | { asset, icon, cutout: true } | null (null = nothing yet)
  *   size     pt, the square box the picture is contained in
- *   on       'surface' (default) | 'canvas' — what it sits on in light mode
+ *   on       'surface' (default) | 'canvas' | 'brand' (the violet hero panel: photos are always
+ *            stickers there, shadows are tinted violet-black)
  */
 function FloatingProductBase({ source, size, on = 'surface' }) {
     const styles = useStyles();
@@ -68,7 +69,7 @@ function FloatingProductBase({ source, size, on = 'surface' }) {
                         {
                             padding: pad,
                             borderRadius: size < 60 ? 8 : STICKER_RADIUS,
-                            boxShadow: `0px 3px 10px rgba(0,0,0,${isDark ? 0.5 : 0.1})`,
+                            boxShadow: on === 'brand' ? '0px 8px 18px rgba(24,8,80,0.32)' : `0px 3px 10px rgba(0,0,0,${isDark ? 0.5 : 0.1})`,
                         },
                     ]}
                 >
@@ -82,7 +83,7 @@ function FloatingProductBase({ source, size, on = 'surface' }) {
     const shadowW = Math.min(rw, size) * 0.55;
     const shadowH = Math.max(3, size * 0.06);
     const bottom = source.cutout ? size * 0.86 : size / 2 + rh / 2 + 1;
-    const shadowInk = isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.05)';
+    const shadowInk = on === 'brand' ? 'rgba(24,8,80,0.3)' : isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.05)';
     return (
         <View style={[styles.box, { width: size, height: size }]}>
             <View

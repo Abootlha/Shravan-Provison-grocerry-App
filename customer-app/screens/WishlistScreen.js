@@ -40,7 +40,7 @@ const WishlistScreen = () => {
         <Screen>
             <AnimatedScreen>
             <View style={styles.header}>
-                <IconButton name="arrow-left" variant="floating" onPress={navigation.goBack} accessibilityLabel="Go back" />
+                <IconButton name="arrow-left" variant="floating" onPress={navigation.goBack} accessibilityLabel={isHi ? 'वापस जाएँ' : 'Go back'} />
                 <View style={styles.titles}>
                     <Text variant="h1" numberOfLines={1} accessibilityRole="header">
                         {isHi ? 'विशलिस्ट' : 'Wishlist'}

@@ -4,7 +4,7 @@
  * header theme lookup.
  */
 import { themes } from '../../constants/theme';
-import { getCategoryId, getImage, getMrp, getPrice, getUnit, isInStock } from '../../components/product/productUtils';
+import { getMrp, getPrice, normalizeProduct } from '../../components/product/productUtils';
 
 export const idOf = (obj) => {
     if (!obj) return null;
@@ -34,18 +34,8 @@ export const discountOf = (p) => {
     return mrp > price && price > 0 ? Math.round((1 - price / mrp) * 100) : 0;
 };
 
-/** API product -> the `product` prop ProductCard expects (unchanged contract). */
-export const toCardProduct = (item, currentLanguage) => ({
-    id: item._id || item.id,
-    name: nameOf(item, currentLanguage),
-    price: getPrice(item),
-    originalPrice: getMrp(item),
-    unit: getUnit(item),
-    image: getImage(item),
-    categoryId: getCategoryId(item),
-    inStock: isInStock(item),
-    discount: discountOf(item),
-});
+/** API product -> the `product` prop ProductCard expects (normalizeProduct in the display language). */
+export const toCardProduct = (item, currentLanguage) => normalizeProduct(item, nameOf(item, currentLanguage));
 
 // ---------------------------------------------------------------------------
 // Header theme per category

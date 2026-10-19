@@ -15,7 +15,8 @@
  * The dock floats 12pt above the safe-area inset; on devices with a home indicator we tuck it
  * 8pt into the inset so it doesn't ride too high.
  */
-import React, { useRef } from 'react';
+import React, { useContext, useRef } from 'react';
+import { BottomTabBarHeightContext } from '@react-navigation/bottom-tabs';
 import Animated from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -36,9 +37,13 @@ export function useTabBarHeight() {
     return useDockInset() + space.md + DOCK_HEIGHT;
 }
 
-/** `bottomOffset` for FloatingCartBar on tab screens: sits just above the dock. */
+/** `bottomOffset` for FloatingCartBar: just above the dock on tab screens; on a stack screen
+ *  (no dock, e.g. Search pushed from a category) just above the safe area. */
 export function useCartBarOffset() {
-    return useTabBarHeight() + space.sm;
+    const inTabs = useContext(BottomTabBarHeightContext) !== undefined;
+    const { bottom } = useSafeAreaInsets();
+    const dock = useTabBarHeight() + space.sm;
+    return inTabs ? dock : bottom + space.lg;
 }
 
 export const TAB_GLYPHS = {

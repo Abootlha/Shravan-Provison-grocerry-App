@@ -65,6 +65,8 @@ function getCacheKey(origin, destination) {
     return `${oLat},${oLng}->${dLat},${dLng}`;
 }
 
+let warnedNoKey = false;
+
 export async function fetchRoute(origin, destination) {
     if (!origin || !destination) {
         return null;
@@ -91,7 +93,9 @@ export async function fetchRoute(origin, destination) {
 
     // Fallback to MapMyIndia
     if (!MAPMYINDIA_API_KEY) {
-        console.warn('Mappls directions disabled: missing API key');
+        // once per session: the tracking screen asks for a route on every rider update
+        if (!warnedNoKey) console.warn('Mappls directions disabled: missing API key');
+        warnedNoKey = true;
         return null;
     }
 

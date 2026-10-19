@@ -36,6 +36,7 @@ import { makeStyles, useTheme } from '../../theme';
 import { springs, durations, easings } from '../../theme/motion';
 import { PressableScale } from './PressableScale';
 import haptics from './haptics';
+import { pe } from './pointerEvents';
 
 let emit = null;
 let seq = 0;
@@ -192,7 +193,7 @@ export function ToastHost({ bottomOffset = 88 }) {
         <View style={[styles.host, { pointerEvents: 'box-none' }]}>
             {/* one flat keyed list so a toast keeps its instance (and position) when it starts leaving */}
             {[...state.leaving.map((t) => [t, true]), ...(state.current ? [[state.current, false]] : [])].map(([t, leaving]) => (
-                <View key={t.id} style={[styles.layer, { bottom: liftOf(t) }, { pointerEvents: leaving ? 'none' : 'box-none' }]}>
+                <View key={t.id} style={[styles.layer, { bottom: liftOf(t) }, leaving ? pe.none : pe.boxNone]}>
                     <ToastCard
                         data={t}
                         leaving={leaving}

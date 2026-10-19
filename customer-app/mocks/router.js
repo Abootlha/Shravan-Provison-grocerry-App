@@ -126,6 +126,30 @@ const calculateBill = (itemTotal, fees) => {
     };
 };
 
+/**
+ * products/sellable-line.ts: a line sells the requested pack-size variant, else the product's
+ * default variant, else the product itself. Null when it can't be bought.
+ */
+const sellableLine = (p, variantSku) => {
+    if (!isSellable(p)) return null;
+    const active = (p.variants || []).filter((v) => v && v.isActive !== false && v.sku);
+    const all = p.variants || [];
+    const def = all.find((v) => v?.isDefault) || all[0];
+    let v = null;
+    if (variantSku) {
+        v = active.find((x) => x.sku === variantSku);
+        if (!v) return null;
+    } else if (active.length) {
+        v = active.find((x) => x.isDefault) || active[0];
+    }
+    if (v) {
+        if (!(v.sellingPrice > 0)) return null;
+        return { variantSku: v.sku, sku: v.sku, unit: v.unit, mrp: v.mrp || v.sellingPrice, price: v.sellingPrice, stock: Number(v.stock) || 0, mirrorsTopLevel: !!def && def.sku === v.sku };
+    }
+    const price = checkoutPriceOf(p);
+    return { sku: p.sku, unit: p.pack?.unit || p.unit, mrp: p.pricing?.mrp || p.originalPrice || price, price, stock: Number(p.stock) || 0, mirrorsTopLevel: false };
+};
+
 /** OrdersService.buildOrderLines: prices lines from the catalogue; 400 for refused / short lines. */
 const buildOrderLines = (items) => {
     if (!Array.isArray(items) || items.length === 0) return { error: fail(400, 'Cart is empty') };
@@ -133,12 +157,24 @@ const buildOrderLines = (items) => {
     let itemTotal = 0;
     for (const it of items) {
         const p = products.find((x) => x._id === it.productId);
-        if (!isSellable(p)) return { error: fail(400, `Product ${it.name || it.productId} is no longer available`) };
+        const line = p ? sellableLine(p, it.variantSku) : null;
+        if (!line) {
+            return { error: fail(400, it.variantSku && p ? `${p.name} (${it.variantSku}) is no longer available` : `Product ${it.name || it.productId} is no longer available`) };
+        }
         const quantity = Number(it.quantity) || 1;
-        if (typeof p.stock === 'number' && p.stock < quantity) return { error: fail(400, `Insufficient stock for ${p.name}`) };
-        const price = checkoutPriceOf(p);
-        lines.push({ productId: p._id, name: p.name, quantity, price, image: p.image });
-        itemTotal += price * quantity;
+        if (line.stock < quantity) return { error: fail(400, `Insufficient stock for ${p.name}${line.variantSku && line.unit ? ` ${line.unit}` : ''}`) };
+        lines.push({
+            productId: p._id,
+            name: p.name,
+            quantity,
+            price: line.price,
+            image: p.image,
+            sku: line.sku,
+            unit: line.unit,
+            mrp: line.mrp,
+            ...(line.variantSku ? { variantSku: line.variantSku, mirrorsTopLevel: line.mirrorsTopLevel } : {}),
+        });
+        itemTotal += line.price * quantity;
     }
     return { lines, itemTotal };
 };
@@ -174,10 +210,11 @@ const riderView = (location) => ({
 
 /** Order list item: riderId populated with 'name phone' (findByUserId). */
 export const listOrderView = (order) => {
-    tick(order);
+    const live = liveTracking(order); // ticks the order; same ETA as GET /orders/:id
     const base = stripMock(order);
     return {
         ...base,
+        estimatedDeliveryTime: live.estimatedDeliveryTime || order.estimatedDeliveryTime,
         riderId: order.riderId ? { _id: db.rider._id, name: db.rider.name, phone: db.rider.phone } : null,
     };
 };
@@ -254,7 +291,8 @@ const createOrder = (body) => {
         timeline: [{ status: 'PENDING', timestamp: new Date(now).toISOString(), changedBy: db.profile.id }],
         riderId: null,
         deliveryInstructions: body.instructions || body.deliveryInstructions || '',
-        estimatedDeliveryTime: new Date(now + 12 * 60000).toISOString(),
+        // Same promise Home and checkout show (settings.estimatedDeliveryMinutes).
+        estimatedDeliveryTime: new Date(now + (db.settings.estimatedDeliveryMinutes || 10) * 60000).toISOString(),
         deliveryOtp: String(1000 + Math.floor(Math.random() * 9000)),
         createdAt: new Date(now).toISOString(),
         updatedAt: new Date(now).toISOString(),

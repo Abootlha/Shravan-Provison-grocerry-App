@@ -3,7 +3,10 @@
  * number plate chip + what they are doing now, and a violet call button.
  * A quiet warning appears when the live location has gone stale.
  *
- * Props: rider ({ name, phone, rating, vehicle, vehicleType, vehicleNumber }), stale (boolean), activeLeg, isHi
+ * After delivery (`deliveredAt` set) it reads "Delivered at 8:42 PM" and the call button goes away.
+ *
+ * Props: rider ({ name, phone, rating, vehicle, vehicleType, vehicleNumber }), stale (boolean), activeLeg,
+ *        deliveredAt (ISO | true when delivered), isHi
  */
 import React from 'react';
 import { Linking, View } from 'react-native';
@@ -11,14 +14,20 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { radii, space } from '../../constants/theme';
 import { makeStyles, useTheme } from '../../theme';
 import { Card, Divider, IconButton, Text } from '../../components/ui';
-import { initialsOf } from '../orders/orderUtils';
+import { formatTime, initialsOf } from '../orders/orderUtils';
 
-export function RiderCard({ rider, stale, activeLeg, isHi }) {
+export function RiderCard({ rider, stale, activeLeg, deliveredAt = null, isHi }) {
     const styles = useStyles();
     const { colors } = useTheme();
     const name = rider?.name || (isHi ? 'डिलीवरी पार्टनर' : 'Delivery partner');
     const onCall = () => rider?.phone && Linking.openURL(`tel:${rider.phone}`);
-    const legText = activeLeg === 'to_store'
+    const delivered = Boolean(deliveredAt);
+    const deliveredTime = typeof deliveredAt === 'string' ? formatTime(deliveredAt, isHi) : '';
+    const legText = delivered
+        ? (deliveredTime
+            ? (isHi ? `${deliveredTime} पर डिलीवर किया` : `Delivered at ${deliveredTime}`)
+            : (isHi ? 'आपका ऑर्डर डिलीवर किया' : 'Delivered your order'))
+        : activeLeg === 'to_store'
         ? isHi ? 'स्टोर की ओर जा रहे हैं' : 'Heading to the store'
         : isHi ? 'आपकी ओर आ रहे हैं' : 'Coming to you';
     const plate = rider?.vehicleNumber || (!rider?.vehicleType ? rider?.vehicle : null);
@@ -51,11 +60,11 @@ export function RiderCard({ rider, stale, activeLeg, isHi }) {
                         <Text variant="caption" color="muted" numberOfLines={1} style={styles.name}>{legText}</Text>
                     </View>
                 </View>
-                {rider?.phone ? (
+                {rider?.phone && !delivered ? (
                     <IconButton name="phone" variant="brand" size="lg" accessibilityLabel={isHi ? `${name} को कॉल करें` : `Call ${name}`} onPress={onCall} />
                 ) : null}
             </View>
-            {stale ? (
+            {stale && !delivered ? (
                 <>
                     <Divider spacing={space.md} />
                     <View style={styles.stale}>

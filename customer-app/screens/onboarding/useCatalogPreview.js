@@ -132,13 +132,4 @@ export function useCatalogPreview(count) {
     return all ? build(all, count) : EMPTY;
 }
 
-/** A pack size worth showing ("500 ml", "6 pcs"), or '' for junk like "1pc" or multi-line values. */
-export const packLabel = (p) => {
-    const u = String(p?.pack?.unit || p?.unit || '').trim();
-    return u && u.length <= 16 && !/[\r\n]/.test(u) && !/^1\s?pc$/i.test(u) ? u : '';
-};
-
-/** The product's name in the active language (falls back to the catalogue name). */
-export const productName = (p, isHi) => (isHi && (p?.nameHi || p?.translatedName)) || p?.name || '';
-
 export default useCatalogPreview;

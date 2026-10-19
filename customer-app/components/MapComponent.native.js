@@ -11,6 +11,7 @@
  */
 import React, { useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { useSelector } from 'react-redux';
 import MapView from 'react-native-maps';
 import { IconButton } from './ui';
 import { radii, space } from '../constants/theme';
@@ -35,6 +36,7 @@ const MapComponent = ({
     title,
     hint,
 }) => {
+    const hi = useSelector((s) => (s.language?.currentLanguage || s.auth?.language) === 'hi');
     const styles = useStyles();
     const { colors, isDark } = useTheme();
     const [moving, setMoving] = useState(false);
@@ -87,7 +89,7 @@ const MapComponent = ({
                         variant="floating"
                         size="lg"
                         color={colors.brandText}
-                        accessibilityLabel="Use current location"
+                        accessibilityLabel={hi ? 'मौजूदा स्थान इस्तेमाल करें' : 'Use current location'}
                         onPress={onCurrentLocationPress}
                     />
                 )}

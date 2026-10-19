@@ -106,6 +106,9 @@ const PlaceOrderBarBase = forwardRef(function PlaceOrderBar(
                             disabled={!!blocked}
                             label={isCod ? (isHi ? 'ऑर्डर के लिए स्लाइड करें' : 'Slide to order') : (isHi ? 'भुगतान के लिए स्लाइड करें' : 'Slide to pay')}
                             hintLabel={isHi ? 'पुष्टि के लिए स्लाइड करें' : 'Slide to confirm'}
+                            armedLabel={isCod
+                                ? (isHi ? 'ऑर्डर के लिए फिर Enter दबाएं' : 'Press Enter again to order')
+                                : (isHi ? 'भुगतान के लिए फिर Enter दबाएं' : 'Press Enter again to pay')}
                             confirmedLabel={isCod
                                 ? (isHi ? 'ऑर्डर दिया जा रहा है…' : 'Placing order…')
                                 : (isHi ? 'भुगतान शुरू…' : 'Starting payment…')}

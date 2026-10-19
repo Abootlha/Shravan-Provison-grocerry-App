@@ -1,6 +1,9 @@
 /**
- * Idle search view: recent searches (chips, clear all), suggested terms with their own glyphs,
- * and popular categories on neutral image wells (photo, else the category's 3D icon).
+ * Idle search view, all from real data:
+ *   Recent searches   chips kept on this phone (max 8), each removable, "Clear all"
+ *   Buy again         products from the shopper's delivered orders that are in stock now (one-tap ADD)
+ *   Popular right now in-stock best sellers (soldCount from the catalogue)
+ *   Categories        shortcuts on neutral image wells (photo, else the category's 3D icon)
  *
  * Motion: the sections rise in on first paint; recent and trending chips stagger in one by one
  * (layout.enterAt). Removing a recent term (its × or "Clear all") fades it out while the chips
@@ -12,33 +15,12 @@ import Animated from 'react-native-reanimated';
 import { Image } from 'expo-image';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { AnimatedListItem, Chip, Icon3D, icon3dFor, PressableScale, SectionHeader, Text } from '../../components/ui';
+import ProductCard from '../../components/ProductCard';
+import { getProductId } from '../../components/product/productUtils';
+import { toCardProduct } from '../home/catalog';
 import { radii, space } from '../../constants/theme';
 import { useTheme, makeStyles } from '../../theme';
 import { press, layout } from '../../theme/motion';
-
-const MAX_TERMS = 6;
-
-/**
- * Starting terms taken from the live catalogue: the parts of each category name
- * ("Dairy, Bread & Eggs" -> Dairy, Bread, Eggs), in catalogue order, de-duplicated.
- * Nothing is suggested when the categories haven't loaded.
- */
-const termsFrom = (categories, isHi) => {
-    const seen = new Set();
-    const out = [];
-    for (const c of categories) {
-        const name = (isHi && (c.nameHi || c.translatedName)) || c.name || '';
-        for (const part of name.split(/\s*(?:,|&|\band\b|और)\s*/i)) {
-            const term = part.trim();
-            const key = term.toLowerCase();
-            if (term.length < 3 || seen.has(key)) continue;
-            seen.add(key);
-            out.push(term);
-            if (out.length >= MAX_TERMS) return out;
-        }
-    }
-    return out;
-};
 
 const HistoryIcon = ({ color, size }) => <MaterialCommunityIcons name="history" color={color} size={size} />;
 const CloseIcon = ({ color, size }) => <MaterialCommunityIcons name="close" color={color} size={size - 2} />;
@@ -72,19 +54,6 @@ export const CategoryTile = memo(function CategoryTile({ category, onPress, isHi
     );
 });
 
-const TrendingTerm = memo(function TrendingTerm({ label, icon, onPress }) {
-    const styles = useStyles();
-    const { colors } = useTheme();
-    return (
-    <PressableScale onPress={onPress} scaleTo={press.scale} haptic="selection" style={styles.trend} accessibilityRole="button" accessibilityLabel={label}>
-        <MaterialCommunityIcons name={icon} size={16} color={colors.inkSecondary} />
-        <Text variant="label" numberOfLines={1}>
-            {label}
-        </Text>
-    </PressableScale>
-    );
-});
-
 /** A recent term: the chip runs the search; the × on its right end removes it. */
 const RecentChip = memo(function RecentChip({ term, selected, onTerm, onRemove, isHi }) {
     const styles = useStyles();
@@ -103,9 +72,20 @@ const RecentChip = memo(function RecentChip({ term, selected, onTerm, onRemove, 
     );
 });
 
-function SearchIdle({ recent, onClearRecent, onRemoveRecent, onTerm, categories, onCategory, isHi, bottomPad, onScroll }) {
+/** A horizontal row of compact product cards (ADD works in place). */
+const ProductRow = memo(function ProductRow({ products, isHi, onProduct }) {
     const styles = useStyles();
-    const terms = React.useMemo(() => termsFrom(categories, isHi), [categories, isHi]);
+    return (
+        <Animated.ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.bleed} contentContainerStyle={styles.rail} keyboardShouldPersistTaps="handled">
+            {products.map((p) => (
+                <ProductCard key={String(getProductId(p))} product={toCardProduct(p, isHi ? 'hi' : 'en')} variant="rail" onPress={() => onProduct(p)} />
+            ))}
+        </Animated.ScrollView>
+    );
+});
+
+function SearchIdle({ recent, onClearRecent, onRemoveRecent, onTerm, categories, onCategory, buyAgain = [], popular = [], onProduct, isHi, bottomPad, onScroll }) {
+    const styles = useStyles();
     return (
         <Animated.ScrollView
             onScroll={onScroll}
@@ -134,27 +114,30 @@ function SearchIdle({ recent, onClearRecent, onRemoveRecent, onTerm, categories,
                 </Animated.View>
             ) : null}
 
-            {terms.length > 0 ? (
+            {buyAgain.length > 0 ? (
                 <Animated.View layout={layout.list}>
                     <AnimatedListItem index={2} style={styles.section}>
-                        <SectionHeader title={isHi ? 'खोजकर देखें' : 'Try searching'} />
-                        <View style={styles.chips}>
-                            {terms.map((term, i) => (
-                                <Animated.View key={term} entering={layout.enterAt(i + 2)}>
-                                    <TrendingTerm label={term} icon="magnify" onPress={() => onTerm(term)} />
-                                </Animated.View>
-                            ))}
-                        </View>
+                        <SectionHeader title={isHi ? 'फिर से खरीदें' : 'Buy again'} subtitle={isHi ? 'आपके पिछले ऑर्डर से' : 'From your delivered orders'} />
+                        <ProductRow products={buyAgain} isHi={isHi} onProduct={onProduct} />
+                    </AnimatedListItem>
+                </Animated.View>
+            ) : null}
+
+            {popular.length > 0 ? (
+                <Animated.View layout={layout.list}>
+                    <AnimatedListItem index={3} style={styles.section}>
+                        <SectionHeader title={isHi ? 'अभी सबसे ज़्यादा बिकने वाले' : 'Popular right now'} />
+                        <ProductRow products={popular} isHi={isHi} onProduct={onProduct} />
                     </AnimatedListItem>
                 </Animated.View>
             ) : null}
 
             {categories.length > 0 ? (
                 <Animated.View layout={layout.list}>
-                <AnimatedListItem index={3} style={styles.section}>
+                <AnimatedListItem index={4} style={styles.section}>
                     <SectionHeader title={isHi ? 'श्रेणियाँ' : 'Categories'} />
                     <View style={styles.grid}>
-                        {categories.slice(0, 8).map((c) => (
+                        {categories.slice(0, 12).map((c) => (
                             <CategoryTile key={c._id || c.id} category={c} isHi={isHi} onPress={() => onCategory(c)} />
                         ))}
                     </View>
@@ -170,17 +153,9 @@ const useStyles = makeStyles((t) => ({
     wrap: { paddingHorizontal: space.lg, paddingTop: space.lg, gap: space['2xl'] + space.xs },
     section: { gap: space.md },
     chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
-    trend: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: space.xs + space.xxs,
-        height: 36,
-        paddingHorizontal: space.md,
-        borderRadius: radii.chip,
-        backgroundColor: t.colors.surface,
-        borderWidth: 1,
-        borderColor: t.colors.hairline,
-    },
+    // rails bleed to the screen edge (the list has a 16 gutter)
+    bleed: { marginHorizontal: -space.lg },
+    rail: { paddingHorizontal: space.lg },
     grid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: space.lg, marginHorizontal: -space.xs },
     tile: { width: '25%', alignItems: 'center', paddingHorizontal: space.xs },
     tileWell: {

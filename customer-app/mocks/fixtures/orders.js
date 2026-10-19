@@ -1,6 +1,9 @@
 import { oid, KIND } from './ids';
 import { products } from './catalog';
-import { addresses, MOCK_USER_ID, rider } from './account';
+import { addresses, MOCK_USER_ID, rider, storeSettings } from './account';
+
+// The promise the app shows on Home / checkout (settings.estimatedDeliveryMinutes).
+const PROMISE_MIN = storeSettings.estimatedDeliveryMinutes;
 
 const MIN = 60 * 1000;
 const DAY = 24 * 60 * MIN;
@@ -104,7 +107,8 @@ export const buildSeedOrders = (now = Date.now()) => {
             timeline: buildTimeline(s.status, createdAt, s.live ? 1 * MIN : 2 * MIN),
             riderId: s.riderAssigned ? rider._id : null,
             deliveryInstructions: s.instructions || '',
-            estimatedDeliveryTime: new Date(s.live ? now + 8 * MIN : createdAt + 12 * MIN).toISOString(),
+            // Live demo order: about 4 minutes left of the promise (it was placed 6 min ago).
+            estimatedDeliveryTime: new Date(createdAt + PROMISE_MIN * MIN).toISOString(),
             actualDeliveryTime: deliveredAt ? new Date(deliveredAt).toISOString() : undefined,
             cancellationReason: s.cancellationReason,
             deliveryOtp: '4821',

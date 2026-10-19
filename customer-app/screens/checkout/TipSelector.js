@@ -95,8 +95,8 @@ function TipSelectorBase({ tip, onChange, isHi, bare = false }) {
                     </Text>
                     <Text variant="caption" color="secondary">
                         {isHi
-                            ? 'पूरी टिप पार्टनर को जाती है। दरवाज़े पर भुगतान करें।'
-                            : 'All of it goes to them. Paid at the door.'}
+                            ? 'ऑनलाइन नहीं ली जाती। दरवाज़े पर उन्हें दें, पूरी उन्हीं की है।'
+                            : 'Not charged online. Give it to them at the door; all of it is theirs.'}
                     </Text>
                 </View>
             </View>

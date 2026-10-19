@@ -99,6 +99,8 @@ function CheckoutItemRowBase({ item, index = 0, showDivider = false, refusedReas
                             size="sm"
                             quantity={item.quantity}
                             productName={name}
+                            // the line's own stock (a pack-size line carries its variant's stock)
+                            max={Number(item.stock) > 0 ? Number(item.stock) : undefined}
                             onAdd={onInc}
                             onIncrement={onInc}
                             onDecrement={onDec}

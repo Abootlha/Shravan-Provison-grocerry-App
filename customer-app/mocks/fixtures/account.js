@@ -2,11 +2,11 @@ import { oid, KIND } from './ids';
 
 // GET /settings/store shape (settings.controller.ts).
 export const storeSettings = {
-    storeName: 'Shravan Provision Store',
+    storeName: 'Shravan Kirana',
     location: {
         latitude: 26.6965,
         longitude: 83.4627,
-        address: 'Shravan Provision Store, Kauriram Road, Gorakhpur, Uttar Pradesh 273016',
+        address: 'Shravan Kirana, Kauriram Road, Gorakhpur, Uttar Pradesh 273016',
     },
     storeTimings: { openTime: '07:00', closeTime: '23:00' },
     contactPhone: '+919876543210',

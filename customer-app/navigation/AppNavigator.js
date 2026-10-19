@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { StyleSheet, DeviceEventEmitter, Platform } from 'react-native';
+import { StyleSheet, DeviceEventEmitter, Platform, View } from 'react-native';
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { useSelector } from 'react-redux';
 import { useTranslation } from '../hooks/useTranslation';
@@ -57,22 +57,25 @@ const CustomTabBar = ({ state, descriptors, navigation }) => {
     const focusedKey = state.routes[state.index]?.key;
     const routeHidesDock = descriptors[focusedKey]?.options?.tabBarStyle?.display === 'none';
 
-    const show = useCallback(
-        (visible) => {
-            const to = visible ? 0 : 1;
-            hidden.value = reduce ? withTiming(to, { duration: durations.fast, easing: easings.out }) : withSpring(to, springs.sheet);
-        },
-        [reduce],
-    );
+    // ONE source of truth for "is the dock up": the focused tab's option AND the scroll signal.
+    // Both the slide and the touch layer derive from `visible`, so the dock can never be on
+    // screen while its layer ignores taps (Home → View cart → back used to leave it dead).
+    const [scrollHidden, setScrollHidden] = useState(false);
+    const visible = !routeHidesDock && !scrollHidden;
 
     useEffect(() => {
-        show(!routeHidesDock); // visible after a tab switch, unless that tab hides it
-    }, [state.index, routeHidesDock, show]);
+        setScrollHidden(false); // every tab switch brings the dock back
+    }, [state.index]);
 
     useEffect(() => {
-        const sub = DeviceEventEmitter.addListener('SET_TAB_BAR_VISIBLE', (visible) => show(visible !== false && !routeHidesDock));
+        const sub = DeviceEventEmitter.addListener('SET_TAB_BAR_VISIBLE', (v) => setScrollHidden(v === false));
         return () => sub.remove();
-    }, [show, routeHidesDock]);
+    }, []);
+
+    useEffect(() => {
+        const to = visible ? 0 : 1;
+        hidden.value = reduce ? withTiming(to, { duration: durations.fast, easing: easings.out }) : withSpring(to, springs.sheet);
+    }, [visible, reduce]);
 
     const slide = useAnimatedStyle(() =>
         reduce ? { opacity: 1 - hidden.value } : { opacity: 1 - hidden.value * 0.4, transform: [{ translateY: hidden.value * travel }] },
@@ -109,9 +112,14 @@ const CustomTabBar = ({ state, descriptors, navigation }) => {
     };
 
     return (
-        <Animated.View style={[styles.dockLayer, { height: travel }, slide, { pointerEvents: routeHidesDock ? 'none' : 'box-none' }]}>
-            <FloatingDock items={items} activeKey={state.routes[state.index]?.key} onSelect={onSelect} bottomInset={dockInset} />
-        </Animated.View>
+        // pointerEvents only ever comes from StyleSheet.create styles: on web an INLINE
+        // { pointerEvents } that flips 'none' → 'box-none' leaves `pointer-events: none` stuck on the
+        // element (react-native-web), which is what left the dock visible but dead.
+        <View style={[styles.dockLayer, { height: travel }, visible ? styles.passThrough : styles.noTouch]}>
+            <Animated.View style={[styles.fill, styles.passThrough, slide]}>
+                <FloatingDock items={items} activeKey={state.routes[state.index]?.key} onSelect={onSelect} bottomInset={dockInset} />
+            </Animated.View>
+        </View>
     );
 };
 
@@ -164,11 +172,32 @@ const TabNavigator = () => {
     );
 };
 
+// Cart / Search opened from a pushed screen (e.g. the Category header's icons call
+// navigate('Main', { screen: 'Cart' })) used to pop that screen and switch tabs, so there was no way
+// back. From any stack screen above Main they now open as stack screens on top instead (Checkout /
+// StackSearch, both with a back arrow), keeping the screen you came from underneath.
+const STACK_TWIN = { Cart: 'Checkout', Search: 'StackSearch' };
+const keepOriginRouter = (original) => ({
+    getStateForAction(state, action, options) {
+        const nav = action.type === 'NAVIGATE' ? action.payload : null;
+        // navigate('Main', { screen: 'Cart' }) or a bare navigate('Cart') from a stack screen
+        const viaMain = nav?.name === 'Main' ? nav.params?.screen : null;
+        const target = viaMain || (STACK_TWIN[nav?.name] ? nav.name : null);
+        const twin = target && STACK_TWIN[target];
+        const focused = state.routes[state.index]?.name;
+        if (twin && focused && focused !== 'Main') {
+            const params = viaMain ? nav.params?.params : nav.params;
+            return original.getStateForAction(state, { ...action, type: 'PUSH', payload: { name: twin, params } }, options);
+        }
+        return original.getStateForAction(state, action, options);
+    },
+});
+
 // Main App Navigator
 const AppNavigator = () => {
     const opts = useNavOptions();
     return (
-        <Stack.Navigator screenOptions={opts.stack} initialRouteName={DEV_INITIAL_ROUTE || 'Splash'}>
+        <Stack.Navigator screenOptions={opts.stack} initialRouteName={DEV_INITIAL_ROUTE || 'Splash'} UNSTABLE_router={keepOriginRouter}>
             <Stack.Screen name="Splash" component={SplashScreen} options={SPLASH_OPTIONS} />
             <Stack.Screen name="LanguageSelection" component={LanguageSelectionScreen} options={FIRST_RUN_OPTIONS} />
             <Stack.Screen name="Onboarding" component={OnboardingScreen} options={FIRST_RUN_OPTIONS} />
@@ -178,6 +207,7 @@ const AppNavigator = () => {
             <Stack.Screen name="Category" component={CategoryScreen} />
             <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={PDP_OPTIONS} />
             <Stack.Screen name="Checkout" component={CheckoutScreen} />
+            <Stack.Screen name="StackSearch" component={SearchScreen} />
             <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
             <Stack.Screen name="OrderDetails" component={OrderDetailsScreen} />
             <Stack.Screen name="OrdersHistory" component={OrdersHistoryScreen} />
@@ -192,6 +222,9 @@ const AppNavigator = () => {
 
 const styles = StyleSheet.create({
     dockLayer: { position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: z.tabBar },
+    fill: { flex: 1 },
+    passThrough: { pointerEvents: 'box-none' },
+    noTouch: { pointerEvents: 'none' },
 });
 
 export default AppNavigator;

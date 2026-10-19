@@ -5,9 +5,10 @@ import authReducer from './slices/authSlice';
 import locationReducer from './slices/locationSlice';
 import languageReducer from './slices/languageSlice';
 import orderTrackingReducer from './slices/orderTrackingSlice';
-import wishlistReducer from './slices/wishlistSlice';
+import wishlistReducer, { hydrateWishlist } from './slices/wishlistSlice';
 
 export const CART_STORAGE_KEY = 'customerCart';
+export const WISHLIST_STORAGE_KEY = 'customerWishlist';
 
 export const store = configureStore({
     reducer: {
@@ -56,5 +57,37 @@ store.subscribe(() => {
 });
 
 hydrateCartFromStorage();
+
+// --- Wishlist persistence (this phone only, like the cart) ---
+let wishlistHydrated = false;
+let lastSavedWishlist = null;
+let wishlistTimer = null;
+
+const hydrateWishlistFromStorage = async () => {
+    try {
+        const saved = await AsyncStorage.getItem(WISHLIST_STORAGE_KEY);
+        if (saved && store.getState().wishlist.items.length === 0) {
+            store.dispatch(hydrateWishlist(JSON.parse(saved)));
+        }
+    } catch (error) {
+        if (__DEV__) console.warn('Failed to restore wishlist:', error?.message);
+    } finally {
+        wishlistHydrated = true;
+        lastSavedWishlist = store.getState().wishlist.items;
+    }
+};
+
+store.subscribe(() => {
+    const items = store.getState().wishlist.items;
+    if (!wishlistHydrated || items === lastSavedWishlist) return;
+    lastSavedWishlist = items;
+
+    clearTimeout(wishlistTimer);
+    wishlistTimer = setTimeout(() => {
+        AsyncStorage.setItem(WISHLIST_STORAGE_KEY, JSON.stringify({ items })).catch(() => undefined);
+    }, 300);
+});
+
+hydrateWishlistFromStorage();
 
 export default store;

@@ -20,7 +20,12 @@ const DEBOUNCE_MS = 350;
 
 export const lineIdOf = (item) => String(item?.productId || item?._id || item?.id || '');
 
-const toLine = (item) => ({ productId: lineIdOf(item), quantity: Number(item.quantity) || 1 });
+// A pack-size line also names its variant; the server prices and reserves that pack.
+const toLine = (item) => ({
+    productId: lineIdOf(item),
+    quantity: Number(item.quantity) || 1,
+    ...(item.variantSku ? { variantSku: item.variantSku } : {}),
+});
 
 const reasonOf = (error) => {
     const msg = String(error?.response?.data?.message || '');
@@ -31,8 +36,8 @@ const isRefusal = (error) => error?.response?.status === 400;
 
 export function useOrderQuote(cartItems, { enabled = true } = {}) {
     const items = cartItems || [];
-    // Only product + quantity change the bill.
-    const key = useMemo(() => items.map((i) => `${lineIdOf(i)}x${Number(i.quantity) || 1}`).join('|'), [items]);
+    // Only product (+ pack size) + quantity change the bill.
+    const key = useMemo(() => items.map((i) => `${lineIdOf(i)}:${i.variantSku || ''}x${Number(i.quantity) || 1}`).join('|'), [items]);
     const [state, setState] = useState({ status: 'idle', key: null, quote: null, refused: [] });
     const [attempt, setAttempt] = useState(0);
     const seq = useRef(0);
