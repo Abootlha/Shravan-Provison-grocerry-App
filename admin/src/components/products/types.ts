@@ -55,6 +55,7 @@ export interface AdminProduct {
     description?: string;
     highlights?: string;
     shelfLife?: number;
+    isPerishable?: boolean;
     storageType?: string;
     nutrition?: Nutrition;
     variants?: ProductVariant[];

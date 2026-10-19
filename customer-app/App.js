@@ -15,6 +15,11 @@ import { PlusJakartaSans_800ExtraBold } from '@expo-google-fonts/plus-jakarta-sa
 import { BricolageGrotesque_600SemiBold } from '@expo-google-fonts/bricolage-grotesque/600SemiBold';
 import { BricolageGrotesque_700Bold } from '@expo-google-fonts/bricolage-grotesque/700Bold';
 import { BricolageGrotesque_800ExtraBold } from '@expo-google-fonts/bricolage-grotesque/800ExtraBold';
+// Hindi: Plus Jakarta has no Devanagari glyphs; components/ui/Text maps each weight onto these.
+import { NotoSansDevanagari_400Regular } from '@expo-google-fonts/noto-sans-devanagari/400Regular';
+import { NotoSansDevanagari_500Medium } from '@expo-google-fonts/noto-sans-devanagari/500Medium';
+import { NotoSansDevanagari_600SemiBold } from '@expo-google-fonts/noto-sans-devanagari/600SemiBold';
+import { NotoSansDevanagari_700Bold } from '@expo-google-fonts/noto-sans-devanagari/700Bold';
 import { store } from './store';
 import { AppNavigator } from './navigation';
 import { navigationRef } from './navigation/navigationRef';
@@ -48,6 +53,10 @@ function ThemedApp() {
         BricolageGrotesque_600SemiBold,
         BricolageGrotesque_700Bold,
         BricolageGrotesque_800ExtraBold,
+        NotoSansDevanagari_400Regular,
+        NotoSansDevanagari_500Medium,
+        NotoSansDevanagari_600SemiBold,
+        NotoSansDevanagari_700Bold,
     });
     const ready = fontsLoaded || !!fontError;
 

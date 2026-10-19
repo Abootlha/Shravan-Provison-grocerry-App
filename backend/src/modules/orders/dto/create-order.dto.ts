@@ -7,7 +7,9 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -31,6 +33,16 @@ export class OrderItemDto {
   @IsOptional()
   @IsString()
   image?: string;
+
+  /**
+   * Pack-size variant (ProductVariant.sku). Optional: products without
+   * variants ignore it; products with variants default to their default pack.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Matches(/^[\w./-]+$/, { message: 'variantSku has invalid characters' })
+  variantSku?: string;
 }
 
 export class AddressDto {

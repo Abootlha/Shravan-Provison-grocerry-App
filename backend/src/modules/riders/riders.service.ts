@@ -4,6 +4,7 @@ import {
   NotFoundException,
   UnauthorizedException,
   Inject,
+  Logger,
   forwardRef,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -23,12 +24,61 @@ import {
   OrderStatus,
 } from '../orders/schemas/order.schema';
 import { OrdersService } from '../orders/orders.service';
+import {
+  OrderStatusLog,
+  OrderStatusLogDocument,
+} from '../orders/schemas/order-status-log.schema';
+import { RIDER_REJECTED_NOTE } from '../orders/rider-events';
+import { DEFAULT_TIMEZONE } from '../settings/store-hours';
 import * as bcrypt from 'bcrypt';
 
 export interface LocationDto {
   latitude: number;
   longitude: number;
   accuracy?: number;
+  heading?: number;
+  speed?: number;
+}
+
+export interface LocationUpdateResult {
+  /** True when the update arrived too soon after the previous one and was dropped. */
+  throttled: boolean;
+  rider?: Rider;
+}
+
+/** Minimum gap between stored rider locations. Clients send every ~5 s. */
+export const LOCATION_THROTTLE_MS = 2500;
+/** Minimum gap between ETA recalculations (each may call the directions API). */
+export const ETA_RECALC_INTERVAL_MS = 15000;
+
+const ACTIVE_RIDER_ORDER_STATUSES = [
+  OrderStatus.ASSIGNED,
+  OrderStatus.PACKED,
+  OrderStatus.PICKED_UP,
+  OrderStatus.OUT_FOR_DELIVERY,
+];
+
+export interface PeriodMetrics {
+  deliveries: number;
+  earnings: number;
+}
+
+export interface RiderMetrics {
+  totalDeliveries: number;
+  avgRating: number;
+  acceptanceRate: number;
+  currency: 'INR';
+  timezone: string;
+  earningsBasis: 'deliveryFee+tip';
+  today: PeriodMetrics;
+  week: PeriodMetrics;
+  month: PeriodMetrics;
+}
+
+export interface UpdateRiderProfileInput {
+  name?: string;
+  vehicleType?: VehicleType;
+  vehicleNumber?: string;
 }
 
 @Injectable()
@@ -43,7 +93,11 @@ export class RidersService {
     private readonly etaService: ETAService,
     @Inject(forwardRef(() => OrdersService))
     private readonly ordersService: OrdersService,
+    @InjectModel(OrderStatusLog.name)
+    private readonly orderStatusLogModel: Model<OrderStatusLogDocument>,
   ) {}
+
+  private readonly logger = new Logger(RidersService.name);
 
   async findAll(status?: string): Promise<Rider[]> {
     const query: Record<string, any> = {};
@@ -143,27 +197,113 @@ export class RidersService {
     }
   }
 
-  async getMetrics(riderId: string): Promise<{
-    totalDeliveries: number;
-    avgRating: number;
-    acceptanceRate: number;
-  }> {
-    await this.findRiderById(riderId);
+  /**
+   * Delivery counts and earnings for today / this week (from Monday) / this
+   * month in the store timezone, from DELIVERED orders by actualDeliveryTime.
+   *
+   * There is no payout or commission model yet, so earnings are estimated as
+   * deliveryFee + tip of each delivered order (tip counts as 0 when absent).
+   * Online hours are not returned because presence history is not stored.
+   */
+  async getMetrics(riderId: string, now = new Date()): Promise<RiderMetrics> {
+    const rider = await this.findRiderById(riderId);
+    const riderObjectId = new Types.ObjectId(riderId);
+    const timezone = DEFAULT_TIMEZONE;
+    const { dayStart, weekStart, monthStart } = periodStarts(now, timezone);
+    const earliest = new Date(
+      Math.min(weekStart.getTime(), monthStart.getTime()),
+    );
 
-    const totalDeliveries = await this.orderModel.countDocuments({
-      riderId: new Types.ObjectId(riderId),
-      orderStatus: OrderStatus.DELIVERED,
+    const countFor = (start: Date) => ({
+      $sum: { $cond: [{ $gte: ['$actualDeliveryTime', start] }, 1, 0] },
+    });
+    const earningsFor = (start: Date) => ({
+      $sum: {
+        $cond: [
+          { $gte: ['$actualDeliveryTime', start] },
+          {
+            $add: [{ $ifNull: ['$deliveryFee', 0] }, { $ifNull: ['$tip', 0] }],
+          },
+          0,
+        ],
+      },
     });
 
-    const acceptedAssignments = await this.orderModel.countDocuments({
-      riderId: new Types.ObjectId(riderId),
+    const [totalDeliveries, periods, accepted, rejected] = await Promise.all([
+      this.orderModel.countDocuments({
+        riderId: riderObjectId,
+        orderStatus: OrderStatus.DELIVERED,
+      }),
+      this.orderModel
+        .aggregate<Record<string, number>>([
+          {
+            $match: {
+              riderId: riderObjectId,
+              orderStatus: OrderStatus.DELIVERED,
+              actualDeliveryTime: { $gte: earliest },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              todayCount: countFor(dayStart),
+              todayEarnings: earningsFor(dayStart),
+              weekCount: countFor(weekStart),
+              weekEarnings: earningsFor(weekStart),
+              monthCount: countFor(monthStart),
+              monthEarnings: earningsFor(monthStart),
+            },
+          },
+        ])
+        .exec(),
+      // Accepts are logged with the rider as actor; rejects carry a note.
+      this.orderStatusLogModel.countDocuments({
+        changedBy: riderObjectId,
+        newStatus: OrderStatus.ASSIGNED,
+      }),
+      this.orderStatusLogModel.countDocuments({
+        changedBy: riderObjectId,
+        note: { $regex: `^${RIDER_REJECTED_NOTE}` },
+      }),
+    ]);
+
+    const p = periods[0] ?? {};
+    const period = (key: 'today' | 'week' | 'month'): PeriodMetrics => ({
+      deliveries: p[`${key}Count`] ?? 0,
+      earnings: Math.round((p[`${key}Earnings`] ?? 0) * 100) / 100,
     });
+    const offers = accepted + rejected;
 
     return {
       totalDeliveries,
-      avgRating: 0,
-      acceptanceRate: acceptedAssignments > 0 ? 100 : 0,
+      avgRating: rider.rating ?? 0,
+      acceptanceRate: offers > 0 ? Math.round((accepted / offers) * 100) : 100,
+      currency: 'INR',
+      timezone,
+      earningsBasis: 'deliveryFee+tip',
+      today: period('today'),
+      week: period('week'),
+      month: period('month'),
     };
+  }
+
+  /** The rider's own profile edit (PUT /riders/me). */
+  async updateProfile(
+    riderId: string,
+    input: UpdateRiderProfileInput,
+  ): Promise<RiderDocument> {
+    const rider = await this.findRiderById(riderId);
+    if (input.name !== undefined) rider.name = input.name.trim();
+    if (input.vehicleType !== undefined) rider.vehicleType = input.vehicleType;
+    if (input.vehicleNumber !== undefined) {
+      const normalized = input.vehicleNumber
+        .trim()
+        .replace(/\s+/g, ' ')
+        .toUpperCase();
+      rider.vehicleNumber = normalized || undefined;
+    }
+    await rider.save();
+    return rider;
   }
 
   async updateAvailability(
@@ -216,18 +356,36 @@ export class RidersService {
     return rider;
   }
 
-  async validateLocationUpdate(riderId: string): Promise<boolean> {
-    const throttleKey = `rider:location:throttle:${riderId}`;
-    const lastUpdate = await this.redisService.get(throttleKey);
-
-    if (lastUpdate) {
-      return false;
+  /**
+   * Claims a Redis slot for `ms`. Returns false when it is still held from a
+   * previous call. Fails open if Redis is unavailable: a few extra writes are
+   * better than a frozen map.
+   */
+  private async acquireThrottle(key: string, ms: number): Promise<boolean> {
+    try {
+      const result = await this.redisService
+        .getClient()
+        .set(key, Date.now().toString(), 'PX', ms, 'NX');
+      return result === 'OK';
+    } catch (error) {
+      this.logger.warn(
+        `Throttle check failed for ${key}: ${(error as Error).message}`,
+      );
+      return true;
     }
-
-    return true;
   }
 
-  async updateLocation(riderId: string, location: LocationDto): Promise<Rider> {
+  /**
+   * Stores the rider's location and broadcasts it to every active order room
+   * (and etaUpdate when the ETA is recalculated). Updates closer than
+   * LOCATION_THROTTLE_MS are dropped silently ({ throttled: true }) rather
+   * than rejected, since clients send on a fixed timer and jitter would
+   * otherwise turn into errors.
+   */
+  async updateLocation(
+    riderId: string,
+    location: LocationDto,
+  ): Promise<LocationUpdateResult> {
     if (
       !Number.isFinite(location.latitude) ||
       location.latitude < -90 ||
@@ -243,66 +401,81 @@ export class RidersService {
       throw new BadRequestException('Longitude must be between -180 and 180');
     }
 
-    const isAllowed = await this.validateLocationUpdate(riderId);
-    if (!isAllowed) {
-      throw new BadRequestException(
-        'Location updates are throttled to 5 seconds minimum interval',
-      );
+    const allowed = await this.acquireThrottle(
+      `rider:location:throttle:${riderId}`,
+      LOCATION_THROTTLE_MS,
+    );
+    if (!allowed) {
+      return { throttled: true };
     }
 
     const rider = await this.findRiderById(riderId);
 
+    const now = new Date();
     rider.currentLocation = {
       type: 'Point',
       coordinates: [location.longitude, location.latitude],
     };
-    rider.lastLocationUpdate = new Date();
+    rider.lastLocationUpdate = now;
+    rider.lastActiveAt = now;
 
     await rider.save();
-
-    const throttleKey = `rider:location:throttle:${riderId}`;
-    await this.redisService.set(throttleKey, Date.now().toString(), 5);
 
     const activeOrders = await this.orderModel
       .find({
         riderId: new Types.ObjectId(riderId),
-        orderStatus: {
-          $in: [
-            OrderStatus.ASSIGNED,
-            OrderStatus.PACKED,
-            OrderStatus.PICKED_UP,
-            OrderStatus.OUT_FOR_DELIVERY,
-          ],
-        },
+        orderStatus: { $in: ACTIVE_RIDER_ORDER_STATUSES },
       })
       .select('_id orderStatus')
       .lean()
       .exec();
 
     for (const order of activeOrders) {
-      if (order.orderStatus === OrderStatus.OUT_FOR_DELIVERY) {
-        try {
-          await this.etaService.recalculateForOrder(order._id.toString());
-        } catch (error) {
-          console.error(
-            `Failed to recalculate ETA for order ${String(order._id)}:`,
-            error,
-          );
+      const orderId = order._id.toString();
+      try {
+        let eta: Date | null = null;
+        if (
+          order.orderStatus === OrderStatus.OUT_FOR_DELIVERY &&
+          (await this.acquireThrottle(
+            `order:eta:recalc:${orderId}`,
+            ETA_RECALC_INTERVAL_MS,
+          ))
+        ) {
+          eta = await this.etaService
+            .recalculateForOrder(orderId)
+            .catch((error: Error) => {
+              this.logger.warn(
+                `Failed to recalculate ETA for order ${orderId}: ${error.message}`,
+              );
+              return null;
+            });
         }
-      }
 
-      const trackingOrder = await this.ordersService.buildRealtimeOrderPayload(
-        order._id.toString(),
-      );
-      this.trackingGateway.broadcastRiderLocationUpdate(
-        order._id.toString(),
-        { latitude: location.latitude, longitude: location.longitude },
-        riderId,
-        trackingOrder,
-      );
+        const trackingOrder =
+          await this.ordersService.buildRealtimeOrderPayload(orderId);
+        this.trackingGateway.broadcastRiderLocationUpdate(
+          orderId,
+          {
+            latitude: location.latitude,
+            longitude: location.longitude,
+            heading: location.heading,
+            speed: location.speed,
+          },
+          riderId,
+          trackingOrder,
+        );
+        if (eta) {
+          this.trackingGateway.broadcastETAUpdate(orderId, eta, trackingOrder);
+        }
+      } catch (error) {
+        // One failing order must not stop updates for the others.
+        this.logger.warn(
+          `Failed to broadcast location for order ${orderId}: ${(error as Error).message}`,
+        );
+      }
     }
 
-    return rider;
+    return { throttled: false, rider };
   }
 
   async findNearbyRiders(
@@ -407,4 +580,53 @@ export class RidersService {
     const rider = await this.findRiderById(riderId);
     await rider.deleteOne();
   }
+}
+
+/**
+ * Start of the current day, week (Monday) and month in `timezone`, as UTC
+ * instants. Assumes the zone offset is the same at the period start as now,
+ * which holds for the store's zone (Asia/Kolkata has no DST).
+ */
+export function periodStarts(
+  now: Date,
+  timezone: string,
+): { dayStart: Date; weekStart: Date; monthStart: Date } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    weekday: 'short',
+  }).formatToParts(now);
+  const get = (type: string) => parts.find((x) => x.type === type)?.value ?? '';
+  const year = Number(get('year'));
+  const month = Number(get('month'));
+  const day = Number(get('day'));
+  // The zone's wall-clock time read as UTC, minus the real instant, is the
+  // zone offset.
+  const wallClockAsUtc = Date.UTC(
+    year,
+    month - 1,
+    day,
+    Number(get('hour')),
+    Number(get('minute')),
+    Number(get('second')),
+  );
+  const offsetMs = wallClockAsUtc - Math.floor(now.getTime() / 1000) * 1000;
+  const startOf = (y: number, m: number, d: number) =>
+    new Date(Date.UTC(y, m - 1, d) - offsetMs);
+
+  const daysSinceMonday = Math.max(
+    ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(get('weekday')),
+    0,
+  );
+  return {
+    dayStart: startOf(year, month, day),
+    weekStart: startOf(year, month, day - daysSinceMonday),
+    monthStart: startOf(year, month, 1),
+  };
 }

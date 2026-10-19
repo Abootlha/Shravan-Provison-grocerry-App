@@ -18,6 +18,7 @@
  */
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
+import { useSelector } from 'react-redux';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { space } from '../../constants/theme';
 import { useTheme } from '../../theme';
@@ -27,6 +28,7 @@ import { IconButton } from './IconButton';
 
 export function SectionHeader({ title, subtitle, actionLabel, onActionPress, size = 'md', style }) {
     const { colors } = useTheme();
+    const hi = useSelector((s) => (s.language?.currentLanguage || s.auth?.language) === 'hi');
     return (
         <View style={[styles.row, style]}>
             <View style={styles.titles}>
@@ -44,7 +46,7 @@ export function SectionHeader({ title, subtitle, actionLabel, onActionPress, siz
                     onPress={onActionPress}
                     haptic="selection"
                     accessibilityRole="link"
-                    accessibilityLabel={`${actionLabel || 'See all'} ${title}`}
+                    accessibilityLabel={`${actionLabel || (hi ? 'सभी देखें' : 'See all')} ${title}`}
                     hitSlop={{ top: 12, bottom: 12, left: 12, right: 8 }}
                     style={styles.action}
                 >
@@ -59,6 +61,7 @@ export function SectionHeader({ title, subtitle, actionLabel, onActionPress, siz
 }
 
 export function SheetHeader({ title, subtitle, onClose, style }) {
+    const hi = useSelector((s) => (s.language?.currentLanguage || s.auth?.language) === 'hi');
     return (
         <View style={[styles.sheetRow, style]}>
             <View style={styles.titles}>
@@ -71,7 +74,7 @@ export function SheetHeader({ title, subtitle, onClose, style }) {
                     </Text>
                 ) : null}
             </View>
-            {onClose ? <IconButton name="close" variant="tinted" size="sm" accessibilityLabel="Close" onPress={onClose} /> : null}
+            {onClose ? <IconButton name="close" variant="tinted" size="sm" accessibilityLabel={hi ? 'बंद करें' : 'Close'} onPress={onClose} /> : null}
         </View>
     );
 }

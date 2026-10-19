@@ -5,7 +5,7 @@
  *   variant        'hero'|'display'|'h1'|'h2'|'h3'|'title'|'body'|'bodyStrong'|'label'|'caption'|'micro'
  *                  |'button'|'price'|'priceLarge'|'priceHero'|'priceStrike'|'counter'   (default 'body')
  *   color          token name ('ink'|'strong'|'secondary'|'muted'|'disabled'|'inverse'|'onBrand'|'onNight'
- *                  |'onNightSecondary'|'brand'|'accent'|'success'|'error'|'warning'|'info'|'offer'|'gold'
+ *                  |'onNightSecondary'|'brand'|'accent'|'success'|'successInk'|'savings'|'error'|'warning'|'info'|'offer'|'gold'
  *                  |'goldInk') or any colour string. Default 'ink'. Tokens resolve against the ACTIVE
  *                  theme ('brand'/'accent' → colors.brandText, the text-safe violet in both modes);
  *                  a raw colour string is used as-is (so pass tokens, not hex, in themed code).
@@ -31,8 +31,9 @@
  *   <Text variant="price">₹48</Text> <Text variant="priceStrike" color="muted">₹60</Text>
  */
 import React from 'react';
-import { Text as RNText } from 'react-native';
-import { colors, type, fontFamily, displayFamily, DISPLAY_VARIANTS } from '../../constants/theme';
+import { Platform, StyleSheet, Text as RNText } from 'react-native';
+import { useSelector } from 'react-redux';
+import { colors, type, fontFamily, displayFamily, DISPLAY_VARIANTS, toDevanagari } from '../../constants/theme';
 import { useTheme } from '../../theme';
 
 /** Font for a weight: the display face on hero/display/h1 (when it has that weight), else Plus Jakarta. */
@@ -54,6 +55,9 @@ const TEXT_KEYS = {
     brand: 'brandText',
     accent: 'brandText',
     success: 'success',
+    // Savings green TEXT that also sits on the green tint (chips, badges): light #0A6B1A (6.0:1 on
+    // #E8F5EA, 6.9:1 on white; #0C831F is only 4.4:1 on the tint), dark #4CC26A (6.0:1 on the tint).
+    successInk: 'successInk',
     error: 'errorInk',
     warning: 'warning',
     info: 'info',
@@ -84,6 +88,7 @@ export const TEXT_COLORS = {
     brand: colors.brand,
     accent: colors.accent,
     success: colors.success,
+    successInk: colors.successInk,
     error: colors.errorInk,
     warning: colors.warning,
     info: colors.info,
@@ -92,6 +97,26 @@ export const TEXT_COLORS = {
     goldInk: colors.goldInk,
     savings: colors.success,
 };
+
+const NATIVE = Platform.OS !== 'web';
+const identity = (style) => style;
+
+/**
+ * Native + Hindi: returns a function that swaps a style's brand fontFamily for the Noto Devanagari
+ * family of the same weight (web needs nothing: its font tokens are already CSS stacks with Noto as
+ * the Devanagari fallback, see constants/theme devanagariFamily). Use it for text that doesn't go
+ * through <Text>: button labels, TextInputs.
+ *   const script = useScriptFamily();  <TextInput style={script([styles.input, type.body])} />
+ */
+export function useScriptFamily() {
+    const hindi = useSelector((s) => (s.language?.currentLanguage || s.auth?.language) === 'hi');
+    if (!NATIVE || !hindi) return identity;
+    return (style) => {
+        const fam = StyleSheet.flatten(style)?.fontFamily;
+        const next = fam && toDevanagari(fam);
+        return next && next !== fam ? [style, { fontFamily: next }] : style;
+    };
+}
 
 export function Text({
     variant = 'body',
@@ -107,17 +132,18 @@ export function Text({
 }) {
     const v = type[variant] || type.body;
     const { colors: palette } = useTheme();
+    const script = useScriptFamily();
     return (
         <RNText
             maxFontSizeMultiplier={maxFontSizeMultiplier}
-            style={[
+            style={script([
                 v,
                 { color: resolveTextColor(color, palette) },
                 weight && fontFamily[weight] && { fontFamily: familyFor(variant, weight) },
                 align && { textAlign: align },
                 tabular && { fontVariant: ['tabular-nums'] },
                 style,
-            ]}
+            ])}
             {...rest}
         >
             {children}
@@ -132,7 +158,8 @@ export function Text({
 export function Em({ color, weight = 'extrabold', display = false, style, children }) {
     const family = (display && displayFamily[weight]) || fontFamily[weight];
     const { colors: palette } = useTheme();
-    return <RNText style={[{ fontFamily: family }, color && { color: resolveTextColor(color, palette) }, style]}>{children}</RNText>;
+    const script = useScriptFamily();
+    return <RNText style={script([{ fontFamily: family }, color && { color: resolveTextColor(color, palette) }, style])}>{children}</RNText>;
 }
 
 /**

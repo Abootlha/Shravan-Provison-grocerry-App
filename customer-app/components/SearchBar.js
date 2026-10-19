@@ -12,9 +12,11 @@
  * Props
  *   onPress        open search (read-only mode, also fired by the mic) — called with `fromRect`
  *   onChangeText / value / placeholder / editable / autoFocus   interactive mode
- *   showVoice      mic affordance on the right (default true)
+ *   showVoice      mic affordance on the right (default false: there is no voice search yet, and a mic
+ *                  that only opens the text field would be a dead control)
  *   showCamera     camera affordance (default false)
- *   suggestions    words cycled in the hint (default: staples)
+ *   suggestions    words cycled in the hint (default: real in-stock product names from the catalogue,
+ *                  best sellers first; one change per visit)
  *   style
  */
 import React, { memo, useCallback, useRef, useState } from 'react';
@@ -25,9 +27,7 @@ import { radii, space, type, HIT } from '../constants/theme';
 import { makeStyles, useTheme } from '../theme';
 import { press } from '../theme/motion';
 import { useTranslation } from '../hooks/useTranslation';
-
-const DEFAULT_SUGGESTIONS = ['milk', 'atta', 'chips', 'paneer', 'bread', 'eggs', 'cold drinks', 'tomato'];
-const DEFAULT_SUGGESTIONS_HI = ['दूध', 'आटा', 'चिप्स', 'पनीर', 'ब्रेड', 'अंडे', 'कोल्ड ड्रिंक', 'टमाटर'];
+import useSearchCatalog, { noteHintIndex, takeHintStart } from '../screens/search/useSearchCatalog';
 
 const SearchBar = ({
     onPress,
@@ -36,7 +36,7 @@ const SearchBar = ({
     placeholder,
     editable = false,
     autoFocus = false,
-    showVoice = true,
+    showVoice = false,
     showCamera = false,
     suggestions,
     style,
@@ -70,8 +70,17 @@ const SearchBar = ({
         });
     }, [onPress]);
     const isInteractive = editable || !!onChangeText;
-    const words = suggestions || (isHi ? DEFAULT_SUGGESTIONS_HI : DEFAULT_SUGGESTIONS);
+    const catalog = useSearchCatalog({ isHi });
+    const words = suggestions || catalog.names.slice(0, 12);
+    const [hintStart] = useState(takeHintStart);
     const prefix = isHi ? 'खोजें ' : 'Search for ';
+    const hint = words.length ? (
+        <RotatingPlaceholder key={words.length} items={words} prefix={prefix} startIndex={hintStart} maxChanges={1} onIndex={noteHintIndex} />
+    ) : (
+        <Text variant="body" color="muted" numberOfLines={1}>
+            {t('searchPlaceholder')}
+        </Text>
+    );
 
     const trailing = (
         <View style={styles.trailing}>
@@ -123,8 +132,8 @@ const SearchBar = ({
                         keyboardAppearance={isDark ? 'dark' : 'light'}
                         accessibilityLabel={placeholder || t('searchPlaceholder')}
                     />
-                    {!value && !placeholder ? (
-                        <RotatingPlaceholder items={words} prefix={prefix} paused={focused} style={[styles.overlay, { pointerEvents: 'none' }]} />
+                    {!value && !placeholder && words.length ? (
+                        <RotatingPlaceholder key={words.length} items={words} prefix={prefix} paused={focused} startIndex={hintStart} maxChanges={1} onIndex={noteHintIndex} style={[styles.overlay, { pointerEvents: 'none' }]} />
                     ) : null}
                 </View>
                 {trailing}
@@ -148,7 +157,7 @@ const SearchBar = ({
                             {placeholder}
                         </Text>
                     ) : (
-                        <RotatingPlaceholder items={words} prefix={prefix} />
+                        hint
                     )}
                 </View>
             </PressableScale>

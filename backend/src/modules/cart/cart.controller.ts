@@ -8,6 +8,7 @@ import {
   Param,
   UseGuards,
   Request,
+  Query,
 } from '@nestjs/common';
 import { CartService } from './cart.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -29,6 +30,7 @@ export class CartController {
       req.user.userId,
       body.productId,
       body.quantity || 1,
+      body.variantSku,
     );
   }
 
@@ -38,6 +40,7 @@ export class CartController {
       req.user.userId,
       body.productId,
       body.quantity,
+      body.variantSku,
     );
   }
 
@@ -45,8 +48,13 @@ export class CartController {
   async removeFromCart(
     @Request() req: any,
     @Param('productId') productId: string,
+    @Query('variantSku') variantSku?: string,
   ) {
-    return this.cartService.removeFromCart(req.user.userId, productId);
+    return this.cartService.removeFromCart(
+      req.user.userId,
+      productId,
+      typeof variantSku === 'string' ? variantSku.slice(0, 100) : undefined,
+    );
   }
 
   @Delete('clear')

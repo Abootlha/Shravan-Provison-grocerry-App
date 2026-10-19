@@ -31,6 +31,7 @@ import Animated, {
     withTiming,
 } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useTranslation } from '../../hooks/useTranslation';
 import { IconButton, Text, PressableScale, PriceTag, RollingNumber, haptic, useCartTarget, useCollapsibleHeader } from '../ui';
 import { radii, space, z } from '../../constants/theme';
 import { useTheme, makeStyles } from '../../theme';
@@ -42,6 +43,7 @@ const LEFT_SLOT = 132;
 const ENTER_DELAY = 120; // ms: let the hero flight lead, then the footer arrives
 
 export const PdpHeader = memo(function PdpHeader({ scrollY, fadeStart, fadeEnd, topInset, title, wishlisted, onBack, onShare, onWishlist }) {
+    const { isHi } = useTranslation();
     const styles = useStyles();
     const { colors } = useTheme();
     // The collapsible-header curves, started where the hero begins to leave instead of at 0.
@@ -56,24 +58,32 @@ export const PdpHeader = memo(function PdpHeader({ scrollY, fadeStart, fadeEnd, 
         <View style={[styles.header, { paddingTop: topInset + space.sm }, { pointerEvents: 'box-none' }]}>
             <Animated.View style={[StyleSheet.absoluteFill, styles.headerBg, collapse.barStyle, { pointerEvents: 'none' }]} />
             <Animated.View style={[styles.hairline, collapse.hairlineStyle, { pointerEvents: 'none' }]} />
-            <IconButton name="arrow-left" variant="glass" onPress={onBack} accessibilityLabel="Go back" />
+            <IconButton name="arrow-left" variant="glass" onPress={onBack} accessibilityLabel={isHi ? 'वापस जाएँ' : 'Go back'} />
             <Animated.View style={[styles.titleWrap, collapse.compactTitleStyle, { pointerEvents: 'none' }]}>
                 <Text variant="title" numberOfLines={1}>
                     {title}
                 </Text>
             </Animated.View>
             <View style={styles.right}>
-                <IconButton name="share-variant-outline" variant="glass" onPress={onShare} accessibilityLabel={`Share ${title}`} />
+                <IconButton name="share-variant-outline" variant="glass" onPress={onShare} accessibilityLabel={isHi ? `${title} शेयर करें` : `Share ${title}`} />
                 <View>
                     <HeartBurst ref={burst} size={34} />
                     <IconButton
                         name={wishlisted ? 'heart' : 'heart-outline'}
                         variant="glass"
                         active={wishlisted}
-                        activeColor={colors.error}
+                        activeColor={colors.errorInk}
                         haptic={wishlisted ? 'light' : 'medium'}
                         onPress={heart}
-                        accessibilityLabel={wishlisted ? `Remove ${title} from wishlist` : `Add ${title} to wishlist`}
+                        accessibilityLabel={
+                            isHi
+                                ? wishlisted
+                                    ? `${title} विशलिस्ट से हटाएँ`
+                                    : `${title} विशलिस्ट में जोड़ें`
+                                : wishlisted
+                                  ? `Remove ${title} from wishlist`
+                                  : `Add ${title} to wishlist`
+                        }
                     />
                 </View>
             </View>
@@ -108,15 +118,22 @@ const WEB = Platform.OS === 'web';
 const SLOT_IN = WEB ? FadeIn.duration(durations.fast) : slotIn;
 const SLOT_OUT = WEB ? FadeOut.duration(durations.instant) : slotOut;
 
-function Stepper({ quantity, productName, onIncrement, onDecrement }) {
+function Stepper({ quantity, productName, onIncrement, onDecrement, max, onMaxReached }) {
+    const { isHi } = useTranslation();
     const styles = useStyles();
     const { colors } = useTheme();
+    const atMax = max != null && quantity >= max;
     const dec = () => {
-        haptic.light();
+        haptic.selection();
         onDecrement?.();
     };
     const inc = () => {
-        haptic.light();
+        if (atMax) {
+            haptic.warning();
+            onMaxReached?.();
+            return;
+        }
+        haptic.selection();
         onIncrement?.();
     };
     return (
@@ -124,15 +141,29 @@ function Stepper({ quantity, productName, onIncrement, onDecrement }) {
             style={styles.stepper}
             accessible
             accessibilityRole="adjustable"
-            accessibilityLabel={`${productName}, ${quantity} in cart`}
+            accessibilityLabel={isHi ? `${productName}, कार्ट में ${quantity}` : `${productName}, ${quantity} in cart`}
             accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
             onAccessibilityAction={(e) => (e.nativeEvent.actionName === 'increment' ? inc() : dec())}
         >
-            <PressableScale onPress={dec} scaleTo={press.deep} style={styles.stepBtn} accessibilityLabel={`Remove one ${productName}`}>
+            <PressableScale onPress={dec} scaleTo={press.deep} style={styles.stepBtn} accessibilityLabel={isHi ? `एक ${productName} हटाएँ` : `Remove one ${productName}`}>
                 <MaterialCommunityIcons name={quantity === 1 ? 'trash-can-outline' : 'minus'} size={20} color={colors.brandStrong} />
             </PressableScale>
             <RollingNumber value={quantity} variant="priceLarge" color={colors.brandStrong} />
-            <PressableScale onPress={inc} scaleTo={press.deep} style={styles.stepBtn} accessibilityLabel={`Add one more ${productName}`}>
+            <PressableScale
+                onPress={inc}
+                scaleTo={press.deep}
+                style={[styles.stepBtn, atMax && styles.stepOff]}
+                accessibilityLabel={
+                    isHi
+                        ? atMax
+                            ? `${productName}: स्टॉक की सीमा पूरी`
+                            : `एक और ${productName} जोड़ें`
+                        : atMax
+                          ? `Stock limit reached for ${productName}`
+                          : `Add one more ${productName}`
+                }
+                accessibilityState={{ disabled: atMax }}
+            >
                 <MaterialCommunityIcons name="plus" size={20} color={colors.brandStrong} />
             </PressableScale>
         </View>
@@ -151,6 +182,10 @@ export const PdpBottomBar = memo(function PdpBottomBar({
     onIncrement,
     onDecrement,
     onViewCart,
+    max,
+    onMaxReached,
+    watching = false,
+    onNotify,
 }) {
     const styles = useStyles();
     const { colors } = useTheme();
@@ -167,9 +202,9 @@ export const PdpBottomBar = memo(function PdpBottomBar({
         transform: [{ translateY: reduce ? 0 : (1 - enter.value) * 120 }],
     }));
     const inCart = quantity > 0;
-    const mode = !inStock ? 'oos' : inCart ? 'cart' : 'add';
+    const mode = !inStock ? (onNotify ? 'notify' : 'oos') : inCart ? 'cart' : 'add';
     const ctaRef = useRef(null);
-    const bump = useCartTarget(ctaRef, { priority: 1, enabled: inStock });
+    const bump = useCartTarget(ctaRef, { priority: 1, enabled: inStock, peak: 1.04 });
     const add = () => {
         haptic.light();
         onAdd?.();
@@ -178,6 +213,11 @@ export const PdpBottomBar = memo(function PdpBottomBar({
     let ctaLabel;
     let ctaAction;
     if (mode === 'oos') ctaLabel = isHi ? 'स्टॉक में नहीं' : 'Out of stock';
+    else if (mode === 'notify') {
+        // kept on this phone (services/restockWatch): Home shows it under "Back in stock"
+        ctaLabel = watching ? (isHi ? 'सूचित होगा · हटाएँ' : 'Notified · tap to stop') : isHi ? 'वापस आने पर बताएँ' : 'Notify me when back';
+        ctaAction = onNotify;
+    }
     else if (mode === 'add') {
         ctaLabel = isHi ? 'कार्ट में जोड़ें' : 'Add to cart';
         ctaAction = add;
@@ -191,13 +231,13 @@ export const PdpBottomBar = memo(function PdpBottomBar({
             <View style={styles.left}>
                 {mode === 'cart' ? (
                     <Animated.View key="stepper" entering={SLOT_IN} exiting={SLOT_OUT}>
-                        <Stepper quantity={quantity} productName={productName} onIncrement={onIncrement} onDecrement={onDecrement} />
+                        <Stepper quantity={quantity} productName={productName} onIncrement={onIncrement} onDecrement={onDecrement} max={max} onMaxReached={onMaxReached} />
                     </Animated.View>
                 ) : (
                     <Animated.View key="price" entering={SLOT_IN} exiting={SLOT_OUT}>
-                        <PriceTag price={price} mrp={mrp} size="md" layout="row" />
-                        <Text variant="caption" color="muted" numberOfLines={1}>
-                            {isHi ? 'सभी कर शामिल' : 'Incl. of all taxes'}
+                        <PriceTag price={price} mrp={inStock ? mrp : null} size="md" layout="row" color={inStock ? 'strong' : 'secondary'} />
+                        <Text variant="caption" color={inStock ? 'muted' : 'error'} numberOfLines={1}>
+                            {inStock ? (isHi ? 'सभी कर शामिल' : 'Incl. of all taxes') : isHi ? 'अभी स्टॉक में नहीं' : 'Out of stock'}
                         </Text>
                     </Animated.View>
                 )}
@@ -209,13 +249,16 @@ export const PdpBottomBar = memo(function PdpBottomBar({
                 disabledOpacity={1}
                 haptic={mode === 'cart' ? 'light' : undefined}
                 scaleTo={press.scale}
-                style={[styles.cta, mode === 'oos' ? styles.ctaOff : styles.ctaOn]}
+                style={[styles.cta, mode === 'oos' ? styles.ctaOff : mode === 'notify' && watching ? styles.ctaWatching : styles.ctaOn]}
                 accessibilityRole="button"
-                accessibilityLabel={mode === 'add' ? `Add ${productName} to cart` : ctaLabel}
+                accessibilityLabel={mode === 'add' ? (isHi ? `${productName} कार्ट में जोड़ें` : `Add ${productName} to cart`) : ctaLabel}
             >
                 <Animated.View key={mode} entering={SLOT_IN} exiting={SLOT_OUT} style={styles.ctaInner}>
                     {mode === 'add' ? <MaterialCommunityIcons name="shopping-outline" size={20} color={colors.onBrand} /> : null}
-                    <Text variant="button" color={mode === 'oos' ? 'muted' : 'onBrand'} numberOfLines={1}>
+                    {mode === 'notify' ? (
+                        <MaterialCommunityIcons name={watching ? 'bell-check-outline' : 'bell-outline'} size={20} color={watching ? colors.brandStrong : colors.onBrand} />
+                    ) : null}
+                    <Text variant="button" color={mode === 'oos' ? 'muted' : mode === 'notify' && watching ? colors.brandStrong : 'onBrand'} numberOfLines={1}>
                         {ctaLabel}
                     </Text>
                     {mode === 'cart' ? (
@@ -295,6 +338,8 @@ const useStyles = makeStyles((t) => ({
     },
     ctaOn: {},
     ctaOff: { backgroundColor: t.colors.surfaceSunken },
+    ctaWatching: { backgroundColor: t.colors.brandTint },
+    stepOff: { opacity: 0.4 },
     ctaInner: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
     ctaDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: t.colors.onBrand, opacity: 0.6 },
 }));

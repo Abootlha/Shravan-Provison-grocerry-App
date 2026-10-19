@@ -5,6 +5,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { useSelector } from 'react-redux';
 import { IconButton } from './ui';
 import { radii, space } from '../constants/theme';
 import { makeStyles, useTheme } from '../theme';
@@ -39,6 +40,7 @@ const MapComponent = ({
     title,
     hint,
 }) => {
+    const hi = useSelector((s) => (s.language?.currentLanguage || s.auth?.language) === 'hi');
     const styles = useStyles();
     const { colors, isDark } = useTheme();
     const center = selectedLocation || region || DEFAULT_CENTER;
@@ -86,7 +88,7 @@ const MapComponent = ({
                 onPress={handlePress}
                 style={StyleSheet.absoluteFill}
                 accessibilityRole="button"
-                accessibilityLabel="Map. Tap to move the delivery pin"
+                accessibilityLabel={hi ? 'नक्शा. डिलीवरी पिन खिसकाने के लिए टैप करें' : 'Map. Tap to move the delivery pin'}
             />
 
             <View style={[styles.pinLayer, { pointerEvents: 'none' }]}>
@@ -104,7 +106,7 @@ const MapComponent = ({
                         variant="floating"
                         size="lg"
                         color={colors.brandText}
-                        accessibilityLabel="Use current location"
+                        accessibilityLabel={hi ? 'मौजूदा स्थान इस्तेमाल करें' : 'Use current location'}
                         onPress={onCurrentLocationPress}
                     />
                 )}

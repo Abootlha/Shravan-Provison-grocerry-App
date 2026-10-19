@@ -18,7 +18,7 @@
  * Theme: everything from useTheme(); the basemap follows the scheme (see OrderTrackingMap*).
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, Linking, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { BackHandler, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import Animated, { interpolate, useAnimatedStyle, useReducedMotion, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
@@ -26,7 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radii, space } from '../constants/theme';
 import { makeStyles, useTheme } from '../theme';
 import { springs, durations, easings } from '../theme/motion';
-import { AnimatedScreen, ContentSwap, EmptyState, IconButton, Screen, Text, haptic, toast } from '../components/ui';
+import { AnimatedScreen, ContentSwap, EmptyState, IconButton, Screen, Text, haptic } from '../components/ui';
 import { describeError, friendlyError, UnexpectedResponseError } from '../services/normalize';
 import { OrderService, SettingsService } from '../services';
 import socketService from '../services/socketService';
@@ -36,7 +36,9 @@ import { EtaHead, MapChrome, TrackingBar } from './tracking/TrackingHeader';
 import DeliveryStepper from './tracking/DeliveryStepper';
 import { TrackingSkeleton } from './tracking/TrackingStates';
 import { getHeaderCopy } from './tracking/trackingCopy';
-import { getEtaMinutes, getRider, shortOrderCode } from './orders/orderUtils';
+import { getRider, shortOrderCode } from './orders/orderUtils';
+import { useDeliveryEta } from './tracking/useDeliveryEta';
+import { contactStore, useStoreContact } from './tracking/storeContact';
 import { useTranslation } from '../hooks/useTranslation';
 import {
     fetchRoute,
@@ -237,12 +239,30 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
         }
     }, [riderLocation?.latitude, riderLocation?.longitude, routeCoordinates, currentOrder?.orderStatus, activeLeg, storeLocation?.latitude, storeLocation?.longitude, currentOrder?.deliveryAddress?.coordinates?.coordinates?.[0], currentOrder?.deliveryAddress?.coordinates?.coordinates?.[1]]);
 
+    // Heading: the device compass/GPS course when the rider app sends it, otherwise the bearing
+    // between fixes. A rider standing still keeps the last heading instead of snapping north.
     useEffect(() => {
-        if (riderLocation && previousRiderLocation) {
-            const bearing = calculateBearing(previousRiderLocation, riderLocation);
-            dispatch(setRiderHeading(bearing));
+        if (!riderLocation) return;
+        if (Number.isFinite(riderLocation.heading)) {
+            dispatch(setRiderHeading(riderLocation.heading));
+            return;
         }
+        if (!previousRiderLocation) return;
+        const moved = Math.abs(riderLocation.latitude - previousRiderLocation.latitude)
+            + Math.abs(riderLocation.longitude - previousRiderLocation.longitude);
+        if (moved < 0.00003) return; // ~3 m: GPS jitter, not movement
+        dispatch(setRiderHeading(calculateBearing(previousRiderLocation, riderLocation)));
     }, [riderLocation]);
+
+    // Re-render every 10 s while the order is live so "location delayed" / "On time" stay honest
+    // even when no socket event arrives.
+    const [, setClock] = useState(0);
+    const isLiveOrder = Boolean(currentOrder) && !['DELIVERED', 'CANCELLED'].includes(String(currentOrder?.orderStatus || '').toUpperCase());
+    useEffect(() => {
+        if (!isLiveOrder) return undefined;
+        const id = setInterval(() => setClock((n) => n + 1), 10000);
+        return () => clearInterval(id);
+    }, [isLiveOrder]);
 
     useEffect(() => {
         const fetchStoreLocation = async () => {
@@ -386,15 +406,17 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
         }
     }, [liveStatus]);
 
+    // Headline minutes: from the server's delivery time only, never counting up without a reason.
+    const eta = useDeliveryEta(currentOrder, liveStatus, isHi);
+
+    // Help: call the store (contactPhone), else email it (contactEmail) — both from /settings/store.
+    const storeContact = useStoreContact();
     const onHelp = useCallback(() => {
-        if (storePhone) {
-            Linking.openURL(`tel:${storePhone}`);
-        } else {
-            toast.info(isHi ? 'सहायता जल्द उपलब्ध होगी' : 'Support will be available shortly', {
-                description: isHi ? 'कृपया थोड़ी देर बाद प्रयास करें।' : 'Please try again in a little while.',
-            });
-        }
-    }, [storePhone, isHi]);
+        contactStore(
+            { phone: storePhone || storeContact.phone, email: storeContact.email },
+            { orderCode: currentOrder ? shortOrderCode(currentOrder) : '', isHi },
+        );
+    }, [storePhone, storeContact.phone, storeContact.email, currentOrder, isHi]);
 
     if (loadError && !currentOrder) {
         return (
@@ -435,7 +457,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
     const legNow = currentOrder?.tracking?.activeLeg || activeLeg;
     const rider = getRider(currentOrder);
     const copy = getHeaderCopy(status, isHi, { activeLeg: legNow, riderName: rider?.name });
-    const etaMinutes = getEtaMinutes({ order: currentOrder, durationRemaining, routeInfo });
+    const { minutes: etaMinutes, delayNote } = eta;
     const canonicalId = currentOrder?._id || currentOrder?.id || orderId;
     const orderCode = shortOrderCode(currentOrder);
     const terminal = ['DELIVERED', 'CANCELLED'].includes(status);
@@ -444,9 +466,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
     // rider's location isn't stale. Without a promised time we only claim it while live.
     const lastFix = currentOrder?.tracking?.lastLocationUpdateAt || riderLocation?.timestamp || null;
     const stale = lastFix != null && Date.now() - new Date(lastFix).getTime() > 30000;
-    const promised = currentOrder?.estimatedDeliveryTime ? new Date(currentOrder.estimatedDeliveryTime).getTime() : NaN;
-    const onTime = Boolean(copy?.eta) && Number.isFinite(etaMinutes) && !stale
-        && (!Number.isFinite(promised) || Date.now() + etaMinutes * 60000 <= promised + 120000);
+    const onTime = Boolean(copy?.eta) && Number.isFinite(etaMinutes) && !stale && !delayNote;
 
     const viewportPadding = expanded
         ? { top: chromeH, bottom: radii.xl + 56 }
@@ -457,7 +477,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
             {!terminal ? (
                 <View style={[styles.headPanel, showMap ? styles.headPanelSheet : styles.headPanelFlat]}>
                     {showMap ? <View style={styles.handle} /> : null}
-                    <EtaHead copy={copy} stateKey={status} etaMinutes={etaMinutes} onTime={onTime} isHi={isHi} />
+                    <EtaHead copy={copy} stateKey={status} etaMinutes={etaMinutes} onTime={onTime} delayNote={delayNote} isHi={isHi} />
                     <View style={styles.stepper}>
                         <DeliveryStepper status={status} isHi={isHi} />
                     </View>

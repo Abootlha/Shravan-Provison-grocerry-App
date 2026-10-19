@@ -10,18 +10,32 @@ import {
   WsException,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger, UseGuards, Inject, forwardRef } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { createAdapter } from '@socket.io/redis-adapter';
-import Redis from 'ioredis';
-import { redisConnectionOptions } from '../config/redis-options';
+import {
+  Logger,
+  UseGuards,
+  Inject,
+  forwardRef,
+  HttpException,
+} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { WsJwtGuard } from '../modules/auth/guards/ws-jwt.guard';
-import { Order, OrderStatus } from '../modules/orders/schemas/order.schema';
 import { OrdersService } from '../modules/orders/orders.service';
 import { RidersService } from '../modules/riders/riders.service';
-import { isStaffRole } from '../modules/users/schemas/user.schema';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { isStaffRole, UserRole } from '../modules/users/schemas/user.schema';
+import { RedisService } from '../common/utils/redis.service';
+import {
+  SocketAuthError,
+  SocketUser,
+  extractSocketToken,
+  rejectSocket,
+  verifySocketToken,
+} from './socket-auth';
+
+/** Why a rider lost an order (sent with `orderUnassigned`). */
+export type RiderUnassignReason = 'admin_unassigned' | 'rider_rejected';
+
+// setTimeout overflows above this (~24.8 days).
+const MAX_TIMER_MS = 2_147_483_647;
 
 interface LocationUpdatePayload {
   latitude: number;
@@ -68,33 +82,95 @@ export class TrackingGateway
     private ordersService: OrdersService,
     @Inject(forwardRef(() => RidersService))
     private ridersService: RidersService,
-    @InjectModel(Order.name) private orderModel: Model<Order>,
-    private configService: ConfigService,
+    private jwtService: JwtService,
+    private redisService: RedisService,
   ) {}
 
+  /**
+   * Authenticates every connection during the handshake. A rejected client
+   * gets `connect_error` with message 'unauthorized' and
+   * `data: { code, message }`. Rooms are shared across instances by
+   * RedisIoAdapter (see main.ts), not configured here.
+   */
   afterInit(server: Server): void {
-    const options = redisConnectionOptions(this.configService);
+    server.use((socket, next) => {
+      this.authenticate(socket).then(
+        () => next(),
+        (error: unknown) => next(this.toConnectError(error)),
+      );
+    });
+  }
 
-    try {
-      const pubClient = new Redis({ ...options, maxRetriesPerRequest: 3 });
-      const subClient = pubClient.duplicate();
-      server.adapter(createAdapter(pubClient, subClient));
-      this.logger.log(
-        `Socket.IO Redis adapter enabled for tracking gateway at ${options.host}:${options.port} (db ${options.db})`,
-      );
-    } catch (error) {
-      this.logger.warn(
-        `Socket.IO Redis adapter disabled: ${error instanceof Error ? error.message : String(error)}`,
-      );
+  private async authenticate(client: Socket): Promise<SocketUser> {
+    const user = await verifySocketToken(
+      this.jwtService,
+      this.redisService,
+      extractSocketToken(client),
+    );
+    client.data.user = user;
+    return user;
+  }
+
+  private toConnectError(error: unknown): Error {
+    if (error instanceof SocketAuthError) {
+      this.logger.warn(`Rejected socket handshake: ${error.code}`);
+      return Object.assign(new Error(error.message), {
+        data: error.toPayload(),
+      });
     }
+    this.logger.error(
+      `Socket handshake auth failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    // Not an auth problem (e.g. Redis down): do not make clients refresh.
+    return Object.assign(new Error('auth_unavailable'), {
+      data: { code: 'AUTH_UNAVAILABLE', message: 'Please retry shortly' },
+    });
   }
 
   /**
-   * Handle client connection
-   * Auto-join rider room if the connected user is a rider
+   * Runs after the handshake middleware. Riders are put in their own room
+   * right away so assignment/cancel events cannot be missed between
+   * connecting and emitting joinRiderRoom.
    */
-  handleConnection(client: Socket): void {
-    this.logger.log(`Client connected: ${client.id}`);
+  async handleConnection(client: Socket): Promise<void> {
+    let user = client.data?.user as SocketUser | undefined;
+    if (!user) {
+      // Middleware not installed (should not happen): authenticate here.
+      try {
+        user = await this.authenticate(client);
+      } catch (error) {
+        if (error instanceof SocketAuthError) {
+          rejectSocket(client, error);
+        } else {
+          client.disconnect(true);
+        }
+        return;
+      }
+    }
+
+    this.scheduleTokenExpiry(client, user);
+
+    if (user.role === (UserRole.RIDER as string)) {
+      await client.join(this.getRiderRoomName(user.userId));
+    }
+    this.logger.log(`Client connected: ${client.id} (${user.role})`);
+  }
+
+  /** Closes the socket when its access token expires, with auth_error. */
+  private scheduleTokenExpiry(client: Socket, user: SocketUser): void {
+    if (typeof user.exp !== 'number') return;
+    const ms = user.exp * 1000 - Date.now();
+    if (ms > MAX_TIMER_MS) return;
+    const timer = setTimeout(
+      () =>
+        rejectSocket(
+          client,
+          new SocketAuthError('TOKEN_EXPIRED', 'Access token expired'),
+        ),
+      Math.max(ms, 0),
+    );
+    timer.unref?.();
+    client.data.authExpiryTimer = timer;
   }
 
   /**
@@ -120,6 +196,10 @@ export class TrackingGateway
    * Handle client disconnection
    */
   handleDisconnect(client: Socket): void {
+    if (client.data?.authExpiryTimer) {
+      clearTimeout(client.data.authExpiryTimer);
+      client.data.authExpiryTimer = undefined;
+    }
     this.logger.log(`Client disconnected: ${client.id}`);
   }
 
@@ -311,73 +391,46 @@ export class TrackingGateway
       throw new WsException('Only riders can send location updates');
     }
 
-    // Validate coordinates
-    if (!payload.latitude || !payload.longitude) {
+    const latitude = Number(payload?.latitude);
+    const longitude = Number(payload?.longitude);
+    // 0 is a valid coordinate, so check for finiteness and range only.
+    if (
+      payload?.latitude == null ||
+      payload?.longitude == null ||
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      Math.abs(latitude) > 90 ||
+      Math.abs(longitude) > 180
+    ) {
       throw new WsException(
         'Invalid location data: latitude and longitude are required',
       );
     }
 
     try {
-      // Update rider location (includes throttling and validation)
-      await this.ridersService.updateLocation(user.userId, {
-        latitude: payload.latitude,
-        longitude: payload.longitude,
-        accuracy: payload.accuracy,
+      // Saves, throttles and broadcasts to every active order room.
+      const result = await this.ridersService.updateLocation(user.userId, {
+        latitude,
+        longitude,
+        accuracy: optionalNumber(payload.accuracy),
+        heading: optionalNumber(payload.heading),
+        speed: optionalNumber(payload.speed),
       });
 
-      // Find all active orders for this rider
-      const activeOrders = await this.orderModel
-        .find({
-          riderId: user.userId,
-          orderStatus: {
-            $in: [
-              OrderStatus.ASSIGNED,
-              OrderStatus.PACKED,
-              OrderStatus.PICKED_UP,
-              OrderStatus.OUT_FOR_DELIVERY,
-            ],
-          },
-        })
-        .select('_id')
-        .lean()
-        .exec();
-
-      // Broadcast location update to all order rooms
-      for (const order of activeOrders) {
-        const trackingOrder =
-          await this.ordersService.buildRealtimeOrderPayload(
-            order._id.toString(),
-          );
-        this.broadcastRiderLocationUpdate(
-          order._id.toString(),
-          {
-            latitude: payload.latitude,
-            longitude: payload.longitude,
-            heading: payload.heading,
-            speed: payload.speed,
-          },
-          user.userId,
-          trackingOrder,
-        );
-      }
-
-      // Send acknowledgment to rider
       client.emit('locationUpdateAck', {
         success: true,
+        throttled: result.throttled,
         timestamp: new Date(),
       });
-
-      this.logger.log(
-        `Location updated for rider ${user.userId}, broadcasted to ${activeOrders.length} orders`,
-      );
     } catch (error) {
-      this.logger.error(
+      this.logger.warn(
         `Location update failed for rider ${user.userId}: ${(error as Error).message}`,
       );
-      throw new WsException(
-        (error as Error).message || 'Failed to update location',
-      );
+      const message =
+        error instanceof HttpException
+          ? error.message
+          : 'Failed to update location';
+      throw new WsException(message);
     }
   }
 
@@ -400,8 +453,13 @@ export class TrackingGateway
     const currentRiderId =
       order.rider?.id || this.extractEntityId(order.riderId) || null;
     void this.evictUnassignedRiders(orderId, currentRiderId);
-    this.server.to(roomName).emit('orderStatusUpdate', payload);
-    this.server.to(roomName).emit('order.status', payload);
+    // The assigned rider gets it even when not in the order room; a socket
+    // in both rooms receives it once.
+    const rooms = currentRiderId
+      ? [roomName, this.getRiderRoomName(currentRiderId)]
+      : roomName;
+    this.server.to(rooms).emit('orderStatusUpdate', payload);
+    this.server.to(rooms).emit('order.status', payload);
     this.logger.log(
       `Broadcasted status update for order ${orderId}: ${order.orderStatus}`,
     );
@@ -446,7 +504,7 @@ export class TrackingGateway
         items: order.items || [],
         totalAmount: order.totalAmount,
         deliveryFee: order.deliveryFee || 0,
-        tip: 0,
+        tip: order.tip ?? 0,
       },
     };
     this.server.to(roomName).emit('newOrderAssignment', payload);
@@ -485,6 +543,75 @@ export class TrackingGateway
     this.logger.log(
       `Notified rider ${riderId} that order ${order.orderId} is packed`,
     );
+  }
+
+  /**
+   * Tells a rider that an order reserved for / assigned to them was
+   * cancelled, and removes their sockets from the order room.
+   */
+  notifyRiderOrderCancelled(
+    riderId: string,
+    order: { _id?: any; id?: any; orderId?: string },
+    reason?: string | null,
+  ): void {
+    const orderId = this.extractEntityId(order._id ?? order.id) ?? '';
+    const payload = {
+      orderId,
+      orderNumber: order.orderId ?? null,
+      status: 'CANCELLED',
+      reason: reason ?? null,
+      cancelledAt: new Date(),
+    };
+    this.emitToRider(riderId, ['orderCancelled', 'order.cancelled'], payload);
+    this.removeRiderFromOrderRoom(riderId, orderId);
+    this.logger.log(
+      `Notified rider ${riderId} that order ${orderId} was cancelled`,
+    );
+  }
+
+  /**
+   * Tells a rider they no longer have an order (admin unassign/reassign, or
+   * their own reject), and removes their sockets from the order room.
+   */
+  notifyRiderOrderUnassigned(
+    riderId: string,
+    order: { _id?: any; id?: any; orderId?: string },
+    reason: RiderUnassignReason,
+  ): void {
+    const orderId = this.extractEntityId(order._id ?? order.id) ?? '';
+    const payload = {
+      orderId,
+      orderNumber: order.orderId ?? null,
+      reason,
+      timestamp: new Date(),
+    };
+    this.emitToRider(riderId, ['orderUnassigned', 'order.unassigned'], payload);
+    this.removeRiderFromOrderRoom(riderId, orderId);
+    this.logger.log(
+      `Notified rider ${riderId} of unassignment from ${orderId} (${reason})`,
+    );
+  }
+
+  private emitToRider(riderId: string, events: string[], payload: unknown) {
+    if (!this.server) return;
+    const room = this.getRiderRoomName(riderId);
+    for (const event of events) {
+      this.server.to(room).emit(event, payload);
+    }
+  }
+
+  private removeRiderFromOrderRoom(riderId: string, orderId: string): void {
+    if (!orderId) return;
+    try {
+      // Works across instances when the Redis adapter is enabled.
+      this.server
+        ?.in(this.getRiderRoomName(riderId))
+        .socketsLeave(this.getOrderRoomName(orderId));
+    } catch (error) {
+      this.logger.warn(
+        `Failed to remove rider ${riderId} from order ${orderId}: ${(error as Error).message}`,
+      );
+    }
   }
 
   broadcastRiderLocationUpdate(
@@ -577,4 +704,11 @@ export class TrackingGateway
       `Broadcasted ETA update for order ${orderId}: ${durationMinutes} minutes`,
     );
   }
+}
+
+/** accuracy/heading/speed: iOS reports -1 when unknown, so negatives are dropped. */
+function optionalNumber(value: unknown): number | undefined {
+  if (value == null || value === '') return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
 }

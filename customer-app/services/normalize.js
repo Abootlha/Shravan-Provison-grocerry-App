@@ -142,6 +142,35 @@ export const normalizeProductPage = (body, what = 'GET /products') => {
     };
 };
 
+/** Fresh produce / dairy category, by `group` or name (mirrors backend isFreshCategory). */
+export const isFreshCategory = (category) => {
+    const text = `${category?.group || ''} ${category?.name || ''}`;
+    return /fruit|vegetable|\bveg|sabzi|produce|herb|dairy|\beggs?\b|bread|\bmilk\b/i.test(text) && !/\btea\b|coffee|biscuit|frozen/i.test(text);
+};
+
+/**
+ * GET /products/home body → `{ sections: [{ category, fresh, products, total }] }`: one shelf per
+ * category that has in-stock products, in category order. Shelves without a usable category or
+ * products are dropped.
+ */
+export const normalizeHomeFeed = (body, what = 'GET /products/home') => {
+    const sections = listFrom(body, 'sections', what)
+        .map((s) => {
+            const category = normalizeCategory(s?.category);
+            if (!category || !category.isActive) return null;
+            const products = normalizeProducts(Array.isArray(s.products) ? s.products : []);
+            if (!products.length) return null;
+            return {
+                category,
+                fresh: typeof s.fresh === 'boolean' ? s.fresh : isFreshCategory(category),
+                products,
+                total: Math.max(num(s.total) || 0, products.length),
+            };
+        })
+        .filter(Boolean);
+    return { sections };
+};
+
 /** Short human description of a failed request, for dev diagnostics. */
 export const describeError = (err) => {
     if (!err) return '';

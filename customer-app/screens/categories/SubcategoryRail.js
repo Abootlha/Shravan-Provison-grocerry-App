@@ -1,5 +1,5 @@
 /**
- * SubcategoryRail — the 76pt left rail of the category listing (Part C #7, Blinkit/Zepto).
+ * SubcategoryRail — the 80pt left rail of the category listing (Part C #7, Blinkit/Zepto).
  * A canvas column of 48pt thumbs on the neutral image well (photo, else the subcategory's 3D icon to identify it) with a
  * two-line label. The selected row lifts onto the surface with a 3pt violet bar on its left edge (the one state colour);
  * row + bar slide together on a spring.
@@ -15,8 +15,9 @@ import { makeStyles } from '../../theme';
 import { springs, durations, easings, press } from '../../theme/motion';
 import { imageOf, nameOf } from '../home/catalog';
 
-export const RAIL_WIDTH = 76;
-const ITEM_H = 96;
+export const RAIL_WIDTH = 80;
+// Room for a three-line label: "Paneer, Butter & Cheese" and the longer Hindi names never truncate.
+const ITEM_H = 108;
 const THUMB = 48;
 const BAR_H = 44;
 const BAR_W = 3;
@@ -56,7 +57,7 @@ const RailItem = memo(({ item, selected, language, onSelect }) => {
                 variant="caption"
                 color={selected ? 'ink' : 'secondary'}
                 align="center"
-                numberOfLines={2}
+                numberOfLines={3}
                 maxFontSizeMultiplier={1.2}
                 style={[styles.label, selected && styles.labelOn]}
             >

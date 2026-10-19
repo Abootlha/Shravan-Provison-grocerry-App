@@ -310,7 +310,7 @@ const PRODUCT_ROWS = [
 ];
 
 const describe = (name, brand, unit, catName) => (
-    `${name} by ${brand}. ${unit} pack, sourced fresh and delivered from our Gorakhpur dark store. Part of our ${catName} range.`
+    `${name} by ${brand}. ${unit} pack, sourced fresh and delivered from our Gorakhpur store. Part of our ${catName} range.`
 );
 
 const highlightsFor = (storage) => (
@@ -370,6 +370,17 @@ export const products = PRODUCT_ROWS.map((row, i) => {
         updatedAt: CREATED_AT,
     };
 });
+
+// One product with pack-size variants (ProductVariant in product.schema.ts), so the card's
+// "2 options" chooser and the PDP size chips have something real to render. The product's own
+// price / unit / stock mirror the default variant, as the schema's pre-save hook keeps them.
+const multiPack = products.find((p) => p.name === 'Aashirvaad Shudh Chakki Atta');
+if (multiPack) {
+    multiPack.variants = [
+        { sku: `${multiPack.sku}-5KG`, unit: '5 kg', mrp: 295, sellingPrice: 249, stock: 50, isDefault: true, isActive: true },
+        { sku: `${multiPack.sku}-10KG`, unit: '10 kg', mrp: 560, sellingPrice: 479, stock: 18, isDefault: false, isActive: true },
+    ];
+}
 
 // Not a backend endpoint (the Home banner carousel uses bundled assets);
 // exposed at GET /banners for screens that want remote banners.

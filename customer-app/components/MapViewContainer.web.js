@@ -5,6 +5,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
+import { useSelector } from 'react-redux';
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withSpring } from 'react-native-reanimated';
 import { springs } from '../theme/motion';
 import { useTheme } from '../theme';
@@ -26,6 +27,7 @@ const LNG_SPAN = 0.014;
 const LAT_SPAN = 0.008;
 
 export default function MapViewContainer({ latitude, longitude, addressText, onMapPress, storeLocation }) {
+    const hi = useSelector((s) => (s.language?.currentLanguage || s.auth?.language) === 'hi');
     const lat = latitude || 26.6926;
     const lng = longitude || 83.4687;
 
@@ -87,7 +89,7 @@ export default function MapViewContainer({ latitude, longitude, addressText, onM
                 style={StyleSheet.absoluteFill}
                 onPress={handlePress}
                 accessibilityRole="button"
-                accessibilityLabel="Map. Tap to move the delivery pin"
+                accessibilityLabel={hi ? 'नक्शा. डिलीवरी पिन खिसकाने के लिए टैप करें' : 'Map. Tap to move the delivery pin'}
             />
 
             {showStore ? (

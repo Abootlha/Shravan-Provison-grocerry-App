@@ -72,6 +72,34 @@ const listProducts = (q) => {
     };
 };
 
+// products.service findHome: one shelf per active category (sortOrder) with its top sellable,
+// in-stock products by soldCount then newest; empty categories are left out.
+const FRESH_CATEGORY = /fruit|vegetable|\bveg|sabzi|produce|herb|dairy|\beggs?\b|bread|\bmilk\b/i;
+const NOT_FRESH_CATEGORY = /\btea\b|coffee|biscuit|frozen/i;
+const homeFeed = (q) => {
+    const perCategory = Math.min(toInt(q.perCategory, 12), 20);
+    const inStock = (p) => p.stock > 0 || (p.variants || []).some((v) => v.stock > 0 && v.isActive !== false);
+    const sellable = products
+        .filter((p) => p.isAvailable && (p.status == null || p.status === 'active') && inStock(p))
+        .sort((a, b) => (b.soldCount || 0) - (a.soldCount || 0) || String(b.createdAt).localeCompare(String(a.createdAt)));
+    const sections = categories
+        .filter((c) => c.isActive)
+        .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+        .map((c) => {
+            const list = sellable.filter((p) => p.categoryId === c._id);
+            if (!list.length) return null;
+            const text = `${c.group || ''} ${c.name}`;
+            return {
+                category: publicCategory(c),
+                fresh: FRESH_CATEGORY.test(text) && !NOT_FRESH_CATEGORY.test(text),
+                products: list.slice(0, perCategory).map(populateProduct),
+                total: list.length,
+            };
+        })
+        .filter(Boolean);
+    return { sections, perCategory, total: sections.reduce((n, s) => n + s.total, 0) };
+};
+
 // ---------- orders ----------
 
 // products/schemas/product.schema.ts checkoutPriceOf + isProductSellable
@@ -98,6 +126,30 @@ const calculateBill = (itemTotal, fees) => {
     };
 };
 
+/**
+ * products/sellable-line.ts: a line sells the requested pack-size variant, else the product's
+ * default variant, else the product itself. Null when it can't be bought.
+ */
+const sellableLine = (p, variantSku) => {
+    if (!isSellable(p)) return null;
+    const active = (p.variants || []).filter((v) => v && v.isActive !== false && v.sku);
+    const all = p.variants || [];
+    const def = all.find((v) => v?.isDefault) || all[0];
+    let v = null;
+    if (variantSku) {
+        v = active.find((x) => x.sku === variantSku);
+        if (!v) return null;
+    } else if (active.length) {
+        v = active.find((x) => x.isDefault) || active[0];
+    }
+    if (v) {
+        if (!(v.sellingPrice > 0)) return null;
+        return { variantSku: v.sku, sku: v.sku, unit: v.unit, mrp: v.mrp || v.sellingPrice, price: v.sellingPrice, stock: Number(v.stock) || 0, mirrorsTopLevel: !!def && def.sku === v.sku };
+    }
+    const price = checkoutPriceOf(p);
+    return { sku: p.sku, unit: p.pack?.unit || p.unit, mrp: p.pricing?.mrp || p.originalPrice || price, price, stock: Number(p.stock) || 0, mirrorsTopLevel: false };
+};
+
 /** OrdersService.buildOrderLines: prices lines from the catalogue; 400 for refused / short lines. */
 const buildOrderLines = (items) => {
     if (!Array.isArray(items) || items.length === 0) return { error: fail(400, 'Cart is empty') };
@@ -105,12 +157,24 @@ const buildOrderLines = (items) => {
     let itemTotal = 0;
     for (const it of items) {
         const p = products.find((x) => x._id === it.productId);
-        if (!isSellable(p)) return { error: fail(400, `Product ${it.name || it.productId} is no longer available`) };
+        const line = p ? sellableLine(p, it.variantSku) : null;
+        if (!line) {
+            return { error: fail(400, it.variantSku && p ? `${p.name} (${it.variantSku}) is no longer available` : `Product ${it.name || it.productId} is no longer available`) };
+        }
         const quantity = Number(it.quantity) || 1;
-        if (typeof p.stock === 'number' && p.stock < quantity) return { error: fail(400, `Insufficient stock for ${p.name}`) };
-        const price = checkoutPriceOf(p);
-        lines.push({ productId: p._id, name: p.name, quantity, price, image: p.image });
-        itemTotal += price * quantity;
+        if (line.stock < quantity) return { error: fail(400, `Insufficient stock for ${p.name}${line.variantSku && line.unit ? ` ${line.unit}` : ''}`) };
+        lines.push({
+            productId: p._id,
+            name: p.name,
+            quantity,
+            price: line.price,
+            image: p.image,
+            sku: line.sku,
+            unit: line.unit,
+            mrp: line.mrp,
+            ...(line.variantSku ? { variantSku: line.variantSku, mirrorsTopLevel: line.mirrorsTopLevel } : {}),
+        });
+        itemTotal += line.price * quantity;
     }
     return { lines, itemTotal };
 };
@@ -146,10 +210,11 @@ const riderView = (location) => ({
 
 /** Order list item: riderId populated with 'name phone' (findByUserId). */
 export const listOrderView = (order) => {
-    tick(order);
+    const live = liveTracking(order); // ticks the order; same ETA as GET /orders/:id
     const base = stripMock(order);
     return {
         ...base,
+        estimatedDeliveryTime: live.estimatedDeliveryTime || order.estimatedDeliveryTime,
         riderId: order.riderId ? { _id: db.rider._id, name: db.rider.name, phone: db.rider.phone } : null,
     };
 };
@@ -226,7 +291,8 @@ const createOrder = (body) => {
         timeline: [{ status: 'PENDING', timestamp: new Date(now).toISOString(), changedBy: db.profile.id }],
         riderId: null,
         deliveryInstructions: body.instructions || body.deliveryInstructions || '',
-        estimatedDeliveryTime: new Date(now + 12 * 60000).toISOString(),
+        // Same promise Home and checkout show (settings.estimatedDeliveryMinutes).
+        estimatedDeliveryTime: new Date(now + (db.settings.estimatedDeliveryMinutes || 10) * 60000).toISOString(),
         deliveryOtp: String(1000 + Math.floor(Math.random() * 9000)),
         createdAt: new Date(now).toISOString(),
         updatedAt: new Date(now).toISOString(),
@@ -337,22 +403,52 @@ const profileView = () => ({
     email: db.profile.email,
     profilePicture: db.profile.profilePicture,
     role: 'customer',
-    addresses: db.addresses,
+    addresses: (ensureAddressIds(), db.addresses),
 });
 
-const addressIndex = (raw) => {
-    const i = parseInt(raw, 10);
-    return Number.isInteger(i) && i >= 0 && i < db.addresses.length ? i : -1;
+const newAddressId = () => `${KIND.address}${Date.now().toString(16).padStart(14, '0')}${Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0')}`;
+
+// Same as UsersService.ensureAddressIds: addresses saved before ids existed (older
+// localStorage data) get a stable _id once.
+const ensureAddressIds = () => {
+    let changed = false;
+    db.addresses.forEach((a) => {
+        if (!a._id) { a._id = newAddressId(); changed = true; }
+    });
+    if (changed) persist();
 };
+
+// :ref is the address _id (24-hex) or, for older app builds, the array index.
+const addressIndex = (raw) => {
+    ensureAddressIds();
+    const ref = String(raw || '');
+    if (/^[a-f\d]{24}$/i.test(ref)) return db.addresses.findIndex((a) => a._id === ref.toLowerCase());
+    if (!/^\d{1,4}$/.test(ref)) return -1;
+    const i = Number(ref);
+    return i < db.addresses.length ? i : -1;
+};
+
+const ADDRESS_FIELDS = ['type', 'address', 'city', 'pincode', 'isDefault', 'latitude', 'longitude'];
+const DETAIL_FIELDS = ['houseNo', 'floor', 'landmark', 'receiverName', 'receiverPhone'];
 
 const normalizeAddress = (body, prev = {}) => {
     const next = { ...prev };
-    ['type', 'address', 'city', 'pincode', 'isDefault', 'latitude', 'longitude'].forEach((k) => {
-        if (body?.[k] !== undefined) next[k] = body[k];
+    ADDRESS_FIELDS.forEach((k) => {
+        if (body?.[k] !== undefined && body?.[k] !== null) next[k] = body[k];
+    });
+    DETAIL_FIELDS.forEach((k) => {
+        const v = body?.[k];
+        if (v === undefined || v === null) return;
+        const text = String(v).trim();
+        if (text) next[k] = k === 'receiverPhone' ? text.replace(/^\+91/, '') : text;
+        else delete next[k];
     });
     if (next.isDefault) db.addresses.forEach((a) => { a.isDefault = false; });
     return next;
 };
+
+const invalidReceiverPhone = (body) => body?.receiverPhone
+    && !/^(\+91)?[6-9]\d{9}$/.test(String(body.receiverPhone).trim());
 
 // ---------- cart (CartService shape; the app keeps its cart in Redux) ----------
 
@@ -413,21 +509,43 @@ const routes = [
     }],
     ['POST', /^\/users\/addresses$/, ({ body }) => {
         if (!body?.address || !body?.city || !body?.pincode || !body?.type) return fail(400, 'type, address, city and pincode are required');
-        db.addresses.push(normalizeAddress(body, { isDefault: false }));
+        if (invalidReceiverPhone(body)) return fail(400, 'receiverPhone must be a 10-digit Indian mobile number');
+        ensureAddressIds();
+        // Same upsert as the backend: same type + address + city updates in place.
+        const same = (a) => String(a.address || '').toLowerCase().trim() === String(body.address).toLowerCase().trim()
+            && String(a.city || '').toLowerCase().trim() === String(body.city).toLowerCase().trim()
+            && a.type === body.type;
+        const makeDefault = !!body.isDefault || db.addresses.length === 0;
+        const at = db.addresses.findIndex(same);
+        if (at >= 0) db.addresses[at] = normalizeAddress(body, db.addresses[at]);
+        else db.addresses.push(normalizeAddress({ ...body, isDefault: false }, { _id: newAddressId(), isDefault: false }));
+        if (makeDefault) {
+            const target = at >= 0 ? at : db.addresses.length - 1;
+            db.addresses.forEach((a, i) => { a.isDefault = i === target; });
+        }
         persist();
         return ok({ addresses: db.addresses }, 201);
     }],
     ['PUT', /^\/users\/addresses\/([^/]+)$/, ({ params, body }) => {
         const i = addressIndex(params[0]);
-        if (i < 0) return fail(400, 'Invalid address index');
+        if (i < 0) return fail(404, 'Address not found');
+        if (invalidReceiverPhone(body)) return fail(400, 'receiverPhone must be a 10-digit Indian mobile number');
         db.addresses[i] = normalizeAddress(body, db.addresses[i]);
+        persist();
+        return ok({ addresses: db.addresses });
+    }],
+    ['PATCH', /^\/users\/addresses\/([^/]+)\/default$/, ({ params }) => {
+        const i = addressIndex(params[0]);
+        if (i < 0) return fail(404, 'Address not found');
+        db.addresses.forEach((a, k) => { a.isDefault = k === i; });
         persist();
         return ok({ addresses: db.addresses });
     }],
     ['DELETE', /^\/users\/addresses\/([^/]+)$/, ({ params }) => {
         const i = addressIndex(params[0]);
-        if (i < 0) return fail(400, 'Invalid address index');
+        if (i < 0) return fail(404, 'Address not found');
         db.addresses.splice(i, 1);
+        if (db.addresses.length && !db.addresses.some((a) => a.isDefault)) db.addresses[0].isDefault = true;
         persist();
         return ok({ addresses: db.addresses });
     }],
@@ -480,6 +598,7 @@ const routes = [
         return b ? ok({ brand: b }) : fail(404, 'Brand not found');
     }],
     ['GET', /^\/products$/, ({ query }) => ok(listProducts(query))],
+    ['GET', /^\/products\/home$/, ({ query }) => ok(homeFeed(query))],
     ['GET', /^\/products\/barcode\/([^/]+)$/, ({ params }) => {
         const p = products.find((x) => x.barcode === params[0]);
         return p ? ok({ product: populateProduct(p), source: 'database' }) : fail(404, 'Product not found');

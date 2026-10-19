@@ -87,6 +87,11 @@ function CheckoutItemRowBase({ item, index = 0, showDivider = false, refusedReas
                                 {item.unit ? `${item.unit} · ₹${formatINR(price)}` : `₹${formatINR(price)} each`}
                             </Text>
                         )}
+                        {!refusedReason && lineMrp ? (
+                            <Text variant="caption" color="success" numberOfLines={1}>
+                                {isHi ? `₹${formatINR(lineMrp - lineTotal)} की बचत` : `You save ₹${formatINR(lineMrp - lineTotal)}`}
+                            </Text>
+                        ) : null}
                     </View>
 
                     <View style={styles.side}>
@@ -94,6 +99,8 @@ function CheckoutItemRowBase({ item, index = 0, showDivider = false, refusedReas
                             size="sm"
                             quantity={item.quantity}
                             productName={name}
+                            // the line's own stock (a pack-size line carries its variant's stock)
+                            max={Number(item.stock) > 0 ? Number(item.stock) : undefined}
                             onAdd={onInc}
                             onIncrement={onInc}
                             onDecrement={onDec}

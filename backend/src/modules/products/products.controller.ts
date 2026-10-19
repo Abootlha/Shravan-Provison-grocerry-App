@@ -30,6 +30,8 @@ import { ProductStatus, productStatusOf } from './schemas/product.schema';
 const MAX_PAGE_SIZE = 100;
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_SEARCH_LENGTH = 100;
+const HOME_DEFAULT_PER_CATEGORY = 12;
+const HOME_MAX_PER_CATEGORY = 20;
 
 const parsePositiveInt = (value: string | undefined, fallback: number) => {
   const parsed = value ? parseInt(value, 10) : NaN;
@@ -68,6 +70,20 @@ export class ProductsController {
           ? search.slice(0, MAX_SEARCH_LENGTH)
           : undefined,
     });
+  }
+
+  /**
+   * Home feed: every active category (in sortOrder) that has sellable,
+   * in-stock products, each with its top `perCategory` products.
+   */
+  @Get('home')
+  async home(@Query('perCategory') perCategory?: string) {
+    return this.productsService.findHome(
+      Math.min(
+        parsePositiveInt(perCategory, HOME_DEFAULT_PER_CATEGORY),
+        HOME_MAX_PER_CATEGORY,
+      ),
+    );
   }
 
   @Get('barcode/:barcode')

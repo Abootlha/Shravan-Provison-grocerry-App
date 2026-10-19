@@ -5,8 +5,14 @@ export interface Coordinates {
 
 export interface Address {
   full: string;
-  coordinates: Coordinates;
+  /** null when the backend sent no usable coordinates. Never 0,0 as a placeholder. */
+  coordinates: Coordinates | null;
+  type?: string;
+  houseNo?: string;
+  floor?: string;
   landmark?: string;
+  city?: string;
+  pincode?: string;
 }
 
 export interface OrderItem {
@@ -14,17 +20,19 @@ export interface OrderItem {
   name: string;
   quantity: number;
   price: number;
-  notes?: string;
+  image?: string;
 }
 
 export type OrderStatus =
-  | 'confirmed'
-  | 'assigned'
-  | 'packed'
-  | 'picked_up'
-  | 'out_for_delivery'
-  | 'delivered'
-  | 'cancelled';
+  'confirmed' | 'assigned' | 'packed' | 'picked_up' | 'out_for_delivery' | 'delivered' | 'cancelled';
+
+export type PaymentMethod = 'COD' | 'UPI' | 'CARD' | 'NETBANKING' | 'WALLET';
+
+export interface TimelineEntry {
+  status: OrderStatus;
+  timestamp: string;
+  note?: string;
+}
 
 export interface Order {
   id: string;
@@ -39,35 +47,44 @@ export interface Order {
     address: Address;
     name: string;
     phone: string;
+    /** Person receiving the order when it is not the account holder. */
+    receiverName?: string;
+    receiverPhone?: string;
+    instructions?: string;
   };
   items: OrderItem[];
+  itemTotal?: number;
   totalAmount: number;
   deliveryFee: number;
-  tip?: number;
-  estimatedDistance?: number;
-  estimatedTime?: number;
-  createdAt: string;
+  packagingFee?: number;
+  discount?: number;
+  tip: number;
+  paymentMethod?: PaymentMethod;
+  paymentStatus?: string;
+  timeline: TimelineEntry[];
+  createdAt?: string;
   acceptedAt?: string;
+  packedAt?: string;
   pickedUpAt?: string;
+  outForDeliveryAt?: string;
   deliveredAt?: string;
+  cancelledAt?: string;
+  cancellationReason?: string;
+  estimatedDeliveryTime?: string;
+  /** Route for the active leg, computed by the backend (may be empty). */
+  routeCoordinates: Coordinates[];
+  activeLeg?: 'to_store' | 'to_customer' | null;
+  distanceRemainingMeters?: number;
+  durationMinutes?: number;
 }
 
-export interface AvailableOrder extends Order {
-  distance?: number;
-  expiresAt?: string;
-}
-
-export interface OrderStatusUpdate {
+/** Why an order left this rider's hands while a screen still showed it. */
+export interface EndedOrder {
   orderId: string;
-  status: OrderStatus;
-  timestamp: string;
-  location?: Coordinates;
-}
-
-export interface NewOrderAssignment {
-  order: AvailableOrder;
-  notification: {
-    title: string;
-    body: string;
-  };
+  orderNumber?: string;
+  kind: 'cancelled' | 'unassigned';
+  reason: string | null;
+  /** True when this rider caused it (rejected/released), so no alert is needed. */
+  self: boolean;
+  at: string;
 }

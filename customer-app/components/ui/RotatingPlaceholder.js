@@ -9,6 +9,11 @@
  *   quote      boolean — wrap item in quotes (default true)
  *   interval   ms between changes (default durations.rotate = 3000 — functional hint, kept calm)
  *   paused     boolean — stop cycling (e.g. while the input is focused)
+ *   maxChanges number — stop after this many timed changes (DESIGN.md: no endless loops). Default
+ *              Infinity for old call sites; search uses 1 (one change per visit).
+ *   startIndex number — first item shown (e.g. continue where the last visit stopped)
+ *   advanceKey any — each new value advances one item (a trigger, e.g. the field losing focus)
+ *   onIndex    (i) => void — reports the item on screen
  *   variant    Text variant (default 'body')
  *   color      Text colour token (default 'muted')
  *   style      container style
@@ -51,6 +56,10 @@ export function RotatingPlaceholder({
     quote = true,
     interval = durations.rotate,
     paused = false,
+    maxChanges = Infinity,
+    startIndex = 0,
+    advanceKey,
+    onIndex,
     variant = 'body',
     color = 'muted',
     style,
@@ -58,20 +67,40 @@ export function RotatingPlaceholder({
 }) {
     const reduce = useReducedMotion();
     const { colors: palette } = useTheme();
-    const [st, setSt] = useState({ i: 0, prev: null, v: 0 });
+    const [st, setSt] = useState(() => ({ i: items.length ? startIndex % items.length : 0, prev: null, v: 0 }));
+    const timed = React.useRef(0);
+    const step = () => setSt((s) => ({ i: (s.i + 1) % items.length, prev: s.i, v: s.v + 1 }));
 
     useEffect(() => {
-        if (paused || items.length < 2) return undefined;
+        if (paused || items.length < 2 || timed.current >= maxChanges) return undefined;
         const id = setInterval(() => {
-            setSt((s) => ({ i: (s.i + 1) % items.length, prev: s.i, v: s.v + 1 }));
+            timed.current += 1;
+            step();
+            if (timed.current >= maxChanges) clearInterval(id);
         }, interval);
         return () => clearInterval(id);
-    }, [paused, items.length, interval]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [paused, items.length, interval, maxChanges]);
+
+    const firstAdvance = React.useRef(true);
+    useEffect(() => {
+        if (firstAdvance.current) {
+            firstAdvance.current = false;
+            return;
+        }
+        if (items.length > 1) step();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [advanceKey]);
+
+    useEffect(() => {
+        onIndex && onIndex(st.i);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [st.i]);
 
     const base = type[variant] || type.body;
     const textStyle = [base, { color: resolveTextColor(color, palette) }];
     const h = base.lineHeight;
-    const fmt = (i) => (items[i] == null ? '' : quote ? `'${items[i]}'` : items[i]);
+    const fmt = (i) => (items[i] == null ? '' : quote ? `‘${items[i]}’` : items[i]);
 
     return (
         <View style={[styles.row, style]} accessibilityLabel={`${prefix}${fmt(st.i)}`} {...rest}>

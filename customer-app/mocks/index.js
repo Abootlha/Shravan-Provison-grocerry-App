@@ -53,6 +53,15 @@ const mockAdapter = async (config) => {
     await delay();
     const method = String(config.method || 'get').toUpperCase();
     const { path, query } = splitUrl(joinUrl(config.baseURL, config.url));
+    // Web preview of a slow or unreachable catalogue: open the app with ?mockProducts=slow|fail.
+    const productsMode = typeof window !== 'undefined' && (window.location?.search || '').match(/[?&]mockProducts=(slow|fail)(&|$)/)?.[1];
+    if (productsMode && method === 'GET' && path.endsWith('/products')) {
+        if (productsMode === 'slow') await new Promise((resolve) => setTimeout(resolve, 4000));
+        else {
+            log(method, path, 'network error');
+            throw new axios.AxiosError('Network Error', axios.AxiosError.ERR_NETWORK, config, { mock: true });
+        }
+    }
     const result = handle({
         method,
         path,

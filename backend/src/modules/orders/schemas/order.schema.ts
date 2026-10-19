@@ -19,7 +19,20 @@ export enum PaymentMethod {
   UPI = 'UPI',
   CARD = 'CARD',
   WALLET = 'WALLET',
+  /** Added later: older net-banking orders were recorded as CARD and stay so. */
+  NETBANKING = 'NETBANKING',
 }
+
+/**
+ * PayU payment category (`pg`) for each online method, used when the client doesn't name one.
+ * NETBANKING → 'NB' (PayU then asks for the bank on its hosted page).
+ */
+export const PAYU_PG_FOR_METHOD: Partial<Record<PaymentMethod, string>> = {
+  [PaymentMethod.UPI]: 'UPI',
+  [PaymentMethod.CARD]: 'CC',
+  [PaymentMethod.NETBANKING]: 'NB',
+  [PaymentMethod.WALLET]: 'CASH',
+};
 
 export enum PaymentStatus {
   PENDING = 'PENDING',
@@ -46,6 +59,24 @@ export class OrderItem {
 
   @Prop()
   image?: string;
+
+  /** Pack-size variant this line sold (absent for products without variants). */
+  @Prop()
+  variantSku?: string;
+
+  /** Snapshots at order time: SKU, pack label and MRP of what was sold. */
+  @Prop()
+  sku?: string;
+
+  @Prop()
+  unit?: string;
+
+  @Prop()
+  mrp?: number;
+
+  /** The variant was the product's default pack (its stock is mirrored on the product). */
+  @Prop()
+  mirrorsTopLevel?: boolean;
 }
 
 @Schema({ _id: false })
@@ -58,6 +89,17 @@ export class TimelineEntry {
 
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   changedBy!: Types.ObjectId;
+
+  /** Where the rider was when recording PICKED_UP / DELIVERED. */
+  @Prop({
+    type: { latitude: Number, longitude: Number, accuracy: Number },
+    _id: false,
+  })
+  location?: { latitude: number; longitude: number; accuracy?: number };
+
+  /** e.g. "rider_rejected: <reason>" when a rider hands the order back. */
+  @Prop()
+  note?: string;
 }
 
 export const TimelineEntrySchema = SchemaFactory.createForClass(TimelineEntry);

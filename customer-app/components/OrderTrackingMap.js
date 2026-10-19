@@ -10,8 +10,8 @@
  *   viewportPadding    { top, bottom } — px of the map hidden behind other UI; fitting keeps markers clear of it
  *   fitKey             any value; when it changes the camera re-fits all markers (map expanded/collapsed)
  *
- * The rider glides between socket fixes over the real update interval (constant motion, no
- * stop-and-go) and the marker rotates through the shortest angle. The camera only re-fits on
+ * The rider glides between socket fixes over the measured update interval (constant motion, no
+ * stop-and-go; capped at GLIDE_MAX_MS after signal gaps) and the marker rotates through the shortest angle. The camera only re-fits on
  * meaningful changes (status, first fix, expand/collapse), not on every animation frame.
  *
  * Theme: the basemap follows the scheme (OrderTrackingMapStyle — a custom JSON style on Android /
@@ -39,6 +39,11 @@ try {
 } catch (e) {
     mapsAvailable = false;
 }
+
+// Riders report every ~5 s; gliding over the measured gap keeps the marker moving instead of
+// stopping halfway. Longer gaps (signal loss) are capped so the marker never crawls.
+const GLIDE_MIN_MS = 500;
+const GLIDE_MAX_MS = 6000;
 
 const valid = (p) => p && Number.isFinite(p.latitude) && Number.isFinite(p.longitude) && (p.latitude !== 0 || p.longitude !== 0);
 
@@ -92,6 +97,7 @@ const OrderTrackingMap = ({
     const [rider, setRider] = useState(null);
     const riderRef = useRef(null);
     const lastFixAt = useRef(0);
+    const lastFixKey = useRef(null);
     const frame = useRef(null);
     const [heading, setHeading] = useState(Number.isFinite(riderHeading) ? riderHeading : 0);
 
@@ -105,8 +111,16 @@ const OrderTrackingMap = ({
         const target = routeCoordinates.length > 1 ? snapPointToRoute(riderLocation, routeCoordinates, 90).point : riderLocation;
         const from = riderRef.current;
         const now = Date.now();
-        const duration = Math.min(Math.max(now - lastFixAt.current, 500), 2500);
-        lastFixAt.current = now;
+        // A route refresh re-runs this effect without a new fix: keep the measured interval.
+        const fixKey = `${riderLocation.latitude},${riderLocation.longitude}`;
+        const isNewFix = fixKey !== lastFixKey.current;
+        const duration = isNewFix
+            ? Math.min(Math.max(now - lastFixAt.current, GLIDE_MIN_MS), GLIDE_MAX_MS)
+            : GLIDE_MIN_MS;
+        if (isNewFix) {
+            lastFixKey.current = fixKey;
+            lastFixAt.current = now;
+        }
         if (!from) {
             riderRef.current = target;
             setRider(target);

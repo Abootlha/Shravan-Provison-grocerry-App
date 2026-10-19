@@ -1,675 +1,365 @@
-import React, { useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Alert,
-  ActivityIndicator,
-  RefreshControl,
-  StatusBar,
-  Platform,
-  Linking,
-  AppState,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Alert, Linking, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { COLORS, SPACING } from '../utils/constants';
-import { OnlineToggle } from '../components/OnlineToggle';
-import { StatsCard } from '../components/StatsCard';
-import { OrderCard } from '../components/OrderCard';
+import { AppText, Banner, Card, IconButton, SectionTitle, Skeleton } from '../components/ui';
+import { ActiveOrderCard, OfferCard, OnlineToggle, StatTile } from '../components/order';
+import { RejectSheet } from '../components/RejectSheet';
 import { useAppDispatch, useAppSelector } from '../hooks/useAuth';
-import { useOrders } from '../hooks/useOrders';
-import { useLocation } from '../hooks/useLocation';
-import { logout, setUser } from '../store/slices/authSlice';
-import { riderApi } from '../services/api';
+import { useSocketState } from '../hooks/useSocketState';
+import { checkLocationPermission } from '../hooks/useRiderRuntime';
+import { clearAvailabilityError, refreshRider, setAvailability } from '../store/slices/authSlice';
+import {
+  acceptOffer,
+  dismissEnded,
+  dismissOffer,
+  fetchCurrentOrder,
+  fetchOffers,
+  rejectOrder,
+} from '../store/slices/orderSlice';
+import { fetchMetrics } from '../store/slices/metricsSlice';
 import { locationService } from '../services/location';
+import { radii, spacing, useTheme } from '../theme';
+import { formatMoney } from '../utils/format';
 import type { HomeScreenProps } from '../types/navigation';
-import type { Rider } from '../types/rider';
+import type { Order } from '../types/order';
 
-const ZEPTO_PURPLE = '#7C3AED';
-const ZEPTO_GREEN = '#10B981';
+const greeting = () => {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+};
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
+  const theme = useTheme();
+  const c = theme.colors;
+  const insets = useSafeAreaInsets();
   const dispatch = useAppDispatch();
-  const { user } = useAppSelector((state) => state.auth);
-  const { currentOrder, availableOrders, loadAvailableOrders, loadCurrentOrder } = useOrders();
+  const user = useAppSelector((s) => s.auth.user);
+  const availabilityPending = useAppSelector((s) => s.auth.availabilityPending);
+  const availabilityError = useAppSelector((s) => s.auth.availabilityError);
   const {
-    isTracking,
-    currentLocation,
-    startTracking,
-    stopTracking,
-    startBackgroundTracking,
-    stopBackgroundTracking,
-    startSocketTracking,
-    stopSocketTracking,
-  } = useLocation();
-  const [refreshing, setRefreshing] = React.useState(false);
-  const [toggling, setToggling] = React.useState(false);
-  const [locationEnabled, setLocationEnabled] = React.useState(false);
-  const [locationAddress, setLocationAddress] = React.useState<string>('');
-  // Set when background tracking could not start (e.g. background permission
-  // denied) and shown once the rider returns to the app.
-  const backgroundTrackingWarningRef = React.useRef<string | null>(null);
+    currentOrder,
+    offers: allOffers,
+    offerSeenAt,
+    expiredOfferIds,
+    ended,
+    loadError,
+    pendingOrderId,
+    currentLoaded,
+  } = useAppSelector((s) => s.orders);
+  const metrics = useAppSelector((s) => s.metrics);
+  const location = useAppSelector((s) => s.location);
+  const socketState = useSocketState();
+  const [refreshing, setRefreshing] = useState(false);
+  const [declining, setDeclining] = useState<Order | null>(null);
 
-  const checkLocationPermission = useCallback(async () => {
-    const hasPermission = await locationService.hasPermissions();
-    setLocationEnabled(hasPermission);
-    if (hasPermission) {
-      const loc = await locationService.getCurrentLocation();
-      if (loc) {
-        setLocationAddress(`${loc.latitude.toFixed(5)}, ${loc.longitude.toFixed(5)}`);
-      }
-    }
-  }, []);
+  const online = Boolean(user?.isOnline);
+  // New requests are only for riders who are online.
+  const offers = online ? allOffers : [];
+  const rider = location.current;
+  const notices = useMemo(() => Object.values(ended).filter((e) => !e.self), [ended]);
 
-  useEffect(() => {
-    const syncTrackingForAppState = async (nextAppState: string) => {
-      if (!user?.isOnline) {
-        return;
-      }
-
-      if (nextAppState === 'active') {
-        const warning = backgroundTrackingWarningRef.current;
-        if (warning) {
-          backgroundTrackingWarningRef.current = null;
-          Alert.alert('Background location off', warning, [
-            { text: 'Not now', style: 'cancel' },
-            { text: 'Open Settings', onPress: () => Linking.openSettings() },
-          ]);
-        }
-        await stopBackgroundTracking();
-        const started = await startTracking();
-        if (started) {
-          startSocketTracking(user.id || '');
-        }
-        checkLocationPermission();
-        return;
-      }
-
-      stopSocketTracking();
-      stopTracking();
-      const backgroundStarted = await startBackgroundTracking();
-      if (!backgroundStarted) {
-        backgroundTrackingWarningRef.current = locationService.lastError;
-      }
-    };
-
-    checkLocationPermission();
-    const interval = setInterval(checkLocationPermission, 10000);
-    const subscription = AppState.addEventListener('change', (nextAppState) => {
-      syncTrackingForAppState(nextAppState).catch(() => undefined);
-    });
-
-    return () => {
-      clearInterval(interval);
-      subscription.remove();
-    };
-  }, [
-    checkLocationPermission,
-    startTracking,
-    stopTracking,
-    startBackgroundTracking,
-    stopBackgroundTracking,
-    startSocketTracking,
-    stopSocketTracking,
-    user?.id,
-    user?.isOnline,
-  ]);
-
-  useEffect(() => {
-    loadAvailableOrders();
-    loadCurrentOrder();
-  }, [loadAvailableOrders, loadCurrentOrder]);
-
-  useEffect(() => {
-    if (!user?.isOnline || !locationEnabled || isTracking) {
-      return;
-    }
-
-    startTracking()
-      .then((started) => {
-        if (started) {
-          startSocketTracking(user.id || '');
-        }
-      })
-      .catch(() => undefined);
-  }, [user?.isOnline, user?.id, locationEnabled, isTracking, startTracking, startSocketTracking]);
-
-  const handleEnableLocation = useCallback(async () => {
-    const granted = await locationService.requestPermissions();
-    if (granted) {
-      checkLocationPermission();
-      return;
-    }
-
-    if (Platform.OS === 'android') {
-      Linking.openSettings().catch(() => {
-        Alert.alert('Error', 'Unable to open settings');
-      });
-    } else {
-      Alert.alert(
-        'Location Required',
-        'Please enable location services in Settings to use the rider app.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Open Settings', onPress: () => Linking.openSettings() },
-        ]
-      );
-    }
-  }, [checkLocationPermission]);
-
-  const handleToggleOnline = useCallback(async (value: boolean) => {
-    if (value && !locationEnabled) {
-      Alert.alert(
-        'Location Required',
-        'You must enable location services to go online and receive orders. Please enable location in your device settings.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Open Settings', onPress: handleEnableLocation },
-        ]
-      );
-      return;
-    }
-
-    setToggling(true);
-    try {
-      await riderApi.updateAvailability(value);
-      dispatch(
-        setUser({
-          ...(user as Rider),
-          isOnline: value,
-        })
-      );
-
-      if (value) {
-        const trackingStarted = await startTracking();
-        if (!trackingStarted) {
-          Alert.alert('Location Required', 'Please allow location access to go online and receive live navigation updates.');
-          await riderApi.updateAvailability(false);
-          dispatch(
-            setUser({
-              ...(user as Rider),
-              isOnline: false,
-            })
-          );
-          return;
-        }
-
-        startSocketTracking(user?.id || '');
-      } else {
-        stopTracking();
-        stopBackgroundTracking().catch(() => undefined);
-        stopSocketTracking();
-      }
-    } catch {
-      Alert.alert('Error', 'Failed to update availability');
-    } finally {
-      setToggling(false);
-    }
-  }, [dispatch, user, startTracking, stopTracking, startBackgroundTracking, stopBackgroundTracking, startSocketTracking, stopSocketTracking, locationEnabled, handleEnableLocation]);
-
-  const handleLogout = useCallback(() => {
-    Alert.alert('Logout', 'Are you sure you want to logout?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Logout',
-        style: 'destructive',
-        onPress: () => {
-          stopTracking();
-          stopBackgroundTracking().catch(() => undefined);
-          stopSocketTracking();
-          dispatch(logout());
-          navigation.replace('Login');
-        },
-      },
-    ]);
-  }, [dispatch, navigation, stopTracking, stopBackgroundTracking, stopSocketTracking]);
-
-  const onRefresh = useCallback(async () => {
+  const refresh = useCallback(async () => {
     setRefreshing(true);
-    await checkLocationPermission();
-    loadAvailableOrders();
-    loadCurrentOrder();
-    setTimeout(() => setRefreshing(false), 1000);
-  }, [checkLocationPermission, loadAvailableOrders, loadCurrentOrder]);
+    await Promise.all([
+      dispatch(refreshRider()),
+      dispatch(fetchCurrentOrder()),
+      dispatch(fetchOffers()),
+      dispatch(fetchMetrics()),
+      checkLocationPermission(),
+    ]);
+    setRefreshing(false);
+  }, [dispatch]);
+
+  const openSettings = () => {
+    Linking.openSettings().catch(() =>
+      Alert.alert('Open Settings', 'Open your phone settings and allow location for this app.')
+    );
+  };
+
+  const goOnline = async () => {
+    if (Platform.OS !== 'web') {
+      const granted = await locationService.requestPermissions();
+      const enabled = await checkLocationPermission();
+      if (!granted || !enabled) {
+        Alert.alert(
+          'Location needed',
+          granted
+            ? 'Turn on location (GPS) to go online. Customers and the store track your trip with it.'
+            : 'Allow location access to go online. Customers and the store track your trip with it.',
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Open settings', onPress: openSettings },
+          ]
+        );
+        return;
+      }
+    }
+    dispatch(setAvailability(true));
+  };
+
+  const onToggle = (next: boolean) => {
+    if (next) {
+      goOnline();
+      return;
+    }
+    if (currentOrder) {
+      Alert.alert(
+        'Go offline?',
+        'You will stop getting new requests. Your current order stays with you until it is delivered.',
+        [
+          { text: 'Stay online', style: 'cancel' },
+          { text: 'Go offline', style: 'destructive', onPress: () => dispatch(setAvailability(false)) },
+        ]
+      );
+      return;
+    }
+    dispatch(setAvailability(false));
+  };
+
+  const accept = async (order: Order) => {
+    const result = await dispatch(acceptOffer(order.id));
+    if (acceptOffer.fulfilled.match(result)) {
+      navigation.navigate('Navigation', { orderId: result.payload.id });
+    } else {
+      Alert.alert('Could not accept', result.payload?.message ?? 'Please try again.');
+    }
+  };
+
+  const submitDecline = async (reason: string) => {
+    if (!declining) return null;
+    const result = await dispatch(rejectOrder({ orderId: declining.id, reason }));
+    if (rejectOrder.fulfilled.match(result)) {
+      setDeclining(null);
+      return null;
+    }
+    return result.payload?.message ?? 'Could not decline this order.';
+  };
+
+  const firstName = (user?.name || 'Rider').split(' ')[0];
+  const m = metrics.data;
+  const metricsLoading = metrics.loading && !m;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="dark-content" backgroundColor="white" />
-
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.greeting}>Hey {user?.name?.split(' ')[0] || 'Rider'},</Text>
-          <View style={styles.onlineStatusRow}>
-            <View style={[styles.statusIndicator, { backgroundColor: user?.isOnline ? ZEPTO_GREEN : '#AAA' }]} />
-            <Text style={styles.subGreeting}>
-              {user?.isOnline ? 'Active & Receiving Orders' : 'Offline - Go Online to work'}
-            </Text>
-          </View>
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
+      <View style={[styles.header, { paddingTop: insets.top + spacing.sm, backgroundColor: c.bg }]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Open profile"
+          onPress={() => navigation.navigate('Profile')}
+          style={[styles.avatar, { backgroundColor: c.brandSoft }]}
+        >
+          <AppText variant="h3" tone="brand">
+            {firstName.charAt(0).toUpperCase()}
+          </AppText>
+        </Pressable>
+        <View style={{ flex: 1 }}>
+          <AppText variant="bodySm" tone="muted">
+            {greeting()},
+          </AppText>
+          <AppText variant="h2" numberOfLines={1}>
+            {firstName}
+          </AppText>
         </View>
-        <View style={styles.headerRight}>
-          <TouchableOpacity
-            onPress={checkLocationPermission}
-            style={[styles.locationButton, !locationEnabled && styles.locationButtonDisabled]}
-          >
-            <MaterialCommunityIcons
-              name={locationEnabled ? 'map-marker-radius' : 'map-marker-off'}
-              size={20}
-              color={locationEnabled ? ZEPTO_GREEN : '#EF4444'}
-            />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleLogout} style={styles.profileButton}>
-            <MaterialCommunityIcons name="logout-variant" size={20} color={ZEPTO_PURPLE} />
-          </TouchableOpacity>
+        <View
+          style={[styles.live, { backgroundColor: socketState === 'connected' ? c.successSoft : c.warningSoft }]}
+          accessibilityLabel={socketState === 'connected' ? 'Live updates connected' : 'Reconnecting to live updates'}
+        >
+          <View style={[styles.liveDot, { backgroundColor: socketState === 'connected' ? c.success : c.warning }]} />
+          <AppText variant="caption" weight="bold" color={socketState === 'connected' ? c.successText : c.warningText}>
+            {socketState === 'connected' ? 'Live' : 'Connecting'}
+          </AppText>
         </View>
+        <IconButton icon="wallet-outline" label="Earnings" onPress={() => navigation.navigate('Earnings')} size={44} />
       </View>
 
-      {!locationEnabled && (
-        <View style={styles.locationWarning}>
-          <View style={styles.warningContent}>
-            <MaterialCommunityIcons name="alert-circle" size={20} color="#EF4444" />
-            <View style={styles.warningTextContainer}>
-              <Text style={styles.warningTitle}>Location Services Disabled</Text>
-              <Text style={styles.warningSubtitle}>
-                Enable location to go online and accept orders
-              </Text>
-            </View>
-            <TouchableOpacity style={styles.enableLocationBtn} onPress={handleEnableLocation}>
-              <Text style={styles.enableLocationText}>Enable</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {locationEnabled && locationAddress ? (
-        <View style={styles.locationInfo}>
-          <MaterialCommunityIcons name="map-marker" size={14} color="#666" />
-          <Text style={styles.locationInfoText}>{locationAddress}</Text>
-        </View>
-      ) : null}
-
       <ScrollView
-        style={styles.content}
-        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.xxxl }]}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ZEPTO_PURPLE} />
+          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.brand} colors={[c.brand]} />
         }
       >
-        <View style={styles.toggleSection}>
-          <OnlineToggle
-            isOnline={user?.isOnline || false}
-            onToggle={handleToggleOnline}
-            loading={toggling}
-            disabled={!locationEnabled}
+        {location.permission === 'denied' || location.permission === 'services_off' ? (
+          <Banner
+            tone="danger"
+            icon="map-marker-off"
+            title={location.permission === 'denied' ? 'Location access is off' : 'GPS is turned off'}
+            message="You need location to go online and get orders."
+            actionLabel="Fix"
+            onAction={openSettings}
           />
-        </View>
+        ) : null}
+        {location.backgroundWarning && (online || currentOrder) ? (
+          <Banner
+            tone="warning"
+            icon="map-marker-alert"
+            title="Live location pauses in the background"
+            message={location.backgroundWarning}
+            actionLabel="Settings"
+            onAction={openSettings}
+          />
+        ) : null}
+        {availabilityError ? (
+          <Banner tone="danger" title={availabilityError} onDismiss={() => dispatch(clearAvailabilityError())} />
+        ) : null}
+        {loadError ? (
+          <Banner tone="warning" icon="cloud-alert" title={loadError} actionLabel="Retry" onAction={refresh} />
+        ) : null}
+        {notices.map((notice) => (
+          <Banner
+            key={notice.orderId}
+            tone="danger"
+            icon={notice.kind === 'cancelled' ? 'close-circle' : 'account-switch'}
+            title={
+              notice.kind === 'cancelled'
+                ? `Order ${notice.orderNumber ?? ''} was cancelled`.replace(/\s+/g, ' ')
+                : `Order ${notice.orderNumber ?? ''} was reassigned`.replace(/\s+/g, ' ')
+            }
+            message={
+              notice.reason && notice.kind === 'cancelled' ? `Reason: ${notice.reason}` : 'No action needed from you.'
+            }
+            onDismiss={() => dispatch(dismissEnded(notice.orderId))}
+          />
+        ))}
 
-        <View style={styles.statsGrid}>
-          <View style={styles.statsRow}>
-            <StatsCard
-              title="Today's Orders"
-              value={user?.totalDeliveries || 0}
-              icon="package-variant"
-            />
-            <StatsCard
-              title="Today's Earnings"
-              value={`₹${(user?.totalEarnings || 0).toFixed(0)}`}
-              color={ZEPTO_GREEN}
-              icon="currency-inr"
+        <OnlineToggle
+          online={online}
+          onDelivery={Boolean(currentOrder)}
+          pending={availabilityPending}
+          onToggle={onToggle}
+        />
+
+        {offers.map((offer) => (
+          <OfferCard
+            key={offer.id}
+            order={offer}
+            seenAt={offerSeenAt[offer.id]}
+            rider={rider}
+            pending={pendingOrderId === offer.id}
+            expired={Boolean(expiredOfferIds[offer.id])}
+            onDismiss={() => dispatch(dismissOffer(offer.id))}
+            onAccept={() => accept(offer)}
+            onDecline={() => setDeclining(offer)}
+            onOpen={() => navigation.navigate('OrderDetail', { orderId: offer.id })}
+          />
+        ))}
+
+        {currentOrder ? (
+          <View>
+            <SectionTitle title="Current order" />
+            <ActiveOrderCard
+              order={currentOrder}
+              rider={rider}
+              onOpen={() => navigation.navigate('Navigation', { orderId: currentOrder.id })}
+              onDetails={() => navigation.navigate('OrderDetail', { orderId: currentOrder.id })}
             />
           </View>
-          <View style={styles.statsRow}>
-            <StatsCard
-              title="Rating"
-              value={typeof user?.rating === 'number' ? user.rating.toFixed(1) : '0.0'}
-              color="#FF9800"
-              icon="star"
-            />
-            <StatsCard
-              title="Online Hours"
-              value="4.5h"
-              color={ZEPTO_PURPLE}
-              icon="clock-outline"
-            />
-          </View>
-        </View>
+        ) : !currentLoaded ? (
+          <Skeleton height={150} radius={radii.lg} />
+        ) : online && offers.length === 0 ? (
+          <Card style={styles.waiting}>
+            <View style={[styles.waitingIcon, { backgroundColor: c.brandSoft }]}>
+              <MaterialCommunityIcons name="radar" size={28} color={c.brandText} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <AppText variant="h3">Looking for orders</AppText>
+              <AppText variant="bodySm" tone="muted">
+                Keep the app open. New requests ring and vibrate.
+              </AppText>
+            </View>
+          </Card>
+        ) : null}
 
-        {currentOrder && (
-          <View style={styles.activeOrderSection}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>ACTIVE ORDER</Text>
-              <View style={styles.liveBadge}>
-                <View style={styles.liveDot} />
-                <Text style={styles.liveText}>READY</Text>
+        <View>
+          <SectionTitle
+            title="Today"
+            right={
+              <Pressable accessibilityRole="button" onPress={() => navigation.navigate('Earnings')} hitSlop={10}>
+                <AppText variant="bodySm" weight="semibold" tone="brand">
+                  All earnings ›
+                </AppText>
+              </Pressable>
+            }
+          />
+          {metrics.error && !m ? (
+            <Banner
+              tone="warning"
+              title="Could not load today's numbers"
+              actionLabel="Retry"
+              onAction={() => dispatch(fetchMetrics())}
+            />
+          ) : (
+            <View style={{ gap: spacing.md }}>
+              <View style={styles.statRow}>
+                <StatTile
+                  label="Deliveries today"
+                  value={m ? String(m.today.deliveries) : '–'}
+                  icon="package-variant-closed-check"
+                  tone="brand"
+                  loading={metricsLoading}
+                />
+                <StatTile
+                  label="Earned today"
+                  value={m ? formatMoney(m.today.earnings) : '–'}
+                  icon="cash"
+                  tone="success"
+                  hint="Fees + tips (estimate)"
+                  loading={metricsLoading}
+                />
+              </View>
+              <View style={styles.statRow}>
+                <StatTile
+                  label="Rating"
+                  value={m ? (m.avgRating > 0 ? m.avgRating.toFixed(1) : 'New') : '–'}
+                  icon="star"
+                  tone="warning"
+                  loading={metricsLoading}
+                />
+                <StatTile
+                  label="Acceptance"
+                  value={m ? `${Math.round(m.acceptanceRate)}%` : '–'}
+                  icon="check-decagram"
+                  loading={metricsLoading}
+                />
               </View>
             </View>
-            <View style={styles.activeOrderCard}>
-              <OrderCard
-                order={currentOrder}
-                onPress={() =>
-                  navigation.navigate('OrderDetail', {
-                    orderId: currentOrder.id,
-                    order: currentOrder,
-                  })
-                }
-              />
-              <TouchableOpacity
-                style={styles.navigateAction}
-                onPress={() =>
-                  navigation.navigate('Navigation', {
-                    orderId: currentOrder.id,
-                    order: currentOrder,
-                  })
-                }
-              >
-                <MaterialCommunityIcons name="navigation-variant" size={20} color="white" />
-                <Text style={styles.navigateActionText}>START NAVIGATION</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
-        {availableOrders.length > 0 && !currentOrder && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>NEW REQUESTS</Text>
-              <TouchableOpacity onPress={() => navigation.navigate('AvailableOrders')}>
-                <Text style={styles.seeAll}>SEE ALL ({availableOrders.length})</Text>
-              </TouchableOpacity>
-            </View>
-            <OrderCard
-              order={availableOrders[0]}
-              showActions
-              onAccept={() =>
-                navigation.navigate('OrderDetail', {
-                  orderId: availableOrders[0].id,
-                  order: availableOrders[0],
-                })
-              }
-            />
-          </View>
-        )}
-
-        <View style={styles.menuGrid}>
-          <Text style={styles.sectionTitle}>QUICK MENU</Text>
-          <View style={styles.menuRow}>
-            <MenuButton
-              label="Earnings"
-              icon="wallet-outline"
-              onPress={() => navigation.navigate('Earnings')}
-              color="#4F46E5"
-            />
-            <MenuButton
-              label="Orders"
-              icon="history"
-              onPress={() => navigation.navigate('AvailableOrders')}
-              color="#EF4444"
-            />
-            <MenuButton
-              label="Profile"
-              icon="account-outline"
-              onPress={() => navigation.navigate('Profile')}
-              color="#10B981"
-            />
-          </View>
+          )}
         </View>
-
-        <View style={styles.bottomPadding} />
       </ScrollView>
-    </SafeAreaView>
+
+      <RejectSheet
+        visible={Boolean(declining)}
+        orderNumber={declining?.orderNumber ?? ''}
+        mode="decline"
+        onClose={() => setDeclining(null)}
+        onSubmit={submitDecline}
+      />
+    </View>
   );
 };
 
-const MenuButton = ({ label, icon, onPress, color }: any) => (
-  <TouchableOpacity style={styles.menuBtn} onPress={onPress}>
-    <View style={[styles.menuIconBox, { backgroundColor: color + '15' }]}>
-      <MaterialCommunityIcons name={icon} size={24} color={color} />
-    </View>
-    <Text style={styles.menuLabel}>{label}</Text>
-  </TouchableOpacity>
-);
-
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: 'white',
-  },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: 'white',
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
   },
-  headerLeft: {
-    flex: 1,
-  },
-  headerRight: {
+  avatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  live: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-  },
-  onlineStatusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
     gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radii.pill,
   },
-  statusIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  greeting: {
-    fontSize: 22,
-    fontWeight: '900',
-    color: '#1F1F1F',
-  },
-  subGreeting: {
-    fontSize: 12,
-    color: '#888',
-    fontWeight: '600',
-  },
-  locationButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: '#F5F5F5',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#F0F0F0',
-  },
-  locationButtonDisabled: {
-    backgroundColor: '#FEF2F2',
-    borderColor: '#FECACA',
-  },
-  profileButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: '#F5F5F5',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#F0F0F0',
-  },
-  locationWarning: {
-    marginHorizontal: 16,
-    marginBottom: 8,
-    backgroundColor: '#FEF2F2',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#FECACA',
-  },
-  warningContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    gap: 12,
-  },
-  warningTextContainer: {
-    flex: 1,
-  },
-  warningTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#DC2626',
-  },
-  warningSubtitle: {
-    fontSize: 11,
-    color: '#991B1B',
-    marginTop: 1,
-  },
-  enableLocationBtn: {
-    backgroundColor: '#DC2626',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
-  enableLocationText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  locationInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 16,
-    marginBottom: 8,
-    gap: 6,
-    backgroundColor: '#F0FDF4',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-  },
-  locationInfoText: {
-    fontSize: 12,
-    color: '#166534',
-    fontWeight: '600',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },
-  toggleSection: {
-    marginBottom: 8,
-  },
-  statsGrid: {
-    gap: 12,
-    marginTop: 12,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  section: {
-    marginTop: 24,
-  },
-  activeOrderSection: {
-    marginTop: 24,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-    paddingHorizontal: 4,
-  },
-  sectionTitle: {
-    fontSize: 11,
-    fontWeight: '900',
-    color: '#999',
-    letterSpacing: 1,
-  },
-  liveBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    gap: 4,
-  },
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: ZEPTO_GREEN,
-  },
-  liveText: {
-    fontSize: 9,
-    fontWeight: '900',
-    color: ZEPTO_GREEN,
-  },
-  activeOrderCard: {
-    backgroundColor: 'white',
-    borderRadius: 24,
-    padding: 2,
-    borderWidth: 1,
-    borderColor: '#F0F0F0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  navigateAction: {
-    flexDirection: 'row',
-    backgroundColor: ZEPTO_PURPLE,
-    margin: 12,
-    marginTop: 4,
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  navigateActionText: {
-    color: 'white',
-    fontWeight: '900',
-    fontSize: 14,
-    letterSpacing: 0.5,
-  },
-  seeAll: {
-    fontSize: 12,
-    color: ZEPTO_PURPLE,
-    fontWeight: '800',
-  },
-  menuGrid: {
-    marginTop: 32,
-  },
-  menuRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    backgroundColor: '#F9F9F9',
-    borderRadius: 24,
-    padding: 16,
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: '#F0F0F0',
-  },
-  menuBtn: {
-    alignItems: 'center',
-    width: 80,
-  },
-  menuIconBox: {
-    width: 54,
-    height: 54,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  menuLabel: {
-    fontSize: 12,
-    color: '#333',
-    fontWeight: '700',
-  },
-  bottomPadding: {
-    height: 100,
-  },
+  liveDot: { width: 8, height: 8, borderRadius: 4 },
+  content: { paddingHorizontal: spacing.lg, gap: spacing.lg, maxWidth: 640, width: '100%', alignSelf: 'center' },
+  waiting: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
+  waitingIcon: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
+  statRow: { flexDirection: 'row', gap: spacing.md },
 });

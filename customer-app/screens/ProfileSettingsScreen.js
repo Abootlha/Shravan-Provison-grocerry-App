@@ -58,6 +58,11 @@ const ProfileSettingsScreen = ({ navigation }) => {
     );
 
     const [isSaving, setIsSaving] = useState(false);
+    // "Save changes" only does something once a field differs from the saved profile.
+    const savedPicture = user?.profilePicture || user?.avatar || user?.photo || null;
+    const dirty = name.trim() !== (user?.name || '').trim()
+        || email.trim() !== (user?.email || '').trim()
+        || profilePicture !== savedPicture;
     const [isDeleting, setIsDeleting] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
 
@@ -139,24 +144,16 @@ const ProfileSettingsScreen = ({ navigation }) => {
                 avatar: profilePicture,
             };
 
-            // 1. Update Redux state & local storage immediately
-            dispatch(updateUser(updatedUserData));
-            await AsyncStorage.setItem('customerUser', JSON.stringify(updatedUserData));
-
-            // 2. Persist to MongoDB backend
-            try {
-                const res = await UserService.updateProfile({
-                    name: trimmedName,
-                    email: email.trim(),
-                    profilePicture: profilePicture,
-                });
-                if (res) {
-                    dispatch(updateUser({ ...updatedUserData, ...res }));
-                    await AsyncStorage.setItem('customerUser', JSON.stringify({ ...updatedUserData, ...res }));
-                }
-            } catch (apiErr) {
-                if (__DEV__) console.log('Backend profile save error:', apiErr?.response?.data || apiErr?.message);
-            }
+            // Save on the server first; only a confirmed save updates the app. A failure falls through to
+            // the catch below, so the user is never told "Profile updated" when nothing was saved.
+            const res = await UserService.updateProfile({
+                name: trimmedName,
+                email: email.trim(),
+                profilePicture: profilePicture,
+            });
+            const saved = { ...updatedUserData, ...(res || {}) };
+            dispatch(updateUser(saved));
+            await AsyncStorage.setItem('customerUser', JSON.stringify(saved));
 
             setIsSaving(false);
             toast.success(isHi ? 'प्रोफ़ाइल सहेजी गई' : 'Profile updated');
@@ -189,7 +186,7 @@ const ProfileSettingsScreen = ({ navigation }) => {
                 if (__DEV__) console.log('Logout on delete error:', err.message);
             }
 
-            await AsyncStorage.removeItem('customerCart');
+            await AsyncStorage.multiRemove(['customerCart', 'customerWishlist']);
 
             dispatch(logout());
             setIsDeleting(false);
@@ -292,7 +289,7 @@ const ProfileSettingsScreen = ({ navigation }) => {
             <CollapsibleHeader collapse={collapse} title={screenTitle} onBack={goBack} backLabel={isHi ? 'वापस जाएँ' : 'Go back'} />
 
             <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, space.md) }]}>
-                <Button size="lg" fullWidth label={isHi ? 'बदलाव सहेजें' : 'Save changes'} loading={isSaving} onPress={handleSave} />
+                <Button size="lg" fullWidth label={isHi ? 'बदलाव सहेजें' : 'Save changes'} loading={isSaving} disabled={!dirty || isSaving} onPress={handleSave} />
             </View>
 
             <DeleteAccountModal

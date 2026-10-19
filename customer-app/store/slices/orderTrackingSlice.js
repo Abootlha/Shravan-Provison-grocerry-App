@@ -43,8 +43,8 @@ const orderTrackingSlice = createSlice({
                     latitude: tracking.riderLocation.latitude,
                     longitude: tracking.riderLocation.longitude,
                     timestamp: tracking.lastLocationUpdateAt || new Date().toISOString(),
-                    heading: tracking.riderLocation.heading || null,
-                    speed: tracking.riderLocation.speed || null,
+                    heading: tracking.riderLocation.heading ?? null,
+                    speed: tracking.riderLocation.speed ?? null,
                 };
             } else {
                 state.riderLocation = null;
@@ -95,7 +95,18 @@ const orderTrackingSlice = createSlice({
                 if (estimatedDeliveryTime) {
                     state.currentOrder.estimatedDeliveryTime = estimatedDeliveryTime;
                 }
-                if (rider) {
+                if (rider === null && 'rider' in action.payload) {
+                    // Rider unassigned (rejected or removed by the store): drop the stale
+                    // partner card, marker and route until a new rider is assigned.
+                    state.currentOrder.rider = null;
+                    state.currentOrder.riderId = null;
+                    state.riderLocation = null;
+                    state.previousRiderLocation = null;
+                    state.riderHeading = 0;
+                    state.routeCoordinates = [];
+                    state.routeInfo = null;
+                    state.activeLeg = null;
+                } else if (rider) {
                     state.currentOrder.rider = { ...state.currentOrder.rider, ...rider };
                     state.currentOrder.riderId = {
                         ...(typeof state.currentOrder.riderId === 'object' ? state.currentOrder.riderId : {}),
@@ -128,8 +139,8 @@ const orderTrackingSlice = createSlice({
                             latitude: tracking.riderLocation.latitude,
                             longitude: tracking.riderLocation.longitude,
                             timestamp: tracking.lastLocationUpdateAt || new Date().toISOString(),
-                            heading: tracking.riderLocation.heading || null,
-                            speed: tracking.riderLocation.speed || null,
+                            heading: tracking.riderLocation.heading ?? null,
+                            speed: tracking.riderLocation.speed ?? null,
                         };
                     }
                 }
@@ -149,8 +160,8 @@ const orderTrackingSlice = createSlice({
                 latitude: action.payload.location.latitude,
                 longitude: action.payload.location.longitude,
                 timestamp: action.payload.timestamp,
-                heading: action.payload.location.heading || null,
-                speed: action.payload.location.speed || null,
+                heading: action.payload.location.heading ?? null,
+                speed: action.payload.location.speed ?? null,
             };
             state.lastLocationUpdateAt = action.payload.timestamp;
 
@@ -161,8 +172,8 @@ const orderTrackingSlice = createSlice({
                     riderLocation: {
                         latitude: action.payload.location.latitude,
                         longitude: action.payload.location.longitude,
-                        heading: action.payload.location.heading || null,
-                        speed: action.payload.location.speed || null,
+                        heading: action.payload.location.heading ?? null,
+                        speed: action.payload.location.speed ?? null,
                     },
                     lastLocationUpdateAt: action.payload.timestamp,
                 };

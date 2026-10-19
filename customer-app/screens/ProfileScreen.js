@@ -11,7 +11,7 @@
  * replays a short crossfade + rise when you switch back to this tab (AnimatedScreen replayOnFocus). Nothing loops.
  */
 import React, { useCallback, useState } from 'react';
-import { Linking, View } from 'react-native';
+import { View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { Image } from 'expo-image';
 import Constants from 'expo-constants';
@@ -29,7 +29,6 @@ import {
     Screen,
     Text,
     ThemeModeControl,
-    toast,
     useCollapsibleHeader,
     useCollapsibleHeaderHeight,
 } from '../components/ui';
@@ -40,6 +39,7 @@ import { SettingsBlock, SettingsGroup, SettingsRow } from './profile/SettingsRow
 import { useThemeCrossfade } from './profile/ThemeCrossfade';
 import { initialsOf } from './orders/orderUtils';
 import { useTabBarHeight } from '../components/BottomTabsIcons';
+import { contactStore } from './tracking/storeContact';
 
 const APP_VERSION = Constants.expoConfig?.version || '1.0.0';
 
@@ -121,18 +121,16 @@ const ProfileScreen = ({ navigation }) => {
         );
     };
 
+    // Call the store (contactPhone), else email it (contactEmail); both from /settings/store.
     const handleHelp = async () => {
+        let settings = null;
         try {
             const data = await SettingsService.getStoreSettings();
-            const phone = (data?.settings || data)?.contactPhone;
-            if (phone) {
-                Linking.openURL(`tel:${phone}`);
-                return;
-            }
+            settings = data?.settings || data;
         } catch (e) {
-            // fall through to the toast
+            // contactStore explains when there's nothing to contact
         }
-        toast.info(isHi ? 'सहायता जल्द उपलब्ध होगी' : 'Support will be available shortly');
+        contactStore({ phone: settings?.contactPhone, email: settings?.contactEmail }, { isHi });
     };
 
     const userName = isAuthenticated && user?.name ? user.name : isHi ? 'मेहमान' : 'Guest';
@@ -238,12 +236,7 @@ const ProfileScreen = ({ navigation }) => {
                             subtitle={isHi ? 'स्टोर को सीधे कॉल करें' : 'Call the store directly'}
                             onPress={handleHelp}
                         />
-                        <SettingsRow
-                            icon="information-outline"
-                            title={isHi ? 'ऐप के बारे में' : 'About'}
-                            value={`v${APP_VERSION}`}
-                            onPress={() => toast.info(`Shravan Kirana v${APP_VERSION}`)}
-                        />
+                        {/* the version is shown once, in the footer below */}
                     </SettingsGroup>
 
                     {isAuthenticated ? (

@@ -2,121 +2,120 @@ import React, { forwardRef, memo } from 'react';
 import { View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Button, PressableScale, SlideToConfirm, Text } from '../../components/ui';
+import { Button, PressableScale, RollingNumber, SlideToConfirm, Text } from '../../components/ui';
 import { HIT, radii, space } from '../../constants/theme';
 import { layout, makeStyles, useTheme } from '../../theme';
 import { press } from '../../theme/motion';
-import { addressIcon, formatAddressLine } from '../address/addressUtils';
 import { ICON_CIRCLE } from './layout';
 
-const IconCircle = ({ name, tone = 'tint' }) => {
+const IconCircle = ({ name }) => {
     const styles = useStyles();
     const { colors } = useTheme();
     return (
-        <View style={[styles.circle, tone === 'white' ? styles.circleWhite : styles.circleTint]}>
+        <View style={styles.circle}>
             <MaterialCommunityIcons name={name} size={18} color={colors.inkSecondary} />
         </View>
     );
 };
 
 /**
- * Sticky checkout footer (Part C §9): a sunken address strip, the payment row with the
- * total, and the violet slide-to-pay. `bottomPad` lets the sheet run under the floating
- * dock on the Cart tab so nothing shows through below it.
+ * Sticky checkout footer (Part C §9): the payment row, then the total ("View bill" scrolls to the
+ * bill summary) beside the violet slide-to-pay. The delivery address lives in the "Delivering to"
+ * card in the checkout content.
  *
- * `amount` is the server quote's totalAmount; `billState` other than 'ready' locks the slider
- * ('updating' / 'refused') or swaps it for a Retry button ('error'), so nobody pays a guess.
+ * `amount` is the server quote's totalAmount (null until confirmed: the estimate shows dimmed as
+ * `estimate`). When the order can't be placed yet, `blockedReason` says why in one line above the
+ * locked slider (no address, outside the delivery area, store closed, total updating, unavailable
+ * items). `billState` 'error' swaps the slider for a Retry button, so nobody pays a guess.
+ * `bottomPad` lets the sheet clear the home indicator.
  */
 const PlaceOrderBarBase = forwardRef(function PlaceOrderBar(
     {
-        address, onChangeAddress, paymentOption, onChangePayment, amount, isCod, onConfirm,
-        billState = 'ready', onRetryQuote, bottomPad = 0, closedLabel = null, isHi,
+        paymentOption, onChangePayment, amount, estimate = null, isCod, onConfirm, onViewBill,
+        billState = 'ready', onRetryQuote, bottomPad = 0, blockedReason = null, isHi,
     },
     sliderRef,
 ) {
     const styles = useStyles();
     const { colors } = useTheme();
     const changeLabel = isHi ? 'बदलें' : 'Change';
-    const addressLine = address ? formatAddressLine(address, { pincode: false }) : '';
-    const type = address?.type || 'Home';
     const ready = billState === 'ready' && amount != null;
-    const blockedLabel = billState === 'refused'
-        ? (isHi ? 'अनुपलब्ध सामान हटाएं' : 'Remove unavailable items')
-        : (isHi ? 'कुल अपडेट हो रहा है…' : 'Updating total…');
+    const shown = amount ?? estimate;
+    const blocked = blockedReason || (!ready
+        ? (billState === 'refused'
+            ? (isHi ? 'ऑर्डर से पहले अनुपलब्ध सामान हटाएं' : 'Remove unavailable items to continue')
+            : (isHi ? 'कुल राशि अपडेट हो रही है…' : 'Updating your total…'))
+        : null);
 
     return (
         <View style={[styles.bar, { paddingBottom: space.md + bottomPad }]}>
             <PressableScale
-                onPress={onChangeAddress}
+                onPress={onChangePayment}
                 haptic="light"
                 scaleTo={press.subtle}
-                accessibilityLabel={address
-                    ? `${isHi ? 'डिलीवरी पता' : 'Delivering to'} ${type}, ${addressLine}. ${changeLabel}`
-                    : (isHi ? 'डिलीवरी पता जोड़ें' : 'Add a delivery address')}
-                accessibilityHint={isHi ? 'सहेजे गए पते खोलता है' : 'Opens your saved addresses'}
-                style={styles.strip}
+                accessibilityLabel={`${isHi ? 'भुगतान का तरीका' : 'Pay using'} ${paymentOption.name}. ${changeLabel}`}
+                accessibilityHint={isHi ? 'भुगतान के तरीके खोलता है' : 'Opens payment methods'}
+                style={styles.payPick}
             >
-                <IconCircle name={address ? addressIcon(address.type) : 'map-marker-plus-outline'} tone="white" />
-                <Animated.View key={address ? `${type}|${addressLine}` : 'none'} entering={layout.enter} style={styles.flex}>
-                    {address ? (
-                        <>
-                            <Text variant="label" weight="medium" color="secondary" numberOfLines={1}>
-                                {isHi ? 'डिलीवरी: ' : 'Delivering to '}
-                                <Text variant="label" weight="bold" color="ink">{type}</Text>
-                            </Text>
-                            <Text variant="caption" color="muted" numberOfLines={1}>{addressLine}</Text>
-                        </>
-                    ) : (
-                        <Text variant="label" numberOfLines={1}>{isHi ? 'डिलीवरी पता जोड़ें' : 'Add a delivery address'}</Text>
-                    )}
+                <IconCircle name={paymentOption.icon} />
+                <Animated.View key={paymentOption.id || paymentOption.name} entering={layout.enter} style={styles.flex}>
+                    <Text variant="caption" color="muted">{isHi ? 'भुगतान' : 'Pay using'}</Text>
+                    <Text variant="bodyStrong" numberOfLines={1}>{paymentOption.name}</Text>
                 </Animated.View>
-                <Text variant="label" color={colors.brandStrong}>{address ? changeLabel : (isHi ? 'जोड़ें' : 'Add')}</Text>
+                <Text variant="label" color={colors.brandStrong} style={styles.payChange}>{changeLabel}</Text>
             </PressableScale>
 
-            <View style={styles.payRow}>
-                <PressableScale
-                    onPress={onChangePayment}
-                    haptic="light"
-                    scaleTo={press.subtle}
-                    accessibilityLabel={`${isHi ? 'भुगतान का तरीका' : 'Pay using'} ${paymentOption.name}. ${changeLabel}`}
-                    accessibilityHint={isHi ? 'भुगतान के तरीके खोलता है' : 'Opens payment methods'}
-                    style={styles.payPick}
-                >
-                    <IconCircle name={paymentOption.icon} />
-                    <Animated.View key={paymentOption.id || paymentOption.name} entering={layout.enter} style={styles.flex}>
-                        <Text variant="caption" color="muted">{isHi ? 'भुगतान' : 'Pay using'}</Text>
-                        <Text variant="bodyStrong" numberOfLines={1}>{paymentOption.name}</Text>
-                    </Animated.View>
-                    <Text variant="label" color={colors.brandStrong} style={styles.payChange}>{changeLabel}</Text>
-                </PressableScale>
-            </View>
-
-            {address && billState === 'error' && !closedLabel ? (
+            {billState === 'error' && !blockedReason ? (
                 <View style={styles.errorBlock} accessibilityLiveRegion="polite">
                     <Text variant="caption" color="secondary" align="center">
                         {isHi ? 'कुल राशि की पुष्टि नहीं हो सकी, भुगतान रोका गया है।' : 'We couldn’t confirm your total, so payment is paused.'}
                     </Text>
                     <Button label={isHi ? 'फिर से प्रयास करें' : 'Retry'} size="lg" fullWidth onPress={onRetryQuote} />
                 </View>
-            ) : address ? (
-                <SlideToConfirm
-                    ref={sliderRef}
-                    disabled={!!closedLabel || !ready}
-                    label={closedLabel || (!ready ? blockedLabel : isCod
-                        ? (isHi ? `ऑर्डर के लिए स्लाइड करें · ₹${amount}` : `Slide to place order · ₹${amount}`)
-                        : (isHi ? `₹${amount} भुगतान के लिए स्लाइड करें` : `Slide to pay ₹${amount}`))}
-                    confirmedLabel={isCod
-                        ? (isHi ? 'ऑर्डर दिया जा रहा है…' : 'Placing your order…')
-                        : (isHi ? 'भुगतान शुरू हो रहा है…' : 'Starting secure payment…')}
-                    onConfirm={onConfirm}
-                />
             ) : (
-                <Button
-                    label={isHi ? 'डिलीवरी पता चुनें' : 'Select delivery address'}
-                    size="lg"
-                    fullWidth
-                    onPress={onChangeAddress}
-                />
+                <>
+                    {blocked ? (
+                        <Animated.View key={blocked} entering={layout.enter} style={styles.blocked} accessibilityLiveRegion="polite">
+                            <MaterialCommunityIcons name="information-outline" size={14} color={colors.inkMuted} />
+                            <Text variant="caption" color="secondary" numberOfLines={1} style={styles.flex}>{blocked}</Text>
+                        </Animated.View>
+                    ) : null}
+                    <View style={styles.payRow}>
+                        <PressableScale
+                            onPress={onViewBill}
+                            haptic="light"
+                            scaleTo={press.subtle}
+                            accessibilityLabel={shown != null
+                                ? (isHi ? `कुल ₹${shown}. बिल देखें` : `Total ₹${shown}. View bill`)
+                                : (isHi ? 'बिल देखें' : 'View bill')}
+                            style={styles.total}
+                        >
+                            {shown != null ? (
+                                <RollingNumber value={shown} prefix="₹" variant="priceLarge" style={ready ? null : styles.dim} />
+                            ) : (
+                                <Text variant="priceLarge" color="muted">₹—</Text>
+                            )}
+                            <View style={styles.viewBill}>
+                                <Text variant="caption" color={colors.brandStrong}>{isHi ? 'बिल देखें' : 'View bill'}</Text>
+                                <MaterialCommunityIcons name="chevron-right" size={14} color={colors.brandStrong} />
+                            </View>
+                        </PressableScale>
+                        <SlideToConfirm
+                            ref={sliderRef}
+                            style={styles.flex}
+                            disabled={!!blocked}
+                            label={isCod ? (isHi ? 'ऑर्डर के लिए स्लाइड करें' : 'Slide to order') : (isHi ? 'भुगतान के लिए स्लाइड करें' : 'Slide to pay')}
+                            hintLabel={isHi ? 'पुष्टि के लिए स्लाइड करें' : 'Slide to confirm'}
+                            armedLabel={isCod
+                                ? (isHi ? 'ऑर्डर के लिए फिर Enter दबाएं' : 'Press Enter again to order')
+                                : (isHi ? 'भुगतान के लिए फिर Enter दबाएं' : 'Press Enter again to pay')}
+                            confirmedLabel={isCod
+                                ? (isHi ? 'ऑर्डर दिया जा रहा है…' : 'Placing order…')
+                                : (isHi ? 'भुगतान शुरू…' : 'Starting payment…')}
+                            onConfirm={onConfirm}
+                        />
+                    </View>
+                </>
             )}
         </View>
     );
@@ -131,27 +130,25 @@ const useStyles = makeStyles((t) => ({
         borderTopLeftRadius: radii.sheet,
         borderTopRightRadius: radii.sheet,
         paddingHorizontal: space.lg,
-        paddingTop: space.md,
-        gap: space.md,
+        paddingTop: space.sm,
+        gap: space.sm,
         ...t.shadows.floating,
     },
-    strip: {
-        flexDirection: 'row',
+    circle: {
+        width: ICON_CIRCLE,
+        height: ICON_CIRCLE,
+        borderRadius: radii.well,
         alignItems: 'center',
-        gap: space.md,
-        minHeight: HIT + space.sm,
-        paddingVertical: space.sm,
-        paddingLeft: space.sm,
-        paddingRight: space.md,
-        borderRadius: radii.card,
+        justifyContent: 'center',
         backgroundColor: t.colors.surfaceSunken,
     },
-    circle: { width: ICON_CIRCLE, height: ICON_CIRCLE, borderRadius: radii.well, alignItems: 'center', justifyContent: 'center' },
-    circleTint: { backgroundColor: t.colors.surfaceSunken },
-    circleWhite: { backgroundColor: t.colors.surface },
-    payRow: { flexDirection: 'row', alignItems: 'center', paddingLeft: space.sm },
-    payPick: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: HIT },
-    payChange: { paddingRight: space.md },
+    payPick: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: HIT, paddingLeft: space.xxs },
+    payChange: { paddingRight: space.xs },
+    blocked: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+    payRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+    total: { minWidth: 84, justifyContent: 'center' },
+    viewBill: { flexDirection: 'row', alignItems: 'center' },
+    dim: { opacity: 0.5 },
     errorBlock: { gap: space.sm },
 }));
 

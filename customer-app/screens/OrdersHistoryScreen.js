@@ -35,7 +35,8 @@ import {
 import { OrderService } from '../services';
 import { useTranslation } from '../hooks/useTranslation';
 import { OrderCard } from './orders/OrderCard';
-import { getOrderId, isActiveOrder, reorderToCart } from './orders/orderUtils';
+import { getOrderId, isActiveOrder } from './orders/orderUtils';
+import { reorderAvailable } from './orders/reorder';
 
 const FILTERS = [
     { key: 'all', en: 'All', hi: 'सभी' },
@@ -145,22 +146,49 @@ const OrdersHistoryScreen = ({ navigation }) => {
 
     const openOrder = useCallback((order) => (isActiveOrder(order) ? openTracking(order) : openDetails(order)), [openTracking, openDetails]);
 
-    const reorder = useCallback((order) => {
-        const units = reorderToCart(dispatch, order, cartItems);
-        if (!units) {
-            toast.error(isHi ? 'ये सामान अभी उपलब्ध नहीं हैं' : "These items aren't available right now");
-            return;
+    // "Reorder all": every line still on the shelf goes in at today's price; the toast names what
+    // was skipped (sold out / unavailable) or capped at the stock left.
+    const [reordering, setReordering] = useState(null);
+    const reorder = useCallback(async (order) => {
+        const id = getOrderId(order);
+        if (reordering) return;
+        setReordering(id);
+        try {
+            const r = await reorderAvailable(dispatch, order, cartItems);
+            const names = (list) => (list.length > 2 ? `${list.slice(0, 2).join(', ')} +${list.length - 2}` : list.join(', '));
+            const missing = [...r.skipped, ...r.capped.filter((n) => !r.skipped.includes(n))];
+            if (!r.units) {
+                toast.error(isHi ? 'इस ऑर्डर का कोई सामान अभी उपलब्ध नहीं है' : 'Nothing from this order is in stock right now', {
+                    description: missing.length ? names(missing) : undefined,
+                });
+                return;
+            }
+            const added = isHi ? `${r.units} सामान कार्ट में जोड़े गए` : `${r.units} ${r.units === 1 ? 'item' : 'items'} added to cart`;
+            let description;
+            if (r.skipped.length) {
+                description = isHi ? `उपलब्ध नहीं, छोड़ दिए: ${names(r.skipped)}` : `Skipped, not available: ${names(r.skipped)}`;
+            }
+            if (r.capped.length) {
+                const capped = isHi ? `कम स्टॉक, कम जोड़े: ${names(r.capped)}` : `Fewer than before, low stock: ${names(r.capped)}`;
+                description = description ? `${description}. ${capped}` : capped;
+            }
+            toast.success(added, {
+                description,
+                duration: description ? 5000 : undefined,
+                action: { label: isHi ? 'कार्ट देखें' : 'View cart', onPress: () => navigation.navigate('Main', { screen: 'Cart' }) },
+            });
+        } catch {
+            toast.error(isHi ? 'फिर से मँगाना नहीं हो सका' : 'Couldn’t reorder', { description: isHi ? 'फिर कोशिश करें।' : 'Please try again.' });
+        } finally {
+            setReordering(null);
         }
-        toast.success(isHi ? `${units} सामान कार्ट में जोड़े गए` : `${units} items added to cart`, {
-            action: { label: isHi ? 'कार्ट देखें' : 'View cart', onPress: () => navigation.navigate('Main', { screen: 'Cart' }) },
-        });
-    }, [dispatch, cartItems, isHi, navigation]);
+    }, [dispatch, cartItems, isHi, navigation, reordering]);
 
     const renderItem = useCallback(({ item, index }) => (
         <Animated.View entering={layout.enterAt(index)} exiting={layout.exit} style={styles.item}>
-            <OrderCard order={item} isHi={isHi} onOpen={openOrder} onTrack={openTracking} onReorder={reorder} onDetails={openDetails} />
+            <OrderCard order={item} isHi={isHi} onOpen={openOrder} onTrack={openTracking} onReorder={reorder} onDetails={openDetails} reordering={reordering === getOrderId(item)} />
         </Animated.View>
-    ), [isHi, openOrder, openTracking, reorder, openDetails, styles.item]);
+    ), [isHi, openOrder, openTracking, reorder, openDetails, styles.item, reordering]);
 
     const goShopping = () => navigation.navigate('Main', { screen: 'Home' });
     const goBack = () => navigation.goBack();

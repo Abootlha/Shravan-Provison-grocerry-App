@@ -19,6 +19,7 @@ export const translations = {
         digitNumber: '10 digit number',
         continue: 'Continue',
         byContinu: 'By continuing, you agree to our',
+        agreeToTerms: 'By continuing, you agree to our Terms and Privacy Policy.',
         terms: 'Terms',
         and: '&',
         privacyPolicy: 'Privacy Policy',
@@ -235,10 +236,11 @@ export const translations = {
         
         // Login & OTP
         whatsYourNumber: 'आपका नंबर क्या है?',
-        verifyText: 'हम आपको एक कोड भेजेंगे यह सत्यापित करने के लिए कि यह वास्तव में आप हैं',
+        verifyText: 'पुष्टि के लिए हम आपके नंबर पर एक कोड भेजेंगे',
         digitNumber: '10 अंकों का नंबर',
         continue: 'जारी रखें',
         byContinu: 'जारी रखकर, आप हमारी सहमत हैं',
+        agreeToTerms: 'जारी रखकर आप हमारी शर्तों और गोपनीयता नीति से सहमत होते हैं।',
         terms: 'शर्तें',
         and: 'और',
         privacyPolicy: 'गोपनीयता नीति',

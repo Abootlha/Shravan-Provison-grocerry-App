@@ -10,6 +10,7 @@ import { Types } from 'mongoose';
 import { WsJwtGuard } from '../modules/auth/guards/ws-jwt.guard';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { RedisService } from '../common/utils/redis.service';
 
 describe('TrackingGateway - Unauthorized Access Logging (Property 38)', () => {
   let gateway: TrackingGateway;
@@ -55,6 +56,14 @@ describe('TrackingGateway - Unauthorized Access Logging (Property 38)', () => {
         {
           provide: ConfigService,
           useValue: { get: jest.fn() },
+        },
+        {
+          provide: RedisService,
+          useValue: {
+            getClient: () => ({
+              mget: jest.fn().mockResolvedValue([null, null]),
+            }),
+          },
         },
         WsJwtGuard,
       ],

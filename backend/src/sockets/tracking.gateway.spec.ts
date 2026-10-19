@@ -10,6 +10,7 @@ import { WsJwtGuard } from '../modules/auth/guards/ws-jwt.guard';
 import { Order } from '../modules/orders/schemas/order.schema';
 import { WsException } from '@nestjs/websockets';
 import { Socket } from 'socket.io';
+import { RedisService } from '../common/utils/redis.service';
 
 describe('TrackingGateway', () => {
   let gateway: TrackingGateway;
@@ -31,6 +32,9 @@ describe('TrackingGateway', () => {
   const mockJwtService = {
     verifyAsync: jest.fn(),
   };
+
+  const mockRedisClient = { mget: jest.fn().mockResolvedValue([null, null]) };
+  const mockRedisService = { getClient: () => mockRedisClient };
 
   const mockConfigService = {
     get: jest.fn((key: string) => {
@@ -66,16 +70,24 @@ describe('TrackingGateway', () => {
           provide: ConfigService,
           useValue: mockConfigService,
         },
+        {
+          provide: RedisService,
+          useValue: mockRedisService,
+        },
       ],
     }).compile();
 
     gateway = module.get<TrackingGateway>(TrackingGateway);
     jwtService = module.get<JwtService>(JwtService);
-    wsJwtGuard = new WsJwtGuard(jwtService);
+    wsJwtGuard = new WsJwtGuard(
+      jwtService,
+      mockRedisService as unknown as RedisService,
+    );
   });
 
   afterEach(() => {
     jest.clearAllMocks();
+    mockRedisClient.mget.mockResolvedValue([null, null]);
   });
 
   describe('Property 15: Socket Authentication', () => {
@@ -113,6 +125,8 @@ describe('TrackingGateway', () => {
                 headers: {},
               },
               data: {},
+              emit: jest.fn(),
+              disconnect: jest.fn(),
             } as unknown as Socket;
 
             // Create mock execution context
@@ -178,6 +192,8 @@ describe('TrackingGateway', () => {
                     : {},
               },
               data: {},
+              emit: jest.fn(),
+              disconnect: jest.fn(),
             } as unknown as Socket;
 
             const mockContext = {

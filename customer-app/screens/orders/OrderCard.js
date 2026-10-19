@@ -1,6 +1,7 @@
 /**
  * OrderCard — one row of order history: soft status chip + date, thumbnail stack, item count,
- * total, and contextual actions (Track for live orders, outlined Reorder for finished ones).
+ * total, and contextual actions (Track for live orders, outlined "Reorder all" for finished ones:
+ * adds what is still in stock, see orders/reorder.js).
  * Live orders also show the ETA as a mixed-weight line ("Arriving in **7 mins**").
  *
  * Props: order, isHi, onOpen(order), onTrack(order), onReorder(order), onDetails(order)
@@ -15,7 +16,7 @@ import { Button, Card, Divider, PressableScale, Text } from '../../components/ui
 import { StatusChip, ThumbStack } from './OrderParts';
 import { countItems, formatMoney, formatOrderDate, getBill, getEtaMinutes, getStatusMeta, isActiveOrder } from './orderUtils';
 
-function OrderCardBase({ order, isHi, onOpen, onTrack, onReorder, onDetails }) {
+function OrderCardBase({ order, isHi, onOpen, onTrack, onReorder, onDetails, reordering = false }) {
     const styles = useStyles();
     const meta = getStatusMeta(order.orderStatus, isHi);
     const active = isActiveOrder(order);
@@ -77,8 +78,10 @@ function OrderCardBase({ order, isHi, onOpen, onTrack, onReorder, onDetails }) {
                     <Button
                         size="sm"
                         variant="outline"
-                        label={isHi ? 'फिर से मँगाएँ' : 'Reorder'}
+                        label={isHi ? 'सब फिर से मँगाएँ' : 'Reorder all'}
+                        loading={reordering}
                         onPress={() => onReorder(order)}
+                        accessibilityHint={isHi ? 'उपलब्ध सामान कार्ट में जोड़ता है' : 'Adds the items still in stock to your cart'}
                         leftIcon={({ color, size }) => <MaterialCommunityIcons name="refresh" color={color} size={size} />}
                     />
                 )}

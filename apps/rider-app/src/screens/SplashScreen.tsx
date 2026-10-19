@@ -1,61 +1,54 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
-import { COLORS } from '../utils/constants';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { AppText } from '../components/ui';
 import { useAppDispatch } from '../hooks/useAuth';
 import { loadUser } from '../store/slices/authSlice';
+import { spacing } from '../theme';
 import type { SplashScreenProps } from '../types/navigation';
+
+const BRAND = '#6C3CF4';
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({ navigation }) => {
   const dispatch = useAppDispatch();
 
   useEffect(() => {
-    const bootstrap = async () => {
+    let active = true;
+    (async () => {
       const result = await dispatch(loadUser());
       const hasSession = loadUser.fulfilled.match(result) && Boolean(result.payload?.user);
-
-      navigation.replace(hasSession ? 'Home' : 'Login');
+      if (active) navigation.replace(hasSession ? 'Home' : 'Login');
+    })();
+    return () => {
+      active = false;
     };
-
-    bootstrap();
   }, [dispatch, navigation]);
 
   return (
     <View style={styles.container}>
-      <Text style={styles.logo}>SK</Text>
-      <Text style={styles.title}>ShravanKirana</Text>
-      <Text style={styles.subtitle}>Rider App</Text>
-      <ActivityIndicator size="large" color={COLORS.surface} style={styles.loader} />
+      <View style={styles.mark}>
+        <MaterialCommunityIcons name="moped" size={44} color={BRAND} />
+      </View>
+      <AppText variant="h1" color="#FFFFFF" style={{ marginTop: spacing.lg }}>
+        ShravanKirana
+      </AppText>
+      <AppText variant="body" color="rgba(255,255,255,0.8)" style={{ marginTop: spacing.xs }}>
+        Delivery Partner
+      </AppText>
+      <ActivityIndicator color="#FFFFFF" style={styles.loader} accessibilityLabel="Loading" />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.primary,
+  container: { flex: 1, backgroundColor: BRAND, alignItems: 'center', justifyContent: 'center' },
+  mark: {
+    width: 88,
+    height: 88,
+    borderRadius: 28,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  logo: {
-    fontSize: 72,
-    fontWeight: '700',
-    color: COLORS.surface,
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: COLORS.surface,
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: COLORS.surface,
-    opacity: 0.8,
-    marginBottom: 48,
-  },
-  loader: {
-    position: 'absolute',
-    bottom: 100,
-  },
+  loader: { position: 'absolute', bottom: 80 },
 });

@@ -1,247 +1,180 @@
 import { io, Socket } from 'socket.io-client';
-import { LOCATION_UPDATE_INTERVAL, SOCKET_URL } from '../utils/constants';
-import type { RiderLocation } from '../types/rider';
-import type { NewOrderAssignment, OrderStatusUpdate } from '../types/order';
+import { SOCKET_URL } from '../utils/constants';
 import { refreshAccessToken } from './authSession';
+import { storage } from './storage';
 
-type SocketEventHandler = (...args: unknown[]) => void;
+type SocketEventHandler = (...args: any[]) => void;
 
+export type SocketState = 'disconnected' | 'connecting' | 'connected';
+
+/** Retry delay after a refresh that failed for a transient reason (offline, 5xx). */
+const AUTH_RETRY_MS = 10_000;
+
+/**
+ * One shared socket to the /tracking namespace.
+ *
+ * Auth (see docs/api/rider-tracking.md): the token is checked on connect. A
+ * rejected handshake (`connect_error` "unauthorized") or an `auth_error` on an
+ * open socket means: refresh the access token, set it on `socket.auth`, and
+ * connect again. socket.io does not retry either case by itself.
+ */
 class SocketService {
   private socket: Socket | null = null;
-  private locationUpdateInterval: ReturnType<typeof setInterval> | null = null;
-  private riderId: string = '';
-  private listeners = new Map<string, Set<SocketEventHandler>>();
-
   private token: string | null = null;
-  private refCount = 0;
+  private listeners = new Map<string, Set<SocketEventHandler>>();
+  private stateListeners = new Set<(state: SocketState) => void>();
+  private authRefreshing = false;
+  private authRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private state: SocketState = 'disconnected';
 
-  /** Register a consumer; the socket stays open while at least one consumer holds it. */
-  retain(): void {
-    this.refCount += 1;
-  }
-
-  /** Drop a consumer; the socket is closed when the last consumer releases it. */
-  release(): void {
-    this.refCount = Math.max(0, this.refCount - 1);
-    if (this.refCount === 0) {
-      this.disconnect();
-    }
-  }
-
-  connect(token: string, riderId?: string): void {
-    if (riderId) {
-      this.riderId = riderId;
-    }
-
+  connect(token: string): void {
     if (this.socket) {
       if (this.token === token) {
-        // Same session: reuse the existing socket (connected or still reconnecting).
-        if (riderId && this.socket.connected) {
-          this.joinRooms();
-        }
+        if (!this.socket.connected && !this.socket.active) this.socket.connect();
         return;
       }
-      // Token changed (refresh or new login): dispose the old socket before creating a new one.
-      this.disposeSocket();
+      // Token renewed elsewhere (REST interceptor, app foreground): the open
+      // connection stays valid; the new token is used for the next handshake.
+      this.token = token;
+      this.socket.auth = { token };
+      if (!this.socket.connected && !this.socket.active) this.socket.connect();
+      return;
     }
 
     this.token = token;
+    this.setState('connecting');
     const socket = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: 10,
       reconnectionDelay: 2000,
-      reconnectionDelayMax: 10000,
+      reconnectionDelayMax: 15000,
     });
     this.socket = socket;
 
-    let initialConnectHandled = false;
     socket.on('connect', () => {
-      if (__DEV__) console.log('Socket connected:', socket.id);
-      // Reconnects re-join via the manager 'reconnect' handler below.
-      if (!initialConnectHandled) {
-        initialConnectHandled = true;
-        this.joinRooms();
-      }
+      this.setState('connected');
+      // The server joins rider_<id> automatically; this is an idempotent safety net.
+      socket.emit('joinRiderRoom');
     });
 
     socket.on('disconnect', (reason) => {
-      if (__DEV__) console.log('Socket disconnected:', reason);
-      // The backend drops sockets whose token fails verification.
+      this.setState('disconnected');
+      if (__DEV__) console.log('[socket] disconnected:', reason);
+      // A server-side disconnect is not retried by socket.io. Unless it was
+      // preceded by auth_error (handled below), try again with a fresh token.
       if (reason === 'io server disconnect') this.handleAuthFailure();
     });
 
-    socket.on('connect_error', (error) => {
-      console.error('Socket connection error:', error.message);
-      if (/unauthori[sz]ed|jwt|token/i.test(error.message || '')) this.handleAuthFailure();
+    socket.on('connect_error', (error: Error & { data?: { code?: string } }) => {
+      this.setState('disconnected');
+      if (__DEV__) console.log('[socket] connect_error:', error.message, error.data?.code);
+      if (error.message === 'unauthorized') {
+        this.handleAuthFailure();
+      } else if (error.message === 'auth_unavailable') {
+        // Server could not check the token right now (e.g. session store down):
+        // the token is fine, so retry the same one later. socket.io will not.
+        this.scheduleRetry();
+      }
     });
 
-    // 'reconnect' is emitted by the Manager (socket.io), not by the Socket.
-    socket.io.on('reconnect', (attemptNumber) => {
-      if (__DEV__) console.log('Socket reconnected after', attemptNumber, 'attempts');
-      this.joinRooms();
+    socket.on('auth_error', (payload: { code?: string } | undefined) => {
+      if (__DEV__) console.log('[socket] auth_error:', payload?.code);
+      this.handleAuthFailure();
     });
 
-    this.attachStoredListeners();
+    socket.io.on('reconnect_attempt', () => this.setState('connecting'));
+
+    for (const [event, handlers] of this.listeners.entries()) {
+      for (const handler of handlers) socket.on(event, handler);
+    }
   }
 
-  private authRefreshing = false;
-
-  /**
-   * Token rejected: renew it. On success the store gets the new token and
-   * useSocket() calls connect() with it, which swaps in a fresh socket. A real
-   * session end (401 from refresh) is handled by the session handlers in App.tsx;
-   * offline, the socket's own reconnection keeps trying.
-   */
   private handleAuthFailure(): void {
-    if (this.authRefreshing) return;
+    if (this.authRefreshing || !this.socket) return;
     this.authRefreshing = true;
+    if (this.authRetryTimer) {
+      clearTimeout(this.authRetryTimer);
+      this.authRetryTimer = null;
+    }
     refreshAccessToken()
       .catch(() => null)
+      .then(async (token) => {
+        if (!this.socket) return;
+        if (token) {
+          this.token = token;
+          this.socket.auth = { token };
+          this.setState('connecting');
+          this.socket.connect();
+          return;
+        }
+        // No refresh token left means the session is over; App.tsx signs out.
+        if (!(await storage.getRefreshToken())) return;
+        this.authRetryTimer = setTimeout(() => this.handleAuthFailure(), AUTH_RETRY_MS);
+      })
       .finally(() => {
         this.authRefreshing = false;
       });
   }
 
-  private joinRooms(): void {
-    if (this.riderId) {
-      this.socket?.emit('joinRiderRoom', { riderId: this.riderId });
-    }
+  private scheduleRetry(): void {
+    if (this.authRetryTimer || !this.socket) return;
+    this.authRetryTimer = setTimeout(() => {
+      this.authRetryTimer = null;
+      if (this.socket && !this.socket.connected) {
+        this.setState('connecting');
+        this.socket.connect();
+      }
+    }, AUTH_RETRY_MS);
   }
 
-  private disposeSocket(): void {
-    if (!this.socket) {
-      return;
-    }
-    this.socket.io.off('reconnect');
-    this.socket.removeAllListeners();
-    this.socket.disconnect();
-    this.socket = null;
-    this.token = null;
+  private setState(state: SocketState): void {
+    if (this.state === state) return;
+    this.state = state;
+    this.stateListeners.forEach((listener) => listener(state));
   }
 
-  setRiderId(riderId: string): void {
-    this.riderId = riderId;
-    if (this.socket?.connected) {
-      this.socket.emit('joinRiderRoom', { riderId });
-    }
+  getState(): SocketState {
+    return this.state;
+  }
+
+  onStateChange(listener: (state: SocketState) => void): () => void {
+    this.stateListeners.add(listener);
+    return () => this.stateListeners.delete(listener);
   }
 
   disconnect(): void {
-    this.stopLocationUpdates();
-    this.disposeSocket();
+    if (this.authRetryTimer) {
+      clearTimeout(this.authRetryTimer);
+      this.authRetryTimer = null;
+    }
+    if (this.socket) {
+      this.socket.io.off('reconnect_attempt');
+      this.socket.removeAllListeners();
+      this.socket.disconnect();
+      this.socket = null;
+    }
+    this.token = null;
+    this.setState('disconnected');
   }
 
-  on(event: string, handler: SocketEventHandler): void {
-    if (!this.listeners.has(event)) {
-      this.listeners.set(event, new Set());
-    }
-    this.listeners.get(event)?.add(handler);
+  /** Register a handler that survives reconnects. Returns an unsubscribe function. */
+  on(event: string, handler: SocketEventHandler): () => void {
+    if (!this.listeners.has(event)) this.listeners.set(event, new Set());
+    this.listeners.get(event)!.add(handler);
     this.socket?.on(event, handler);
-  }
-
-  off(event: string, handler?: SocketEventHandler): void {
-    if (handler) {
+    return () => {
       this.listeners.get(event)?.delete(handler);
-    } else {
-      this.listeners.delete(event);
-    }
-    if (handler) {
       this.socket?.off(event, handler);
-    } else {
-      this.socket?.off(event);
-    }
+    };
   }
 
   emit(event: string, data?: unknown): void {
-    this.socket?.emit(event, data);
-  }
-
-  onNewOrderAssignment(handler: (data: NewOrderAssignment) => void): void {
-    this.on('newOrderAssignment', handler as SocketEventHandler);
-  }
-
-  offNewOrderAssignment(handler?: (data: NewOrderAssignment) => void): void {
-    if (handler) {
-      this.off('newOrderAssignment', handler as SocketEventHandler);
-    } else {
-      this.off('newOrderAssignment');
-    }
-  }
-
-  onOrderStatusUpdate(handler: (data: OrderStatusUpdate) => void): void {
-    this.on('orderStatusUpdate', handler as SocketEventHandler);
-  }
-
-  offOrderStatusUpdate(handler?: (data: OrderStatusUpdate) => void): void {
-    if (handler) {
-      this.off('orderStatusUpdate', handler as SocketEventHandler);
-    } else {
-      this.off('orderStatusUpdate');
-    }
-  }
-
-  onOrderPacked(handler: (data: { orderId: string; status: string; order?: unknown }) => void): void {
-    this.on('orderPacked', handler as SocketEventHandler);
-  }
-
-  offOrderPacked(handler?: (data: { orderId: string; status: string; order?: unknown }) => void): void {
-    if (handler) {
-      this.off('orderPacked', handler as SocketEventHandler);
-    } else {
-      this.off('orderPacked');
-    }
-  }
-
-  sendLocationUpdate(location: RiderLocation): void {
-    this.emit('riderLocationUpdate', location);
-  }
-
-  startLocationUpdates(
-    getLocation: () => { latitude: number; longitude: number; heading?: number; speed?: number } | null
-  ): void {
-    if (this.locationUpdateInterval) {
-      return;
-    }
-
-    this.locationUpdateInterval = setInterval(() => {
-      const location = getLocation();
-      if (location) {
-        this.sendLocationUpdate({
-          riderId: '',
-          latitude: location.latitude,
-          longitude: location.longitude,
-          heading: location.heading,
-          speed: location.speed,
-          timestamp: new Date().toISOString(),
-        });
-      }
-    }, LOCATION_UPDATE_INTERVAL);
-  }
-
-  stopLocationUpdates(): void {
-    if (this.locationUpdateInterval) {
-      clearInterval(this.locationUpdateInterval);
-      this.locationUpdateInterval = null;
-    }
+    if (this.socket?.connected) this.socket.emit(event, data);
   }
 
   isConnected(): boolean {
     return this.socket?.connected ?? false;
-  }
-
-  private attachStoredListeners(): void {
-    if (!this.socket) {
-      return;
-    }
-
-    for (const [event, handlers] of this.listeners.entries()) {
-      for (const handler of handlers) {
-        this.socket.off(event, handler);
-        this.socket.on(event, handler);
-      }
-    }
   }
 }
 

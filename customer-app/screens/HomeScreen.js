@@ -23,23 +23,26 @@ import { describeError, friendlyError } from '../services/normalize';
 import HomeHeader from './home/HomeHeader';
 import { CategoryGrid, HomeSkeleton, ProductRail, RailSkeleton } from './home/HomeSections';
 import { FreshSection, MomentSection, PriceStore, Reveal, SeasonBlock } from './home/EditorialSections';
-import { buildHomeSections, productCategoryId, resolveNow } from './home/collections';
+import { buildHomeSections, productCategoryId, resolveNow, shelvesFrom } from './home/collections';
 import { headerThemeFor, idOf, nameOf } from './home/catalog';
 import { useTabBarScroll } from './home/useTabBarScroll';
 import { useTabEnter } from './home/useTabEnter';
 import { useCartBarOffset, useTabBarHeight } from '../components/BottomTabsIcons';
-import ActiveOrderBar, { ORDER_BAR_HEIGHT, useActiveOrder } from '../components/ActiveOrderBar';
+import ActiveOrderBar, { ORDER_BAR_HEIGHT, ORDER_STRIP_HEIGHT, useActiveOrder } from '../components/ActiveOrderBar';
 import { contentColumn } from '../hooks/useContentWidth';
+import { useRestockWatch } from '../services/restockWatch';
 
 const AnimatedFlashList = Animated.createAnimatedComponent(FlashList);
 
 // Bundled art (assets/banner-*.png): unbranded product cut-outs on a transparent canvas (sources in
 // assets/README-images.md), products on
 // the right. BannerCarousel paints the flat block (neutral, or brand for one slide) and the copy.
+// A banner only shows when a category it promises has stock (`fresh`: only fresh shelves count),
+// and opens that category.
 const BANNERS = [
-    { id: 'b1', image: require('../assets/banner-essentials.png'), surface: 'brand', en: ['Daily essentials in minutes', 'Milk, bread, eggs and more'], hi: ['रोज़ की ज़रूरतें, मिनटों में', 'दूध, ब्रेड, अंडे और भी बहुत कुछ'] },
-    { id: 'b2', image: require('../assets/banner-fresh.png'), surface: 'neutral', en: ['Fresh fruits & vegetables', 'Tomatoes, onions, bananas and more'], hi: ['ताज़े फल और सब्ज़ियाँ', 'टमाटर, प्याज़, केले और भी बहुत कुछ'] },
-    { id: 'b3', image: require('../assets/banner-pantry.png'), surface: 'neutral', en: ['Stock up your pantry', 'Atta, dal, rice and spices'], hi: ['रसोई का सामान भर लें', 'आटा, दाल, चावल और मसाले'] },
+    { id: 'b1', image: require('../assets/banner-essentials.png'), surface: 'brand', fresh: true, match: /dairy|milk|bread|\beggs?\b/i, en: ['Daily essentials in minutes', 'Milk, bread, eggs and more'], hi: ['रोज़ की ज़रूरतें, मिनटों में', 'दूध, ब्रेड, अंडे और भी बहुत कुछ'] },
+    { id: 'b2', image: require('../assets/banner-fresh.png'), surface: 'neutral', fresh: true, match: /fruit|veg|sabzi|produce|herb/i, en: ['Fresh fruits & vegetables', 'Tomatoes, onions, bananas and more'], hi: ['ताज़े फल और सब्ज़ियाँ', 'टमाटर, प्याज़, केले और भी बहुत कुछ'] },
+    { id: 'b3', image: require('../assets/banner-pantry.png'), surface: 'neutral', match: /atta|rice|\bdaa?l|spice|masala|\boils?\b/i, en: ['Stock up your pantry', 'Atta, dal, rice and spices'], hi: ['रसोई का सामान भर लें', 'आटा, दाल, चावल और मसाले'] },
 ];
 
 const RAIL_LIMIT = 12;
@@ -90,6 +93,7 @@ const HomeScreen = ({ navigation }) => {
 
     const [categories, setCategories] = useState([]);
     const [products, setProducts] = useState([]);
+    const [shelves, setShelves] = useState(null); // GET /products/home shelves; null = derive from products
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState(null);
@@ -103,6 +107,8 @@ const HomeScreen = ({ navigation }) => {
     const [collapseH, setCollapseH] = useState(0);
 
     const [orderHistory, setOrderHistory] = useState([]);
+    // "Notify me" on sold-out cards (kept on this phone): watched items get a "Back in stock" rail
+    const watchKey = useRestockWatch().watchedIds.join(',');
 
     const listRef = useRef(null);
     const cartBarOffset = useCartBarOffset();
@@ -119,11 +125,14 @@ const HomeScreen = ({ navigation }) => {
                 setError(null);
                 setPartialError(null);
                 setErrorCause(null);
-                // Independent requests: one failing must not blank the other.
-                const [catRes, prodRes] = await Promise.allSettled([
-                    ProductService.getCategories(),
-                    ProductService.getProducts({ limit: 100 }),
-                ]);
+                // Independent requests: one failing must not blank the other. GET /products/home
+                // carries every category's shelf; backends without it fall back to the top 100.
+                const [catRes, homeRes] = await Promise.allSettled([ProductService.getCategories(), ProductService.getHome()]);
+                let prodRes = homeRes;
+                if (homeRes.status === 'rejected') {
+                    if (__DEV__) console.warn('[home] /products/home unavailable, using /products', describeError(homeRes.reason));
+                    [prodRes] = await Promise.allSettled([ProductService.getProducts({ limit: 100 })]);
+                }
                 const failed = [
                     catRes.status === 'rejected' && `categories: ${describeError(catRes.reason)}`,
                     prodRes.status === 'rejected' && `products: ${describeError(prodRes.reason)}`,
@@ -132,12 +141,28 @@ const HomeScreen = ({ navigation }) => {
                     if (__DEV__) console.error('[home] catalogue request failed', failed.join(' | '));
                     setErrorCause(catRes.status === 'rejected' ? catRes.reason : prodRes.reason);
                 }
-                const [cats, prods] = await Promise.all([
-                    translateList(catRes.status === 'fulfilled' ? catRes.value : [], currentLanguage),
-                    translateList(prodRes.status === 'fulfilled' ? prodRes.value.products : [], currentLanguage),
-                ]);
+                const homeShelves = homeRes.status === 'fulfilled' ? homeRes.value.sections : null;
+                const rawProducts = homeShelves
+                    ? homeShelves.flatMap((x) => x.products)
+                    : prodRes.status === 'fulfilled'
+                      ? prodRes.value.products
+                      : [];
+                // the shelves know their categories even when GET /categories failed
+                const rawCats = catRes.status === 'fulfilled' ? catRes.value : (homeShelves || []).map((x) => x.category);
+                const [cats, prods] = await Promise.all([translateList(rawCats, currentLanguage), translateList(rawProducts, currentLanguage)]);
+                const catById = new Map(cats.map((c) => [String(idOf(c)), c]));
+                const prodById = new Map(prods.map((p) => [String(p._id), p]));
                 setCategories(cats);
                 setProducts(prods);
+                setShelves(
+                    homeShelves
+                        ? homeShelves.map((x) => ({
+                              ...x,
+                              category: catById.get(String(idOf(x.category))) || x.category,
+                              products: x.products.map((p) => prodById.get(String(p._id)) || p),
+                          }))
+                        : null,
+                );
                 setCatProducts({});
                 // Only an error page when nothing usable came back; a partial catalogue still renders.
                 if (failed.length) {
@@ -212,7 +237,10 @@ const HomeScreen = ({ navigation }) => {
     const handleLocationPress = useCallback(() => navigation.navigate('Location'), [navigation]);
     const handleProfilePress = useCallback(() => navigation.navigate('Main', { screen: 'Account' }), [navigation]);
     const handleAllCategories = useCallback(() => navigation.navigate('Categories'), [navigation]);
-    const handleBannerPress = useCallback(() => navigation.navigate('Categories'), [navigation]);
+    const handleBannerPress = useCallback(
+        (banner) => (banner?.category ? navigation.navigate('Category', { category: banner.category }) : navigation.navigate('Categories')),
+        [navigation],
+    );
     const handleOrderPress = useCallback(
         () => activeOrder && navigation.navigate('OrderTracking', { orderId: activeOrder._id || activeOrder.orderId }),
         [navigation, activeOrder],
@@ -313,6 +341,20 @@ const HomeScreen = ({ navigation }) => {
         return () => clearTimeout(id);
     }, [loading, firstPaint]);
 
+    // Every category with in-stock products (from /products/home, or rebuilt from the product slice).
+    const homeShelves = useMemo(() => shelves || shelvesFrom(products, categories), [shelves, products, categories]);
+
+    const banners = useMemo(
+        () =>
+            BANNERS.map((b) => {
+                const shelf = homeShelves.find((x) => (!b.fresh || x.fresh) && b.match.test(x.category?.name || ''));
+                if (!shelf) return null;
+                const [title, subtitle] = isHi ? b.hi : b.en;
+                return { id: b.id, image: b.image, surface: b.surface, title, subtitle, category: shelf.category };
+            }).filter(Boolean),
+        [homeShelves, isHi],
+    );
+
     const sections = useMemo(() => {
         if (loading) return [{ key: 'skeleton', type: 'skeleton' }];
         if (error) return [{ key: 'error', type: 'error' }];
@@ -340,9 +382,17 @@ const HomeScreen = ({ navigation }) => {
             }));
         }
 
-        if (!products.length && !categories.length) return [{ key: 'banners', type: 'banners' }, { key: 'catalogEmpty', type: 'catalogEmpty' }];
+        // Nothing in stock anywhere: say so (the category grid still lets people look around).
+        if (!homeShelves.length) {
+            return [
+                ...(categories.length ? [{ key: 'grid', type: 'grid', categories }] : []),
+                { key: 'catalogEmpty', type: 'catalogEmpty' },
+                ...(partialError ? [{ key: 'partialError', type: 'error', detail: partialError, partial: true }] : []),
+            ];
+        }
 
-        const built = buildHomeSections({ products, categories, orders: orderHistory, now: resolveNow(), language: currentLanguage, t, eta: etaMinutes });
+        const built = buildHomeSections({ products, categories, shelves: homeShelves, orders: orderHistory, watched: watchKey ? watchKey.split(',') : [], now: resolveNow(), language: currentLanguage, t, eta: etaMinutes });
+        if (!banners.length) built.splice(built.findIndex((x) => x.type === 'banners'), 1);
         // Too few products for any curated collection: still show everything as one rail.
         if (products.length && !built.some((x) => x.type !== 'banners' && x.type !== 'grid')) {
             built.push({ key: 'everything', type: 'rail', title: isHi ? 'सभी उत्पाद' : 'All products', subtitle: `${products.length} ${isHi ? 'आइटम' : 'items'}`, products: products.slice(0, 30) });
@@ -351,19 +401,7 @@ const HomeScreen = ({ navigation }) => {
         return built;
         // `t` is a fresh function every render but only depends on the language, so key on that instead
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [loading, error, partialError, activeCategory, catProducts, categories, products, orderHistory, currentLanguage, isHi, handleCategoryPress, etaMinutes]);
-
-    const banners = useMemo(
-        () =>
-            BANNERS.map((b) => ({
-                id: b.id,
-                image: b.image,
-                surface: b.surface,
-                title: (isHi ? b.hi : b.en)[0],
-                subtitle: (isHi ? b.hi : b.en)[1],
-            })),
-        [isHi],
-    );
+    }, [loading, error, partialError, activeCategory, catProducts, categories, products, homeShelves, banners, orderHistory, watchKey, currentLanguage, isHi, handleCategoryPress, etaMinutes]);
 
     const freshLabels = useMemo(
         () => ({ chilled: t('homeFeed.fresh.chilled'), shelf: t('homeFeed.fresh.shelf'), shelfOne: t('homeFeed.fresh.shelfOne') }),
@@ -491,7 +529,8 @@ const HomeScreen = ({ navigation }) => {
         [banners, currentLanguage, errorCause, fetchData, firstPaint, freshLabels, handleAllCategories, handleBannerPress, handleCategoryPress, handleProductPress, isHi, onTabSelect, scrollY, t],
     );
 
-    const addressType = selectedAddress?.type || (isHi ? 'घर' : 'Home');
+    // No address yet: just the prompt (never a made-up "Home" label)
+    const addressType = selectedAddress ? selectedAddress.type || (isHi ? 'पता' : 'Address') : null;
     const addressLine = selectedAddress?.address || (isHi ? 'अपना पता चुनें' : 'Select your location');
     // From the server's fees; nothing until settings load.
     const freeAt = fees?.freeDeliveryThreshold;
@@ -502,10 +541,14 @@ const HomeScreen = ({ navigation }) => {
           : (isHi ? 'हर ऑर्डर पर मुफ़्त डिलीवरी' : 'Free delivery on every order');
     const avatarInitial = (user?.name || '').trim().charAt(0).toUpperCase();
     const hasOrderBar = !!activeOrder;
-    const cartSpace = cartCount > 0 ? CART_PILL_H + space.sm : 0;
+    // Cart pill + active order: the order collapses to a slim strip sitting 4pt above the pill, so
+    // the pair reads as one stacked unit (36 + 4 + 56 = 96pt above the dock, was 120 + gaps).
+    const orderCompact = hasOrderBar && cartCount > 0;
+    const cartSpace = cartCount > 0 ? CART_PILL_H + (orderCompact ? space.xs : space.sm) : 0;
     const orderBarBottom = cartBarOffset + cartSpace;
     // the list scrolls behind the dock: clear the dock, the cart pill and the order bar
-    const bottomSpace = dockHeight + space['3xl'] + cartSpace + (hasOrderBar ? ORDER_BAR_H + space.sm : 0);
+    const bottomSpace = dockHeight + space['3xl'] + cartSpace
+        + (hasOrderBar ? (orderCompact ? ORDER_STRIP_HEIGHT : ORDER_BAR_H + space.sm) : 0);
 
     return (
         <Screen edges={[]} statusBar={theme.statusBar} topInsetColor={theme.bg}>
@@ -558,7 +601,7 @@ const HomeScreen = ({ navigation }) => {
 
                 {hasOrderBar ? (
                     <Animated.View style={[styles.orderBar, { bottom: orderBarBottom }, orderBarFollow, { pointerEvents: 'box-none' }]}>
-                        <ActiveOrderBar order={activeOrder} onPress={handleOrderPress} />
+                        <ActiveOrderBar order={activeOrder} onPress={handleOrderPress} compact={orderCompact} />
                     </Animated.View>
                 ) : null}
                 <FloatingCartBar onPress={handleCartPress} bottomOffset={cartBarOffset} />

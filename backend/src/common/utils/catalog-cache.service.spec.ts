@@ -56,6 +56,7 @@ describe('ProductsService public list', () => {
       redis as any,
       { get: () => 300 } as any,
       catalog as any,
+      {} as any,
     );
 
     await service.findAll({ page: 1, limit: 20 });

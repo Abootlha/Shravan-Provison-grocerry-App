@@ -5,8 +5,7 @@
  *                   clean row of three pack shots on image wells (each opens its product), then
  *                   the rest of the collection as a rail below the card
  *   PriceStore      "Shop by price" chip row → client-filtered rail
- *   FreshSection    produce spotlight: big 2-up image-well tiles with freshness chips when the
- *                   record carries storage / shelf-life data (plain tiles otherwise)
+ *   FreshSection    produce spotlight: 2-up ProductCards at tile width (same card, same tag rule)
  *   SeasonBlock     config-driven seasonal card: flat surface + hairline, plain title, and the
  *                   season's rail inset inside the card
  *   Reveal          first-view-only fade + rise; the first screenful staggers, later sections
@@ -17,17 +16,14 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useDispatch, useSelector } from 'react-redux';
-import { AddToCartButton, Chip, PressableScale, PriceTag, Text, useStaggeredEntrance } from '../../components/ui';
+import { Chip, PressableScale, Text, useStaggeredEntrance } from '../../components/ui';
 import ProductImage from '../../components/product/ProductImage';
-import { normalizeProduct } from '../../components/product/productUtils';
-import { addToCart, decrementQuantity, incrementQuantity } from '../../store/slices/cartSlice';
+import ProductCard from '../../components/ProductCard';
 import { radii, space } from '../../constants/theme';
-import { makeStyles, useTheme } from '../../theme';
+import { makeStyles } from '../../theme';
 import { press } from '../../theme/motion';
 import { HomeSectionHeader, RailList } from './HomeSections';
-import { fmt } from './collections';
+import { toCardProduct } from './catalog';
 import { useContentWidth } from '../../hooks/useContentWidth';
 
 // ---------------------------------------------------------------------------
@@ -151,81 +147,26 @@ export const PriceStore = memo(({ section, language, onProductPress, filterLabel
 });
 
 // ---------------------------------------------------------------------------
-// Fresh — 2-up produce tiles
+// Fresh — 2-up produce tiles (the shared ProductCard at tile width: same anatomy and tag rule
+// as every other card, so a tomato looks the same here as in a rail)
 // ---------------------------------------------------------------------------
 
-const FreshChip = memo(({ freshness, labels }) => {
-    const styles = useStyles();
-    const { colors } = useTheme();
-    if (!freshness) return null;
-    const chilled = freshness.kind === 'chilled';
-    const label = chilled ? labels.chilled : fmt(freshness.days === 1 ? labels.shelfOne : labels.shelf, { n: freshness.days });
-    return (
-        <View style={styles.freshChip}>
-            <MaterialCommunityIcons name={chilled ? 'snowflake' : 'leaf'} size={12} color={colors.successInk} />
-            <Text variant="caption" weight="semibold" color="successInk" numberOfLines={1}>
-                {label}
-            </Text>
-        </View>
-    );
-});
-
-const FreshTile = memo(({ item, width, language, labels, addLabel, soldOutLabel, onProductPress }) => {
-    const styles = useStyles();
-    const dispatch = useDispatch();
+const FreshTile = memo(({ item, width, language, onProductPress }) => {
     const raw = item.product;
-    const product = useMemo(() => normalizeProduct(raw, language === 'hi' ? raw.translatedName : raw.name), [raw, language]);
-    const quantity = useSelector((s) => s.cart.items.find((it) => it.id === product.id)?.quantity || 0);
+    const product = useMemo(() => toCardProduct(raw, language), [raw, language]);
     const onPress = useCallback(() => onProductPress(raw), [onProductPress, raw]);
-    // the cart keeps the source-language name (rows translate on render)
-    const onAdd = useCallback(() => dispatch(addToCart({ ...product, name: raw.name || product.name })), [dispatch, product, raw]);
-    const onInc = useCallback(() => dispatch(incrementQuantity(product.id)), [dispatch, product.id]);
-    const onDec = useCallback(() => dispatch(decrementQuantity(product.id)), [dispatch, product.id]);
-    const hasMrp = product.originalPrice > product.price;
-    return (
-        <PressableScale
-            container
-            onPress={onPress}
-            scaleTo={press.subtle}
-            style={[styles.freshTile, { width }]}
-            accessibilityLabel={`${product.name}${product.unit ? `, ${product.unit}` : ''}, ₹${product.price}`}
-        >
-            <View style={[styles.freshWell, { width, height: width }]}>
-                <ProductImage uri={product.image} variant="card" size={width} radius={radii.card} recyclingKey={product.id} />
-                <FreshChip freshness={item.freshness} labels={labels} />
-                <AddToCartButton
-                    size="md"
-                    quantity={quantity}
-                    productName={product.name}
-                    outOfStock={!product.inStock}
-                    label={addLabel}
-                    outOfStockLabel={soldOutLabel}
-                    onAdd={onAdd}
-                    onIncrement={onInc}
-                    onDecrement={onDec}
-                    style={styles.freshAdd}
-                />
-            </View>
-            <PriceTag price={product.price} mrp={hasMrp ? product.originalPrice : null} size="sm" style={styles.freshPrice} />
-            <Text variant="label" weight="medium" numberOfLines={2} style={styles.freshName}>
-                {product.name}
-            </Text>
-            {product.unit ? (
-                <Text variant="caption" color="muted" numberOfLines={1}>
-                    {product.unit}
-                </Text>
-            ) : null}
-        </PressableScale>
-    );
+    return <ProductCard product={product} variant="tile" width={width} onPress={onPress} style={TILE_STYLE} />;
 });
+const TILE_STYLE = { marginRight: 0, marginBottom: 0 };
 
-export const FreshSection = memo(({ section, language, labels, addLabel, soldOutLabel, actionLabel, onProductPress, onSeeAll }) => {
+export const FreshSection = memo(({ section, language, actionLabel, onProductPress, onSeeAll }) => {
     const styles = useStyles();
     const width = useContentWidth();
     const tileW = Math.floor((width - space.gutter * 2 - space.md) / 2);
     return (
         <View style={styles.editorialSection}>
             <HomeSectionHeader
+                title={section.title}
                 lead={section.lead}
                 emphasis={section.emphasis}
                 trail={section.trail}
@@ -235,16 +176,7 @@ export const FreshSection = memo(({ section, language, labels, addLabel, soldOut
             />
             <View style={styles.freshGrid}>
                 {section.products.map((item) => (
-                    <FreshTile
-                        key={item.product._id}
-                        item={item}
-                        width={tileW}
-                        language={language}
-                        labels={labels}
-                        addLabel={addLabel}
-                        soldOutLabel={soldOutLabel}
-                        onProductPress={onProductPress}
-                    />
+                    <FreshTile key={item.product._id} item={item} width={tileW} language={language} onProductPress={onProductPress} />
                 ))}
             </View>
         </View>
@@ -292,26 +224,7 @@ const useStyles = makeStyles((t) => ({
     chipRow: { gap: space.sm, paddingHorizontal: space.gutter, paddingBottom: space.lg },
 
     // fresh
-    freshGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: space.gutter, columnGap: space.md, rowGap: space.xl },
-    freshTile: {},
-    freshWell: { borderRadius: radii.card, overflow: 'hidden' },
-    freshChip: {
-        position: 'absolute',
-        top: space.sm,
-        left: space.sm,
-        maxWidth: '86%',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: space.xs,
-        paddingHorizontal: space.sm,
-        paddingVertical: space.xxs + 1,
-        borderRadius: radii.chip,
-        backgroundColor: t.colors.surface,
-    },
-    freshAdd: { position: 'absolute', right: space.sm, bottom: space.sm },
-    freshPrice: { marginTop: space.md },
-    freshName: { marginTop: space.xxs },
-
+    freshGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: space.gutter, columnGap: space.md, rowGap: space.md },
     // season: the rail runs edge to edge inside the card
     seasonCard: { paddingHorizontal: 0, paddingBottom: space.md },
     seasonHead: { paddingHorizontal: space.lg },

@@ -121,6 +121,31 @@ describe('orderTrackingSlice', () => {
                 { status: 'PENDING', timestamp: '2024-01-01' },
             ]);
         });
+
+        it('clears the rider, marker and route when the rider is unassigned', () => {
+            const withRider = {
+                ...initialState,
+                currentOrder: {
+                    _id: '123',
+                    orderStatus: 'ASSIGNED',
+                    rider: { id: 'r1', name: 'Ravi' },
+                    riderId: { id: 'r1', name: 'Ravi' },
+                },
+                riderLocation: { latitude: 26.7, longitude: 83.4 },
+                routeCoordinates: [{ latitude: 26.7, longitude: 83.4 }, { latitude: 26.71, longitude: 83.41 }],
+                activeLeg: 'to_store',
+            };
+            const actual = orderTrackingReducer(
+                withRider,
+                updateOrderStatus({ status: 'CONFIRMED', rider: null, order: { _id: '123', orderStatus: 'CONFIRMED', rider: null } })
+            );
+            expect(actual.currentOrder.orderStatus).toBe('CONFIRMED');
+            expect(actual.currentOrder.rider).toBeNull();
+            expect(actual.currentOrder.riderId).toBeNull();
+            expect(actual.riderLocation).toBeNull();
+            expect(actual.routeCoordinates).toEqual([]);
+            expect(actual.activeLeg).toBeNull();
+        });
     });
 
     describe('updateRiderLocation', () => {

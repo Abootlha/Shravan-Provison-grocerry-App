@@ -12,6 +12,7 @@ import { getRefreshToken, clearSession } from './tokenStorage';
 import {
     listFrom,
     normalizeCategories,
+    normalizeHomeFeed,
     normalizeProduct,
     normalizeProductPage,
     normalizeSubcategories,
@@ -78,6 +79,13 @@ export const ProductService = {
         cachedRequest(`products:${paramsKey(params)}`, async () => {
             const response = await productApi.get(ENDPOINTS.products.LIST, { params });
             return normalizeProductPage(response.data);
+        }),
+
+    /** Home shelves: every category with in-stock products, top `perCategory` each (GET /products/home). */
+    getHome: ({ perCategory = 12 } = {}) =>
+        cachedRequest(`home:${perCategory}`, async () => {
+            const response = await productApi.get(ENDPOINTS.products.HOME, { params: { perCategory } });
+            return normalizeHomeFeed(response.data);
         }),
 
     getProductById: async (id) => {
@@ -164,6 +172,31 @@ export const OrderService = {
     },
 };
 
+const OBJECT_ID = /^[a-f\d]{24}$/i;
+
+/**
+ * Route reference for a saved address: its server `_id` when it has one, otherwise its
+ * array index (mock data or a backend that predates address ids).
+ */
+export const addressRef = (target) => {
+    if (typeof target === 'number') return target;
+    if (typeof target === 'string') return OBJECT_ID.test(target) ? target : Number(target);
+    const id = target?._id || target?.id;
+    if (id && OBJECT_ID.test(String(id))) return String(id);
+    const index = target?.originalIndex ?? target?.listIndex;
+    if (Number.isInteger(index)) return index;
+    throw new Error('Address has no server id or index');
+};
+
+// Client-only keys never sent to the address routes.
+const CLIENT_ADDRESS_KEYS = ['id', '_id', 'originalIndex', 'listIndex', 'coords'];
+const stripClientKeys = (address) => {
+    if (!address || typeof address !== 'object') return address;
+    const body = { ...address };
+    CLIENT_ADDRESS_KEYS.forEach((k) => delete body[k]);
+    return body;
+};
+
 export const UserService = {
     // eslint-disable-next-line no-unused-vars -- legacy signature
     getProfile: (userId, { fresh = false } = {}) =>
@@ -183,19 +216,30 @@ export const UserService = {
     },
 
     addAddress: async (address) => {
-        const response = await userApi.post(ENDPOINTS.user.ADDRESSES, address);
+        const response = await userApi.post(ENDPOINTS.user.ADDRESSES, stripClientKeys(address));
         invalidate('users/me');
         return response.data;
     },
 
-    updateAddress: async (index, address) => {
-        const response = await userApi.put(ENDPOINTS.user.UPDATE_ADDRESS(index), address);
+    /** `target`: a client address (from toClientAddresses), its _id, or a legacy index. */
+    updateAddress: async (target, address) => {
+        const response = await userApi.put(ENDPOINTS.user.UPDATE_ADDRESS(addressRef(target)), stripClientKeys(address));
         invalidate('users/me');
         return response.data;
     },
 
-    removeAddress: async (index) => {
-        const response = await userApi.delete(ENDPOINTS.user.REMOVE_ADDRESS(index));
+    removeAddress: async (target) => {
+        const response = await userApi.delete(ENDPOINTS.user.REMOVE_ADDRESS(addressRef(target)));
+        invalidate('users/me');
+        return response.data;
+    },
+
+    /** PATCH .../:id/default; addresses without a server id (older backend) fall back to PUT by index. */
+    setDefaultAddress: async (target) => {
+        const ref = addressRef(target);
+        const response = typeof ref === 'string'
+            ? await userApi.patch(ENDPOINTS.user.SET_DEFAULT_ADDRESS(ref))
+            : await userApi.put(ENDPOINTS.user.UPDATE_ADDRESS(ref), { isDefault: true });
         invalidate('users/me');
         return response.data;
     },

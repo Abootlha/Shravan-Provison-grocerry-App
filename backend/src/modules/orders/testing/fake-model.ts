@@ -49,16 +49,66 @@ function valueMatches(actual: any, condition: any): boolean {
   return idOf(actual) === idOf(condition);
 }
 
+/**
+ * Index of the first array element a filter pins down: `arr: { $elemMatch }` or a
+ * dotted `arr.field` condition. Used for the positional `arr.$.field` update.
+ */
+function positionalIndex(
+  doc: Doc,
+  filter: Doc,
+): { path: string; index: number } | null {
+  for (const [key, condition] of Object.entries(filter)) {
+    if (
+      condition &&
+      typeof condition === 'object' &&
+      '$elemMatch' in condition
+    ) {
+      const arr = doc[key];
+      if (!Array.isArray(arr)) continue;
+      const index = arr.findIndex((el) => docMatches(el, condition.$elemMatch));
+      if (index >= 0) return { path: key, index };
+    }
+    const dot = key.indexOf('.');
+    if (dot > 0 && Array.isArray(doc[key.slice(0, dot)])) {
+      const path = key.slice(0, dot);
+      const field = key.slice(dot + 1);
+      const index = doc[path].findIndex((el: Doc) =>
+        valueMatches(el?.[field], condition),
+      );
+      if (index >= 0) return { path, index };
+    }
+  }
+  return null;
+}
+
 export function docMatches(doc: Doc, filter: Doc = {}): boolean {
   return Object.entries(filter).every(([key, condition]) => {
     if (key === '$or') {
       return (condition as Doc[]).some((sub) => docMatches(doc, sub));
     }
+    if (
+      condition &&
+      typeof condition === 'object' &&
+      '$elemMatch' in condition
+    ) {
+      const arr = doc[key];
+      return (
+        Array.isArray(arr) &&
+        arr.some((el) => docMatches(el, condition.$elemMatch))
+      );
+    }
+    const dot = key.indexOf('.');
+    if (dot > 0 && Array.isArray(doc[key.slice(0, dot)])) {
+      const field = key.slice(dot + 1);
+      return doc[key.slice(0, dot)].some((el: Doc) =>
+        valueMatches(el?.[field], condition),
+      );
+    }
     return valueMatches(doc[key], condition);
   });
 }
 
-function applyUpdate(doc: Doc, update: Doc): void {
+function applyUpdate(doc: Doc, update: Doc, filter: Doc = {}): void {
   const hasOperators = Object.keys(update).some((k) => k.startsWith('$'));
   if (!hasOperators) {
     Object.assign(doc, update);
@@ -68,6 +118,16 @@ function applyUpdate(doc: Doc, update: Doc): void {
     doc[key] = value;
   }
   for (const [key, value] of Object.entries(update.$inc || {})) {
+    const positional = key.match(/^(\w+)\.\$\.(\w+)$/);
+    if (positional) {
+      const pos = positionalIndex(doc, filter);
+      if (!pos || pos.path !== positional[1]) {
+        throw new Error(`fake-model: no positional match for ${key}`);
+      }
+      const el = doc[pos.path][pos.index];
+      el[positional[2]] = (el[positional[2]] || 0) + (value as number);
+      continue;
+    }
     doc[key] = (doc[key] || 0) + (value as number);
   }
   for (const [key, value] of Object.entries(update.$push || {})) {
@@ -205,7 +265,7 @@ export function createFakeModel(options: FakeModelOptions = {}) {
       settle(() => {
         const doc = findFirst(filter);
         if (!doc) return { matchedCount: 0, modifiedCount: 0 };
-        applyUpdate(doc, update);
+        applyUpdate(doc, update, filter);
         return { matchedCount: 1, modifiedCount: 1 };
       });
     const q: any = {

@@ -20,12 +20,26 @@ export const mrpSavingsOf = (items = []) =>
 
 const round2 = (v) => Math.round(v * 100) / 100;
 
+/**
+ * "You saved ₹X" — ONE definition, used by checkout (BillSummary) and the order receipt
+ * (OrderDetails → orders/OrderParts BillRows), so the same order shows the same number:
+ *
+ *     savings = the bill's discount (the store discount the server applies to the order)
+ *
+ * MRP savings (mrp − price per line) are NOT counted: orders don't store the MRP a line was
+ * sold against, so the receipt could never reproduce that figure. Those savings already show
+ * on each line as the struck-through MRP. A waived delivery fee isn't counted either (the
+ * order doesn't record the standard fee it replaced; "Free" shows on the delivery row).
+ * Accepts a checkout bill or an order (both carry `discount`).
+ */
+export const orderSavings = (billOrOrder) => Math.max(0, Math.round(Number(billOrOrder?.discount) || 0));
+
 const withExtras = (bill, items) => {
     const mrpSavings = mrpSavingsOf(items);
     return {
         ...bill,
         mrpSavings,
-        savings: mrpSavings + (bill.discount || 0),
+        savings: orderSavings(bill),
         freeDeliveryGap: Math.max(0, Math.ceil(bill.freeDeliveryThreshold - bill.itemTotal)),
     };
 };

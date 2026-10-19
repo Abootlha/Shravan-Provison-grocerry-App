@@ -9,6 +9,7 @@
  */
 import React, { useEffect } from 'react';
 import { View } from 'react-native';
+import { useSelector } from 'react-redux';
 import Animated, {
     useAnimatedStyle,
     useReducedMotion,
@@ -104,10 +105,11 @@ export function HomeMarker({ label }) {
 }
 
 export function StoreMarker() {
+    const hi = useSelector((s) => (s.language?.currentLanguage || s.auth?.language) === 'hi');
     const styles = useStyles();
     const { colors } = useTheme();
     return (
-        <View style={styles.store} accessibilityLabel="Store">
+        <View style={styles.store} accessibilityLabel={hi ? 'दुकान' : 'Store'}>
             <MaterialCommunityIcons name="storefront-outline" size={18} color={colors.onBrand} />
         </View>
     );

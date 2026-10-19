@@ -81,8 +81,10 @@ export const ENDPOINTS = {
     user: {
         PROFILE: '/users/me',
         ADDRESSES: '/users/addresses',
-        UPDATE_ADDRESS: (addressIndex) => `/users/addresses/${addressIndex}`,
-        REMOVE_ADDRESS: (addressIndex) => `/users/addresses/${addressIndex}`,
+        // ref: the address _id, or its array index for backends/mocks without ids.
+        UPDATE_ADDRESS: (ref) => `/users/addresses/${encodeURIComponent(ref)}`,
+        REMOVE_ADDRESS: (ref) => `/users/addresses/${encodeURIComponent(ref)}`,
+        SET_DEFAULT_ADDRESS: (id) => `/users/addresses/${encodeURIComponent(id)}/default`,
     },
     categories: {
         LIST: '/categories',
@@ -90,6 +92,7 @@ export const ENDPOINTS = {
     },
     products: {
         LIST: '/products',
+        HOME: '/products/home',
         DETAIL: (id) => `/products/${id}`,
     },
     cart: {

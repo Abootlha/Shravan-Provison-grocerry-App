@@ -1,6 +1,6 @@
 /**
  * Terminal-state hero cards and small rows for order tracking.
- *   <DeliveredHero isHi deliveredAt />   SuccessCheck resolves, confetti pops, then a rate-your-order prompt (UI only)
+ *   <DeliveredHero isHi deliveredAt orderCode />   SuccessCheck resolves, confetti pops, then "Report an issue"
  *   <CancelledHero isHi onShop />        sad mascot (error state, static) + what happens to the money + next step
  *   <HelpRow isHi onPress />             "Need help with this order?" (plain line glyph, no tile)
  *   <TrackingSkeleton topInset />        loading layout that mirrors header + map + cards
@@ -15,42 +15,31 @@ import {
     Card,
     ConfettiBurst,
     Mascot,
-    PressableScale,
     Skeleton,
     SkeletonGroup,
     SkeletonText,
     SuccessCheck,
     Text,
-    haptic,
-    toast,
 } from '../../components/ui';
 import { formatTime } from '../orders/orderUtils';
+import { contactStore, useStoreContact } from './storeContact';
 
-const RATING_WORDS = {
-    en: ['', 'Poor', 'Could be better', 'Okay', 'Good', 'Loved it'],
-    hi: ['', 'खराब', 'ठीक नहीं', 'ठीक', 'अच्छा', 'बहुत बढ़िया'],
-};
-
-export function DeliveredHero({ isHi, deliveredAt }) {
+/**
+ * Delivered: check + one confetti burst, the delivery time, and "Report an issue" (calls or mails
+ * the store from /settings/store). There's no rating endpoint on the server yet, so no stars:
+ * a rating that goes nowhere would be a dead control.
+ */
+export function DeliveredHero({ isHi, deliveredAt, orderCode }) {
     const styles = useStyles();
-    const { colors } = useTheme();
     const confetti = useRef(null);
     const [status, setStatus] = useState('loading');
-    const [rating, setRating] = useState(0);
+    const contact = useStoreContact();
 
     useEffect(() => {
         const t = setTimeout(() => setStatus('success'), 260);
         return () => clearTimeout(t);
     }, []);
 
-    const rate = (n) => {
-        haptic.selection();
-        setRating(n);
-        if (n >= 4) toast.success(isHi ? 'रेटिंग के लिए धन्यवाद!' : 'Thanks for rating!');
-        else toast.info(isHi ? 'धन्यवाद, हम सुधार करेंगे' : 'Thanks, we will do better');
-    };
-
-    const words = isHi ? RATING_WORDS.hi : RATING_WORDS.en;
     return (
         <Card radius="lg" padding="xl" style={styles.center}>
             <View style={styles.checkBox}>
@@ -63,30 +52,19 @@ export function DeliveredHero({ isHi, deliveredAt }) {
                     {isHi ? `${formatTime(deliveredAt, true)} पर पहुँचाया गया` : `Delivered at ${formatTime(deliveredAt)}`}
                 </Text>
             ) : null}
-            <View style={styles.rateBox}>
-                <Text variant="label" color="secondary" align="center">
-                    {rating ? words[rating] : isHi ? 'अपना ऑर्डर रेट करें' : 'How was your order?'}
-                </Text>
-                <View style={styles.stars} accessibilityRole="radiogroup">
-                    {[1, 2, 3, 4, 5].map((n) => (
-                        <PressableScale
-                            key={n}
-                            scaleTo={0.85}
-                            onPress={() => rate(n)}
-                            style={styles.star}
-                            accessibilityRole="radio"
-                            accessibilityState={{ checked: rating === n }}
-                            accessibilityLabel={`${n} ${isHi ? 'स्टार' : n === 1 ? 'star' : 'stars'}`}
-                        >
-                            <MaterialCommunityIcons
-                                name={n <= rating ? 'star' : 'star-outline'}
-                                size={32}
-                                color={n <= rating ? colors.brandText : colors.borderStrong}
-                            />
-                        </PressableScale>
-                    ))}
-                </View>
-            </View>
+            {contact.available ? (
+                <Button
+                    label={isHi ? 'समस्या बताएं' : 'Report an issue'}
+                    variant="outline"
+                    size="sm"
+                    style={styles.cta}
+                    accessibilityHint={contact.phone
+                        ? (isHi ? 'स्टोर को कॉल करता है' : 'Calls the store')
+                        : (isHi ? 'स्टोर को ईमेल लिखता है' : 'Writes an email to the store')}
+                    leftIcon={({ color, size }) => <MaterialCommunityIcons name="alert-circle-outline" size={size} color={color} />}
+                    onPress={() => contactStore(contact, { orderCode, isHi })}
+                />
+            ) : null}
         </Card>
     );
 }
@@ -156,9 +134,6 @@ const useStyles = makeStyles((t) => ({
     flex: { flex: 1 },
     center: { alignItems: 'center', gap: space.sm },
     checkBox: { width: 120, height: 104, alignItems: 'center', justifyContent: 'center' },
-    rateBox: { marginTop: space.md, gap: space.xs, alignItems: 'center' },
-    stars: { flexDirection: 'row', gap: space.xs },
-    star: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
     cta: { marginTop: space.sm, alignSelf: 'center' },
     helpRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
     skSheet: {

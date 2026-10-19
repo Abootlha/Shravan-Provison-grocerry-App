@@ -96,6 +96,8 @@ describe('OrdersService - Property-Based Tests', () => {
     broadcastETAUpdate: jest.fn(),
     notifyRiderOfAssignment: jest.fn(),
     notifyRiderOrderPacked: jest.fn(),
+    notifyRiderOrderCancelled: jest.fn(),
+    notifyRiderOrderUnassigned: jest.fn(),
   };
 
   const mockETAService = {
@@ -1218,6 +1220,186 @@ describe('OrdersService - Property-Based Tests', () => {
         (o) => mockOrderModel.get(o._id).riderId,
       );
       expect(assigned).toHaveLength(1);
+    });
+  });
+
+  describe('Rider reject, real-time rider events and location snapshots', () => {
+    const lastTimeline = (orderId: any) => {
+      const timeline = mockOrderModel.get(orderId).timeline;
+      return timeline[timeline.length - 1];
+    };
+
+    it('a reserved order is handed to another rider when its rider rejects it', async () => {
+      const rejecting = seedRider({ status: RiderStatus.BUSY });
+      const other = seedRider({ status: RiderStatus.AVAILABLE });
+      const order = seedOrder({
+        orderStatus: OrderStatus.CONFIRMED,
+        riderId: rejecting._id,
+      });
+
+      const result = await service.riderRejectOrder(
+        order._id.toString(),
+        rejecting._id.toString(),
+        '  Vehicle issue ',
+      );
+
+      expect(result.reassigned).toBe(true);
+      const stored = mockOrderModel.get(order._id);
+      expect(stored.riderId.toString()).toBe(other._id.toString());
+      expect(stored.orderStatus).toBe(OrderStatus.CONFIRMED);
+      expect(mockRiderModel.get(rejecting._id).status).toBe(
+        RiderStatus.AVAILABLE,
+      );
+      expect(mockRiderModel.get(other._id).status).toBe(RiderStatus.BUSY);
+      expect(
+        stored.timeline.some(
+          (e: any) => e.note === 'rider_rejected: Vehicle issue',
+        ),
+      ).toBe(true);
+      expect(mockOrderStatusLogModel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          newStatus: OrderStatus.CONFIRMED,
+          note: 'rider_rejected: Vehicle issue',
+        }),
+      );
+      expect(
+        mockTrackingGateway.notifyRiderOrderUnassigned,
+      ).toHaveBeenCalledWith(
+        rejecting._id.toString(),
+        expect.anything(),
+        'rider_rejected',
+      );
+      expect(mockTrackingGateway.notifyRiderOfAssignment).toHaveBeenCalledWith(
+        other._id.toString(),
+        expect.anything(),
+      );
+    });
+
+    it('an accepted (ASSIGNED) order goes back to CONFIRMED and is never re-offered to the same rider', async () => {
+      const rejecting = seedRider({ status: RiderStatus.BUSY });
+      const order = seedOrder({
+        orderStatus: OrderStatus.ASSIGNED,
+        riderId: rejecting._id,
+      });
+
+      const result = await service.riderRejectOrder(
+        order._id.toString(),
+        rejecting._id.toString(),
+      );
+
+      expect(result.reassigned).toBe(false);
+      const stored = mockOrderModel.get(order._id);
+      expect(stored.orderStatus).toBe(OrderStatus.CONFIRMED);
+      expect(stored.riderId).toBeUndefined();
+      expect(lastTimeline(order._id).note).toBe('rider_rejected');
+      // Freed, and still free: auto-assign skipped the rejecting rider.
+      expect(mockRiderModel.get(rejecting._id).status).toBe(
+        RiderStatus.AVAILABLE,
+      );
+      expect(
+        mockTrackingGateway.notifyRiderOfAssignment,
+      ).not.toHaveBeenCalled();
+      // Customer and admin see the rider removed.
+      expect(mockTrackingGateway.broadcastOrderStatusUpdate).toHaveBeenCalled();
+      expect(mockRedisService.publish).toHaveBeenCalledWith(
+        ADMIN_ORDER_EVENTS_CHANNEL,
+        expect.stringContaining('"order:updated"'),
+      );
+    });
+
+    it('rejects are refused once the store packed the order or for another rider', async () => {
+      const rider = seedRider({ status: RiderStatus.BUSY });
+      const packed = seedOrder({
+        orderStatus: OrderStatus.PACKED,
+        riderId: rider._id,
+      });
+      await expect(
+        service.riderRejectOrder(packed._id.toString(), rider._id.toString()),
+      ).rejects.toThrow(BadRequestException);
+
+      const reserved = seedOrder({
+        orderStatus: OrderStatus.CONFIRMED,
+        riderId: rider._id,
+      });
+      await expect(
+        service.riderRejectOrder(
+          reserved._id.toString(),
+          new Types.ObjectId().toString(),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockOrderModel.get(reserved._id).riderId.toString()).toBe(
+        rider._id.toString(),
+      );
+    });
+
+    it('stores the rider location on PICKED_UP and DELIVERED timeline entries only', async () => {
+      const rider = seedRider({ status: RiderStatus.BUSY });
+      const order = seedOrder({
+        orderStatus: OrderStatus.PACKED,
+        riderId: rider._id,
+      });
+      const id = order._id.toString();
+      const riderId = rider._id.toString();
+      const location = { latitude: 26.75, longitude: 83.37, accuracy: 8 };
+
+      await service.updateStatus(id, OrderStatus.PICKED_UP, riderId, {
+        actorRole: UserRole.RIDER,
+        location,
+      });
+      expect(lastTimeline(order._id).location).toEqual(location);
+
+      await service.updateStatus(id, OrderStatus.OUT_FOR_DELIVERY, riderId, {
+        actorRole: UserRole.RIDER,
+        location,
+      });
+      expect(lastTimeline(order._id).location).toBeUndefined();
+
+      await service.updateStatus(id, OrderStatus.DELIVERED, riderId, {
+        actorRole: UserRole.RIDER,
+        deliveryOtp: '4321',
+        location: { latitude: 0, longitude: 0 },
+      });
+      expect(lastTimeline(order._id).location).toEqual({
+        latitude: 0,
+        longitude: 0,
+      });
+    });
+
+    it('tells the rider in real time when their order is cancelled', async () => {
+      const rider = seedRider({ status: RiderStatus.BUSY });
+      const order = seedOrder({
+        orderStatus: OrderStatus.ASSIGNED,
+        riderId: rider._id,
+      });
+      await service.updateStatus(
+        order._id.toString(),
+        OrderStatus.CANCELLED,
+        ADMIN_ID,
+        { actorRole: UserRole.ADMIN, reason: 'Out of stock' },
+      );
+      expect(
+        mockTrackingGateway.notifyRiderOrderCancelled,
+      ).toHaveBeenCalledWith(
+        rider._id.toString(),
+        expect.anything(),
+        'Out of stock',
+      );
+    });
+
+    it('tells the rider in real time when an admin unassigns them', async () => {
+      const rider = seedRider({ status: RiderStatus.BUSY });
+      const order = seedOrder({
+        orderStatus: OrderStatus.CONFIRMED,
+        riderId: rider._id,
+      });
+      await service.unassignRider(order._id.toString());
+      expect(
+        mockTrackingGateway.notifyRiderOrderUnassigned,
+      ).toHaveBeenCalledWith(
+        rider._id.toString(),
+        expect.anything(),
+        'admin_unassigned',
+      );
     });
   });
 });

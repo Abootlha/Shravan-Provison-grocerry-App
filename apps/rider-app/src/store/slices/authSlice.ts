@@ -1,5 +1,5 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import { authApi } from '../../services/api';
+import { apiErrorMessage, authApi, riderApi } from '../../services/api';
 import { storage } from '../../services/storage';
 import { ensureFreshAccessToken } from '../../services/authSession';
 import type { Rider } from '../../types/rider';
@@ -12,6 +12,9 @@ interface AuthState {
   error: string | null;
   /** Shown on Login after the server ended the session. */
   sessionNotice: string | null;
+  /** Online/offline request in flight. */
+  availabilityPending: boolean;
+  availabilityError: string | null;
 }
 
 const initialState: AuthState = {
@@ -21,70 +24,117 @@ const initialState: AuthState = {
   loading: false,
   error: null,
   sessionNotice: null,
+  availabilityPending: false,
+  availabilityError: null,
 };
 
-export const login = createAsyncThunk(
-  'auth/login',
-  async ({ username, password }: any, { rejectWithValue }) => {
-    try {
-      const response = await authApi.login(username, password);
-      await storage.setToken(response.token);
-      await storage.setRefreshToken(response.refreshToken);
-      await storage.setUser(response.user);
-      return response;
-    } catch (error: any) {
-      return rejectWithValue(error.response?.data?.message || 'Login failed');
-    }
-  }
-);
+const persistSession = async (response: { token?: string; refreshToken?: string; user: Rider }) => {
+  if (!response.token) throw new Error('No access token in the login response');
+  await storage.setToken(response.token);
+  await storage.setRefreshToken(response.refreshToken);
+  await storage.setUser(response.user);
+};
 
-export const sendOtp = createAsyncThunk(
+export const login = createAsyncThunk<
+  { token: string; user: Rider },
+  { username: string; password: string },
+  { rejectValue: string }
+>('auth/login', async ({ username, password }, { rejectWithValue }) => {
+  try {
+    const response = await authApi.login(username, password);
+    await persistSession(response);
+    return { token: response.token, user: response.user };
+  } catch (error) {
+    return rejectWithValue(apiErrorMessage(error, 'Login failed. Please try again.'));
+  }
+});
+
+export const sendOtp = createAsyncThunk<{ otpLength?: number }, string, { rejectValue: string }>(
   'auth/sendOtp',
-  async (phone: string, { rejectWithValue }) => {
+  async (phone, { rejectWithValue }) => {
     try {
       return await authApi.sendOtp(phone);
-    } catch (error: any) {
-      return rejectWithValue(error.response?.data?.message || 'Failed to send OTP');
+    } catch (error) {
+      return rejectWithValue(apiErrorMessage(error, 'Could not send the OTP.'));
     }
   }
 );
 
-export const verifyOtp = createAsyncThunk(
-  'auth/verifyOtp',
-  async ({ phone, otp, name }: { phone: string; otp: string; name?: string }, { rejectWithValue }) => {
-    try {
-      const response = await authApi.verifyOtp(phone, otp, name);
-      await storage.setToken(response.token);
-      await storage.setRefreshToken(response.refreshToken);
-      await storage.setUser(response.user);
-      return response;
-    } catch (error: any) {
-      return rejectWithValue(error.response?.data?.message || 'OTP verification failed');
-    }
+export const verifyOtp = createAsyncThunk<
+  { token: string; user: Rider },
+  { phone: string; otp: string },
+  { rejectValue: string }
+>('auth/verifyOtp', async ({ phone, otp }, { rejectWithValue }) => {
+  try {
+    const response = await authApi.verifyOtp(phone, otp);
+    await persistSession(response);
+    return { token: response.token, user: response.user };
+  } catch (error) {
+    return rejectWithValue(apiErrorMessage(error, 'OTP verification failed.'));
   }
-);
+});
 
-export const loadUser = createAsyncThunk(
-  'auth/loadUser',
+export const loadUser = createAsyncThunk('auth/loadUser', async (_, { rejectWithValue }) => {
+  try {
+    const token = await storage.getToken();
+    const refreshToken = await storage.getRefreshToken();
+    const user = await storage.getUser<Rider>();
+    // A refresh token alone is enough: restore now, renew the access token in
+    // the background (App.tsx) instead of making the rider wait or log in.
+    if (user && (token || refreshToken)) {
+      return { token, user, notice: null };
+    }
+    return { token: null, user: null, notice: await storage.takeSessionNotice() };
+  } catch {
+    return rejectWithValue('Failed to load user');
+  }
+});
+
+/** Server truth for profile and online status. */
+export const refreshRider = createAsyncThunk<Rider, void, { rejectValue: string }>(
+  'auth/refreshRider',
   async (_, { rejectWithValue }) => {
     try {
-      const token = await storage.getToken();
-      const refreshToken = await storage.getRefreshToken();
-      const user = await storage.getUser<Rider>();
-      // A refresh token alone is enough: restore now, renew the access token in
-      // the background (App.tsx) instead of making the rider wait or log in.
-      if (user && (token || refreshToken)) {
-        return { token, user, notice: null };
-      }
-      return { token: null, user: null, notice: await storage.takeSessionNotice() };
-    } catch {
-      return rejectWithValue('Failed to load user');
+      const rider = await riderApi.getMe();
+      await storage.setUser(rider);
+      return rider;
+    } catch (error) {
+      return rejectWithValue(apiErrorMessage(error, 'Could not load your profile.'));
     }
   }
 );
+
+export const setAvailability = createAsyncThunk<Rider, boolean, { rejectValue: string }>(
+  'auth/setAvailability',
+  async (isOnline, { rejectWithValue }) => {
+    try {
+      const rider = await riderApi.updateAvailability(isOnline);
+      await storage.setUser(rider);
+      return rider;
+    } catch (error) {
+      return rejectWithValue(apiErrorMessage(error, isOnline ? 'Could not go online.' : 'Could not go offline.'));
+    }
+  }
+);
+
+export const saveProfile = createAsyncThunk<
+  Rider,
+  { name?: string; vehicleType?: string; vehicleNumber?: string },
+  { rejectValue: string }
+>('auth/saveProfile', async (patch, { rejectWithValue }) => {
+  try {
+    const rider = await riderApi.updateProfile(patch);
+    await storage.setUser(rider);
+    return rider;
+  } catch (error) {
+    return rejectWithValue(apiErrorMessage(error, 'Could not save your profile.'));
+  }
+});
 
 export const logout = createAsyncThunk('auth/logout', async () => {
   try {
+    // Go offline first so no new orders are reserved for a signed-out rider.
+    await riderApi.updateAvailability(false).catch(() => undefined);
     // /auth/logout needs a live access token to end this device's session.
     await ensureFreshAccessToken();
     await authApi.logout();
@@ -102,8 +152,8 @@ const authSlice = createSlice({
     clearError: (state) => {
       state.error = null;
     },
-    setUser: (state, action: PayloadAction<Rider>) => {
-      state.user = action.payload;
+    clearAvailabilityError: (state) => {
+      state.availabilityError = null;
     },
     tokenRefreshed: (state, action: PayloadAction<string>) => {
       state.token = action.payload;
@@ -119,21 +169,23 @@ const authSlice = createSlice({
     },
   },
   extraReducers: (builder) => {
+    const signedIn = (state: AuthState, payload: { token: string; user: Rider }) => {
+      state.loading = false;
+      state.error = null;
+      state.sessionNotice = null;
+      state.isAuthenticated = true;
+      state.token = payload.token;
+      state.user = payload.user;
+    };
     builder
       .addCase(login.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
-      .addCase(login.fulfilled, (state, action) => {
-        state.loading = false;
-        state.sessionNotice = null;
-        state.isAuthenticated = true;
-        state.token = action.payload.token;
-        state.user = action.payload.user as Rider;
-      })
+      .addCase(login.fulfilled, (state, action) => signedIn(state, action.payload))
       .addCase(login.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.payload as string;
+        state.error = action.payload ?? 'Login failed.';
       })
       .addCase(sendOtp.pending, (state) => {
         state.loading = true;
@@ -144,22 +196,16 @@ const authSlice = createSlice({
       })
       .addCase(sendOtp.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.payload as string;
+        state.error = action.payload ?? 'Could not send the OTP.';
       })
       .addCase(verifyOtp.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
-      .addCase(verifyOtp.fulfilled, (state, action) => {
-        state.loading = false;
-        state.sessionNotice = null;
-        state.isAuthenticated = true;
-        state.token = action.payload.token;
-        state.user = action.payload.user as Rider;
-      })
+      .addCase(verifyOtp.fulfilled, (state, action) => signedIn(state, action.payload))
       .addCase(verifyOtp.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.payload as string;
+        state.error = action.payload ?? 'OTP verification failed.';
       })
       .addCase(loadUser.pending, (state) => {
         state.loading = true;
@@ -177,6 +223,24 @@ const authSlice = createSlice({
       .addCase(loadUser.rejected, (state) => {
         state.loading = false;
       })
+      .addCase(refreshRider.fulfilled, (state, action) => {
+        if (state.isAuthenticated) state.user = action.payload;
+      })
+      .addCase(setAvailability.pending, (state) => {
+        state.availabilityPending = true;
+        state.availabilityError = null;
+      })
+      .addCase(setAvailability.fulfilled, (state, action) => {
+        state.availabilityPending = false;
+        if (state.isAuthenticated) state.user = action.payload;
+      })
+      .addCase(setAvailability.rejected, (state, action) => {
+        state.availabilityPending = false;
+        state.availabilityError = action.payload ?? 'Could not change your status.';
+      })
+      .addCase(saveProfile.fulfilled, (state, action) => {
+        if (state.isAuthenticated) state.user = action.payload;
+      })
       .addCase(logout.fulfilled, (state) => {
         state.isAuthenticated = false;
         state.user = null;
@@ -185,5 +249,6 @@ const authSlice = createSlice({
   },
 });
 
-export const { clearError, setUser, tokenRefreshed, sessionExpired, clearSessionNotice } = authSlice.actions;
+export const { clearError, clearAvailabilityError, tokenRefreshed, sessionExpired, clearSessionNotice } =
+  authSlice.actions;
 export default authSlice.reducer;

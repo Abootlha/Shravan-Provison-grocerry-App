@@ -48,6 +48,7 @@ import CartThumbStack from './product/CartThumbStack';
 import { nightPill } from './product/nightPill';
 import { formatINR } from './product/productUtils';
 import { useStoreFees } from '../hooks/useStoreSettings';
+import { pe } from './ui/pointerEvents';
 
 const PILL_HEIGHT = 56;
 const PILL_RADIUS = 14; // DESIGN.md: floating bars are rounded rects, not pills
@@ -152,7 +153,7 @@ const FloatingCartBar = ({ onPress, bottomOffset, showDeliveryMeter: wantsMeter 
     const viewCart = isHi ? 'कार्ट देखें' : 'View cart';
 
     return (
-        <Animated.View style={[styles.wrap, { bottom }, anim, { pointerEvents: hasItems ? 'box-none' : 'none' }]}>
+        <Animated.View style={[styles.wrap, { bottom }, anim, hasItems ? pe.boxNone : pe.none]}>
             <PressableScale
                 onPress={onPress}
                 haptic="light"
@@ -167,7 +168,7 @@ const FloatingCartBar = ({ onPress, bottomOffset, showDeliveryMeter: wantsMeter 
                             height={3}
                             gradient={gradients.freeDelivery}
                             trackColor={colors.haloOnBrand}
-                            accessibilityLabel="Free delivery progress"
+                            accessibilityLabel={isHi ? 'मुफ़्त डिलीवरी प्रगति' : 'Free delivery progress'}
                         />
                     </View>
                 ) : null}
