@@ -94,7 +94,9 @@ function useRiderSearchProvider() {
 
 function RidersPage() {
     const confirm = useConfirm();
-    const riders = useQuery({ queryKey: ridersListKey, queryFn: fetchRiders });
+    // Rider status changes on the server (going online, offers, deliveries,
+    // the stale-rider sweep), so keep the list live without a reload.
+    const riders = useQuery({ queryKey: ridersListKey, queryFn: fetchRiders, refetchInterval: 15_000 });
     const [filter, setFilter] = React.useState<Filter>('all');
     const [query, setQuery] = React.useState('');
     const [formOpen, setFormOpen] = React.useState(false);

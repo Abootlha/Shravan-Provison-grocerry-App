@@ -12,7 +12,7 @@ jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
 const DIRECTIONS_URL =
-  'https://route.mappls.com/route/direction/route_adv/driving';
+  'https://apis.mapmyindia.com/advancedmaps/v1/test-api-key/route_adv/driving';
 
 // Mappls directions response: 20 minutes, 5km
 const directionsResponse = {
@@ -154,13 +154,10 @@ describe('ETAService', () => {
       await service.calculateETA(riderLocation, deliveryAddress);
 
       const [url, config] = mockedAxios.get.mock.calls[0];
+      // The REST key goes in the path; access_token (an OAuth token) is not sent.
       expect(url.startsWith(`${DIRECTIONS_URL}/`)).toBe(true);
       expect(url).toContain('/driving/');
-      expect(config).toEqual(
-        expect.objectContaining({
-          params: expect.objectContaining({ access_token: 'test-api-key' }),
-        }),
-      );
+      expect(config?.params).not.toHaveProperty('access_token');
     });
   });
 
@@ -328,8 +325,8 @@ describe('ETAService', () => {
         );
 
         await fallbackService.calculateETA(riderLocation, deliveryAddress);
-        expect(mockedAxios.get.mock.calls[0][1]?.params.access_token).toBe(
-          'fallback-key',
+        expect(mockedAxios.get.mock.calls[0][0]).toContain(
+          '/advancedmaps/v1/fallback-key/route_adv/driving/',
         );
       });
     });

@@ -36,9 +36,24 @@ const apiBaseUrl = requireEnv(
     DEV_DEFAULTS.apiBaseUrl,
 );
 
+/**
+ * The sockets live on the same server as the API, so when PUBLIC_TRACKING_URL is not set it
+ * is derived from PUBLIC_API_URL (https://api.example.com/api/v1 -> https://api.example.com/tracking).
+ * Falling back to localhost instead left live updates silently dead whenever only the API URL
+ * pointed at a real server.
+ */
+export function trackingUrlFromApiUrl(apiUrl: string): string | undefined {
+    try {
+        return `${new URL(apiUrl).origin}/tracking`;
+    } catch {
+        return undefined;
+    }
+}
+
+const explicitTrackingUrl = readEnv(import.meta.env.PUBLIC_TRACKING_URL, import.meta.env.PUBLIC_TRACKING_SERVICE_URL);
 const trackingServiceUrl = requireEnv(
     'PUBLIC_TRACKING_URL',
-    readEnv(import.meta.env.PUBLIC_TRACKING_URL, import.meta.env.PUBLIC_TRACKING_SERVICE_URL),
+    explicitTrackingUrl ?? trackingUrlFromApiUrl(apiBaseUrl),
     DEV_DEFAULTS.trackingUrl,
 );
 

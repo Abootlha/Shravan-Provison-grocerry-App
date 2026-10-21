@@ -158,8 +158,18 @@ export class AdminRidersService {
                 ],
               },
             },
+            // Same basis as `available`: only active riders, so
+            // offline = active - available - busy never goes negative.
             busy: {
-              $sum: { $cond: [{ $eq: ['$status', RiderStatus.BUSY] }, 1, 0] },
+              $sum: {
+                $cond: [
+                  {
+                    $and: ['$isActive', { $eq: ['$status', RiderStatus.BUSY] }],
+                  },
+                  1,
+                  0,
+                ],
+              },
             },
           },
         },

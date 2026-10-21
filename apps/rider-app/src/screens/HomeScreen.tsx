@@ -83,6 +83,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     if (Platform.OS !== 'web') {
       const granted = await locationService.requestPermissions();
       const enabled = await checkLocationPermission();
+      // Asked once ever; later the "Live location pauses" banner links to Settings.
+      if (granted && enabled) await locationService.requestBackgroundPermission();
       if (!granted || !enabled) {
         Alert.alert(
           'Location needed',

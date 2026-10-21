@@ -130,23 +130,48 @@ class LocationService {
   /** Human-readable reason for the last failed start, for the UI to surface. */
   lastError: string | null = null;
 
+  /**
+   * Foreground ("while using the app") permission. Background permission is
+   * asked separately (requestBackgroundPermission) and only once: on Android 11+
+   * asking again sends the rider to system settings every time.
+   */
   async requestPermissions(): Promise<boolean> {
     const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
     this.foregroundPermissionGranted = foregroundStatus === 'granted';
+    return this.foregroundPermissionGranted;
+  }
 
-    if (!this.foregroundPermissionGranted) {
-      return false;
-    }
-
+  /**
+   * Asks for "Allow all the time" only if the rider has never been asked.
+   * After that the Home banner links to Settings instead of re-prompting.
+   */
+  async requestBackgroundPermission(): Promise<boolean> {
+    if (Platform.OS === 'web') return true;
     try {
-      const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
-      this.backgroundPermissionGranted = backgroundStatus === 'granted';
+      const current = await Location.getBackgroundPermissionsAsync();
+      if (current.status === 'granted') {
+        this.backgroundPermissionGranted = true;
+        return true;
+      }
+      if (current.status !== 'undetermined') return false;
+      const { status } = await Location.requestBackgroundPermissionsAsync();
+      this.backgroundPermissionGranted = status === 'granted';
     } catch {
-      // Background permission is optional for live in-app tracking.
+      // Optional: live tracking still works while the app is open.
       this.backgroundPermissionGranted = false;
     }
+    return this.backgroundPermissionGranted;
+  }
 
-    return true;
+  /** Why location cannot be used right now, or null when it can. */
+  private async blockedReason(): Promise<'denied' | 'services_off' | null> {
+    try {
+      const { status } = await Location.getForegroundPermissionsAsync();
+      if (status !== 'granted') return 'denied';
+      return (await Location.hasServicesEnabledAsync()) ? null : 'services_off';
+    } catch {
+      return 'denied';
+    }
   }
 
   async hasBackgroundPermission(): Promise<boolean> {
@@ -217,13 +242,15 @@ class LocationService {
   }
 
   private async doStartTracking(): Promise<boolean> {
-    const hasPerms = await this.hasPermissions();
-    if (!hasPerms) {
-      const granted = await this.requestPermissions();
-      if (!granted) {
-        this.lastError = 'Location permission was denied.';
-        return false;
-      }
+    const blocked = await this.blockedReason();
+    if (blocked === 'services_off') {
+      // A permission prompt cannot fix this; only the rider turning GPS on can.
+      this.lastError = 'Turn on location (GPS) to go online.';
+      return false;
+    }
+    if (blocked === 'denied' && !(await this.requestPermissions())) {
+      this.lastError = 'Location permission was denied.';
+      return false;
     }
 
     if (this.locationSubscription) {
@@ -245,6 +272,10 @@ class LocationService {
           }
           this.lastUpdate = now;
           this.publish(fromExpoLocation(location));
+        },
+        (reason) => {
+          // GPS switched off or lost: the runtime's permission check reacts.
+          this.lastError = reason || 'Location is unavailable.';
         }
       );
     } catch {
@@ -266,13 +297,13 @@ class LocationService {
       return true;
     }
 
-    const hasPerms = await this.hasPermissions();
-    if (!hasPerms) {
-      const granted = await this.requestPermissions();
-      if (!granted) {
-        this.lastError = 'Location permission was denied.';
-        return false;
-      }
+    // No prompts from here: the app is going to the background, so a dialog
+    // would not be seen (and on Android it would open Settings instead).
+    const blocked = await this.blockedReason();
+    if (blocked) {
+      this.lastError =
+        blocked === 'services_off' ? 'Turn on location (GPS) to keep sharing your trip.' : 'Location permission was denied.';
+      return false;
     }
 
     if (!(await this.hasBackgroundPermission())) {
@@ -291,7 +322,9 @@ class LocationService {
     await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
       accuracy: Location.Accuracy.Balanced,
       timeInterval: LOCATION_UPDATE_THROTTLE,
-      distanceInterval: 10,
+      // Time-based: a rider waiting at the store must keep reporting in, or
+      // the server would mark them unreachable and stop offering orders.
+      distanceInterval: 0,
       pausesUpdatesAutomatically: false,
       showsBackgroundLocationIndicator: false,
       foregroundService: {

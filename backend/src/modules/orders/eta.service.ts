@@ -45,8 +45,13 @@ export class ETAService {
   private readonly TRACKING_ROUTE_CACHE_TTL = 15; // 15 seconds
   private readonly TRACKING_ROUTE_CALL_INTERVAL = 20; // seconds between directions calls per destination
   private readonly mapplsApiKey: string;
-  private readonly directionsUrl =
-    'https://route.mappls.com/route/direction/route_adv/driving';
+  /**
+   * Mappls REST directions: the REST key goes in the path. (The
+   * route.mappls.com form with ?access_token= rejects REST keys with 401
+   * "Invalid Token", which left every ETA at the order-time promise.)
+   */
+  private readonly advancedMapsUrl =
+    'https://apis.mapmyindia.com/advancedmaps/v1';
 
   constructor(
     private readonly configService: ConfigService,
@@ -180,9 +185,9 @@ export class ETAService {
     }
 
     const coordinates = `${riderLocation.longitude},${riderLocation.latitude};${deliveryAddress.longitude},${deliveryAddress.latitude}`;
-    const response = await axios.get(`${this.directionsUrl}/${coordinates}`, {
+    const url = `${this.advancedMapsUrl}/${encodeURIComponent(this.mapplsApiKey)}/route_adv/driving/${coordinates}`;
+    const response = await axios.get(url, {
       params: {
-        access_token: this.mapplsApiKey,
         alternatives: false,
         geometries: 'polyline',
         overview: 'full',

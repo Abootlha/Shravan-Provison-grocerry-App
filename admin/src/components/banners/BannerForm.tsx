@@ -113,31 +113,17 @@ export function BannerForm({
 }
 
 function BannerFields({ form, categories }: { form: UseFormReturn<FormInput, unknown, BannerFormValues>; categories: Category[] }) {
-    const [lang, setLang] = React.useState<'en' | 'hi'>('en');
     const [title, titleHi, image, targetType] = form.watch(['title', 'titleHi', 'image', 'targetType']);
 
     return (
         <>
             <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium text-foreground">Preview</p>
-                    <ToggleGroup
-                        type="single"
-                        size="sm"
-                        variant="outline"
-                        spacing={0}
-                        value={lang}
-                        onValueChange={(v) => v && setLang(v as 'en' | 'hi')}
-                        aria-label="Preview language"
-                    >
-                        <ToggleGroupItem value="en">English</ToggleGroupItem>
-                        <ToggleGroupItem value="hi">हिन्दी</ToggleGroupItem>
-                    </ToggleGroup>
-                </div>
-                <BannerPreview title={title} titleHi={titleHi} image={image} lang={lang} />
+                <p className="text-sm font-medium text-foreground">Preview</p>
+                <BannerPreview title={title} titleHi={titleHi} image={image} />
                 <p className="text-xs text-muted-foreground">
-                    Approximate. The app shows the image at 2:1 with the headline over its left side, so keep products on the right half.
-                    {lang === 'hi' && !titleHi ? ' No Hindi headline yet, so the English one is shown.' : ''}
+                    The app shows the image as it is, at 2:1 (cropped to fill), on the Home screen. Put the headline, offer and
+                    button in the image itself; the headline below is read out by screen readers. A banner that opens a category
+                    also shows at the top of that category's page.
                 </p>
             </div>
 

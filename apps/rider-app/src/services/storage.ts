@@ -7,6 +7,7 @@ const REFRESH_TOKEN_KEY = 'rider_refresh_token';
 const USER_KEY = 'rider_user';
 const ACTIVE_ORDER_KEY = 'rider_active_order';
 const SESSION_NOTICE_KEY = 'rider_session_notice';
+const PUSH_TOKEN_KEY = 'rider_push_token';
 
 // Tokens go to the OS keychain/keystore on native. expo-secure-store has no web
 // implementation, so web falls back to AsyncStorage (localStorage).
@@ -129,6 +130,20 @@ export const storage = {
     } catch {
       return null;
     }
+  },
+
+  /** Expo push token this phone registered with the server (removed on logout). */
+  async getPushToken(): Promise<string | null> {
+    try {
+      return await AsyncStorage.getItem(PUSH_TOKEN_KEY);
+    } catch {
+      return null;
+    }
+  },
+
+  async setPushToken(token: string | null): Promise<void> {
+    if (token) await AsyncStorage.setItem(PUSH_TOKEN_KEY, token);
+    else await AsyncStorage.removeItem(PUSH_TOKEN_KEY);
   },
 
   async clearAll(): Promise<void> {
