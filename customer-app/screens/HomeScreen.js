@@ -16,6 +16,7 @@ import { space, z } from '../constants/theme';
 import { useTheme } from '../theme';
 import { durations, easings, springs } from '../theme/motion';
 import { OrderService, ProductService } from '../services';
+import { toBannerSlides, useOpenBanner, useStoreBanners } from '../hooks/useStoreBanners';
 import { useStoreFees, useStoreStatus } from '../hooks/useStoreSettings';
 import { useTranslation } from '../hooks/useTranslation';
 import { translateToHindi } from '../services/translationService';
@@ -237,10 +238,8 @@ const HomeScreen = ({ navigation }) => {
     const handleLocationPress = useCallback(() => navigation.navigate('Location'), [navigation]);
     const handleProfilePress = useCallback(() => navigation.navigate('Main', { screen: 'Account' }), [navigation]);
     const handleAllCategories = useCallback(() => navigation.navigate('Categories'), [navigation]);
-    const handleBannerPress = useCallback(
-        (banner) => (banner?.category ? navigation.navigate('Category', { category: banner.category }) : navigation.navigate('Categories')),
-        [navigation],
-    );
+    // Store banners (Admin > Banners) open their product, category or link.
+    const handleBannerPress = useOpenBanner(navigation, categories);
     const handleOrderPress = useCallback(
         () => activeOrder && navigation.navigate('OrderTracking', { orderId: activeOrder._id || activeOrder.orderId }),
         [navigation, activeOrder],
@@ -344,16 +343,18 @@ const HomeScreen = ({ navigation }) => {
     // Every category with in-stock products (from /products/home, or rebuilt from the product slice).
     const homeShelves = useMemo(() => shelves || shelvesFrom(products, categories), [shelves, products, categories]);
 
-    const banners = useMemo(
-        () =>
-            BANNERS.map((b) => {
-                const shelf = homeShelves.find((x) => (!b.fresh || x.fresh) && b.match.test(x.category?.name || ''));
-                if (!shelf) return null;
-                const [title, subtitle] = isHi ? b.hi : b.en;
-                return { id: b.id, image: b.image, surface: b.surface, title, subtitle, category: shelf.category };
-            }).filter(Boolean),
-        [homeShelves, isHi],
-    );
+    // The store's own banners (Admin > Banners) win; the bundled art is only a fallback for a
+    // store that has set none up.
+    const storeBanners = useStoreBanners();
+    const banners = useMemo(() => {
+        if (storeBanners.length) return toBannerSlides(storeBanners, isHi);
+        return BANNERS.map((b) => {
+            const shelf = homeShelves.find((x) => (!b.fresh || x.fresh) && b.match.test(x.category?.name || ''));
+            if (!shelf) return null;
+            const [title, subtitle] = isHi ? b.hi : b.en;
+            return { id: b.id, image: b.image, surface: b.surface, title, subtitle, category: shelf.category };
+        }).filter(Boolean);
+    }, [storeBanners, homeShelves, isHi]);
 
     const sections = useMemo(() => {
         if (loading) return [{ key: 'skeleton', type: 'skeleton' }];

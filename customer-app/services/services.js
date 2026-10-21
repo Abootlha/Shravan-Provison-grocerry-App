@@ -102,6 +102,30 @@ export const ProductService = {
     },
 };
 
+const isHttpsImage = (value) => typeof value === 'string' && /^https:\/\//i.test(value.trim());
+
+/**
+ * Home banners from Admin > Banners. The server returns only live ones, in the store's order.
+ * Each: { id, image, title, titleHi, target: { type: 'category' | 'product' | 'url', id?, url? } }.
+ * Banners without an https image are dropped (the carousel would show an empty block).
+ */
+export const BannerService = {
+    list: () =>
+        cachedRequest('banners', async () => {
+            const response = await productApi.get(ENDPOINTS.banners.LIST);
+            const raw = Array.isArray(response.data?.banners) ? response.data.banners : Array.isArray(response.data) ? response.data : [];
+            return raw
+                .filter((b) => b && isHttpsImage(b.image))
+                .map((b) => ({
+                    id: String(b._id || b.id),
+                    image: b.image.trim(),
+                    title: b.title || '',
+                    titleHi: b.titleHi || '',
+                    target: b.target && typeof b.target === 'object' ? b.target : null,
+                }));
+        }),
+};
+
 export const CartService = {
     getCart: async () => {
         const response = await cartApi.get(ENDPOINTS.cart.GET);
