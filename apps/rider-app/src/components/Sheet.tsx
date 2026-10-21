@@ -59,7 +59,7 @@ export const Sheet: React.FC<Props> = ({ visible, title, subtitle, onClose, dism
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  backdrop: { ...StyleSheet.absoluteFillObject },
+  backdrop: { ...StyleSheet.absoluteFill },
   sheet: {
     marginTop: 'auto',
     borderTopLeftRadius: radii.xl,
