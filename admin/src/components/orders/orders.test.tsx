@@ -23,7 +23,9 @@ vi.mock('./order-model', async (importOriginal) => {
 vi.mock('./LiveTracking', () => ({ LiveTracking: () => <div data-testid="live-map" /> }));
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), warning: vi.fn() }) }));
 
-import { OrderDetailSheet } from './OrderDetailSheet';
+import { DETAIL_POLL_OFFLINE_MS, detailRefetchInterval, OrderDetailSheet } from './OrderDetailSheet';
+import type { LiveConnection } from './useOrdersLive';
+import { trackingUrlFromApiUrl } from '@/lib/config';
 import { ConfirmHost } from '@/components/shared/confirm';
 
 beforeAll(() => {
@@ -54,11 +56,11 @@ function order(overrides: Partial<OrderDetail> = {}): OrderDetail {
     };
 }
 
-function renderSheet(id = 'o1') {
+function renderSheet(id = 'o1', connection?: LiveConnection) {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
         <QueryClientProvider client={client}>
-            <OrderDetailSheet orderId={id} onOpenChange={() => {}} />
+            <OrderDetailSheet orderId={id} onOpenChange={() => {}} connection={connection} />
             <ConfirmHost />
         </QueryClientProvider>,
     );
@@ -179,5 +181,41 @@ describe('OrderDetailSheet', () => {
         renderSheet();
         expect(await screen.findByTestId('live-map')).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Confirm order' })).not.toBeInTheDocument();
+    });
+});
+
+describe('order panel live refresh', () => {
+    it('refreshes in-progress orders by itself, faster while live updates are down', () => {
+        expect(detailRefetchInterval('OUT_FOR_DELIVERY', 'offline')).toBe(8_000);
+        expect(detailRefetchInterval('PICKED_UP', 'connecting')).toBe(8_000);
+        expect(detailRefetchInterval('CONFIRMED', 'live')).toBe(30_000);
+        expect(detailRefetchInterval('DELIVERED', 'offline')).toBe(false);
+        expect(detailRefetchInterval('CANCELLED', 'live')).toBe(false);
+        expect(detailRefetchInterval(undefined, 'live')).toBe(false);
+    });
+
+    it('shows the rider moving the order on without a socket event', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        try {
+            const rider = { _id: 'r1', name: 'Md' };
+            api.detail
+                .mockResolvedValueOnce(order({ orderStatus: 'PICKED_UP', riderId: rider }))
+                .mockResolvedValue(order({ orderStatus: 'OUT_FOR_DELIVERY', riderId: rider }));
+            renderSheet('o1', 'offline');
+            expect(await screen.findAllByText(/picked up/i)).not.toHaveLength(0);
+            await vi.advanceTimersByTimeAsync(DETAIL_POLL_OFFLINE_MS + 100);
+            await waitFor(() => expect(screen.getAllByText(/out for delivery/i).length).toBeGreaterThan(0));
+            expect(api.detail).toHaveBeenCalledTimes(2);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});
+
+describe('trackingUrlFromApiUrl', () => {
+    it('puts the sockets on the API server when no tracking URL is configured', () => {
+        expect(trackingUrlFromApiUrl('https://api.shravanprovision.com/api/v1')).toBe('https://api.shravanprovision.com/tracking');
+        expect(trackingUrlFromApiUrl('http://localhost:3000/api/v1')).toBe('http://localhost:3000/tracking');
+        expect(trackingUrlFromApiUrl('not a url')).toBeUndefined();
     });
 });
