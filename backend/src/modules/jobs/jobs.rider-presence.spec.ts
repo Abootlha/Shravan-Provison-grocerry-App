@@ -195,7 +195,9 @@ describe('JobsService rider presence sweep (MongoDB)', () => {
     jest
       .spyOn(service, 'expireUnansweredOffers')
       .mockRejectedValueOnce(new Error('boom'));
-    await rider(RiderStatus.BUSY, NOW);
+    // sweepRiderPresence uses the real clock, so the rider must have been
+    // heard from just now (a fixed NOW made this fail later in the day).
+    await rider(RiderStatus.BUSY, new Date());
     const result = await service.sweepRiderPresence();
     expect(result).toEqual({
       expiredOffers: 0,
