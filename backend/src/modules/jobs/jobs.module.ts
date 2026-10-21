@@ -13,6 +13,7 @@ import { User, UserSchema } from '../users/schemas/user.schema';
 import { Rider, RiderSchema } from '../riders/schemas/rider.schema';
 import { OrdersModule } from '../orders/orders.module';
 import { RidersModule } from '../riders/riders.module';
+import { TrackingModule } from '../../sockets/tracking.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { RidersModule } from '../riders/riders.module';
     ),
     forwardRef(() => OrdersModule),
     forwardRef(() => RidersModule),
+    forwardRef(() => TrackingModule),
   ],
   providers: [
     JobsService,
