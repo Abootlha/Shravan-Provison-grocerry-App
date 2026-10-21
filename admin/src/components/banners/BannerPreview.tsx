@@ -3,10 +3,10 @@ import { ImageOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /**
- * Approximates one slide of the customer app's home carousel (customer-app BannerCarousel):
- * 2:1, 12px radius, a flat neutral block, the art covering it, and the title in ink on the
- * left 44% of the slide. Copy is not drawn over a busy image, so keep the left side of the
- * art clear.
+ * Approximates one slide of the customer app's banner carousel (customer-app BannerCarousel):
+ * 2:1, 12px radius, the image covering the slide. The app shows store banners as finished
+ * artwork, so the headline is NOT drawn over the image (it is the screen-reader label and names
+ * the banner here); the title only appears in this preview while there is no image yet.
  */
 export function BannerPreview({
     title,
@@ -43,7 +43,7 @@ export function BannerPreview({
                     <span className="text-xs">{image && failed ? 'Image did not load' : 'Add an image'}</span>
                 </div>
             ) : null}
-            {text && size === 'md' ? (
+            {text && size === 'md' && !showImage ? (
                 <div className="absolute inset-y-0 left-4 flex w-[calc(44%-1rem)] items-center sm:left-5">
                     <p
                         lang={lang === 'hi' && titleHi ? 'hi' : undefined}

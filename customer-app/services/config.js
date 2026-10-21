@@ -90,6 +90,10 @@ export const ENDPOINTS = {
         LIST: '/categories',
         SUBCATEGORIES: (categoryId) => `/subcategories?parentId=${categoryId}`,
     },
+    banners: {
+        // Public: what the store set up in Admin > Banners (only live ones are returned).
+        LIST: '/banners',
+    },
     products: {
         LIST: '/products',
         HOME: '/products/home',

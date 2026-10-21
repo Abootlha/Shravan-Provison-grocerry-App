@@ -4,7 +4,8 @@ import { FlashList } from '@shopify/flash-list';
 import Animated from 'react-native-reanimated';
 import { useSelector } from 'react-redux';
 import { AnimatedScreen, Chip, ContentSwap, EmptyState, GradientHeader, IconButton, Screen, SkeletonGroup, SkeletonProductTile, Text } from '../components/ui';
-import { ProductCard, FloatingCartBar } from '../components';
+import { BannerCarousel, ProductCard, FloatingCartBar } from '../components';
+import { bannersForCategory, toBannerSlides, useOpenBanner, useStoreBanners } from '../hooks/useStoreBanners';
 import { space } from '../constants/theme';
 import { layout, stagger } from '../theme/motion';
 import { makeStyles, useTheme } from '../theme';
@@ -181,6 +182,20 @@ const CategoryScreen = ({ route, navigation }) => {
     const gridW = width - (subcategories.length ? RAIL_WIDTH : 0);
     const cardW = Math.floor((gridW - GRID_PAD * 2 - GRID_GAP) / 2);
 
+    // The store's banners for this category (Admin > Banners, target = this category) sit above
+    // the products and scroll away with them.
+    const storeBanners = useStoreBanners();
+    const categoryBanners = useMemo(
+        () => toBannerSlides(bannersForCategory(storeBanners, categoryId), isHi),
+        [storeBanners, categoryId, isHi],
+    );
+    const openBanner = useOpenBanner(navigation, [], categoryId);
+    const bannerHeader = categoryBanners.length ? (
+        <View style={styles.bannerWrap}>
+            <BannerCarousel banners={categoryBanners} onPress={openBanner} width={gridW - GRID_PAD * 2} aspectRatio={2} />
+        </View>
+    ) : null;
+
     const visible = useMemo(() => {
         let list = inStockOnly ? products.filter(isInStock) : products;
         if (sort === 'priceAsc') list = [...list].sort((a, b) => getPrice(a) - getPrice(b));
@@ -325,6 +340,7 @@ const CategoryScreen = ({ route, navigation }) => {
                                     extraData={cardW}
                                     CellRendererComponent={ReorderCell}
                                     contentContainerStyle={styles.gridContent}
+                                    ListHeaderComponent={bannerHeader}
                                     showsVerticalScrollIndicator={false}
                                     ListEmptyComponent={
                                         <EmptyState
@@ -377,6 +393,7 @@ const useStyles = makeStyles((t) => ({
     chipBar: { flexGrow: 0 },
     chips: { gap: space.sm, paddingHorizontal: GRID_PAD, paddingTop: space.md, paddingBottom: space.sm },
     grid: { flex: 1 },
+    bannerWrap: { marginHorizontal: GRID_GAP / 2, marginBottom: space.md },
     gridContent: { paddingHorizontal: GRID_PAD - GRID_GAP / 2, paddingTop: space.xs, paddingBottom: 160 },
     cell: { marginHorizontal: GRID_GAP / 2, marginBottom: GRID_GAP },
     skeletonGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: GRID_GAP, paddingHorizontal: GRID_PAD },

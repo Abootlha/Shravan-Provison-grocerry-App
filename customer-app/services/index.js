@@ -7,6 +7,7 @@ export {
     OrderService,
     UserService,
     SettingsService,
+    BannerService,
     addressRef,
 } from './services';
 export {
