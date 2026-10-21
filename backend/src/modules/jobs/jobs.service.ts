@@ -1,4 +1,12 @@
-import { Injectable, OnModuleInit, Logger, Optional } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  OnModuleInit,
+  Logger,
+  Optional,
+  forwardRef,
+} from '@nestjs/common';
+import { TrackingGateway } from '../../sockets/tracking.gateway';
 import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { Queue, Job } from 'bullmq';
@@ -66,6 +74,9 @@ export class JobsService implements OnModuleInit {
     private etaService: ETAService,
     private configService: ConfigService,
     @Optional() private riderPush?: RiderPushService,
+    @Optional()
+    @Inject(forwardRef(() => TrackingGateway))
+    private trackingGateway?: TrackingGateway,
   ) {}
 
   async onModuleInit() {
@@ -437,9 +448,35 @@ export class JobsService implements OnModuleInit {
       .select('_id')
       .lean()
       .exec();
+    if (!stale.length) return 0;
+
+    // A rider with the app connected is reachable even without location
+    // updates (standing still at the store sends none): keep them online.
+    let connected = new Set<string>();
+    try {
+      connected =
+        (await this.trackingGateway?.connectedRiderIds(
+          stale.map((r) => String(r._id)),
+        )) ?? connected;
+    } catch (error) {
+      // Unknown socket state: do not take anyone offline on a guess.
+      this.logger.warn(
+        `Could not read rider connections, skipping offline sweep: ${(error as Error).message}`,
+      );
+      return 0;
+    }
+    if (connected.size) {
+      await this.riderModel
+        .updateMany(
+          { _id: { $in: [...connected] } },
+          { $set: { lastActiveAt: new Date() } },
+        )
+        .exec();
+    }
 
     let marked = 0;
     for (const rider of stale) {
+      if (connected.has(String(rider._id))) continue;
       const res = await this.riderModel
         .updateOne(
           { _id: rider._id, status: RiderStatus.AVAILABLE },

@@ -294,6 +294,29 @@ export class TrackingGateway
   }
 
   /**
+   * Which of these riders have the app connected right now (any device).
+   * Works across processes through the Redis adapter. A connected rider is
+   * reachable even when they send no location (standing still: the GPS
+   * watcher only reports movement).
+   */
+  async connectedRiderIds(riderIds: string[]): Promise<Set<string>> {
+    const connected = new Set<string>();
+    if (!riderIds.length) return connected;
+    const rooms = riderIds.map((id) => this.getRiderRoomName(id));
+    const target = this.server?.in?.(rooms);
+    if (!target || typeof target.fetchSockets !== 'function') return connected;
+    const sockets = await target.fetchSockets();
+    for (const socket of sockets) {
+      const user = socket.data?.user as
+        | { userId?: string; role?: string }
+        | undefined;
+      if (user?.role === 'rider' && user.userId)
+        connected.add(String(user.userId));
+    }
+    return connected;
+  }
+
+  /**
    * Generate room name for user
    */
   private getUserRoomName(userId: string): string {
