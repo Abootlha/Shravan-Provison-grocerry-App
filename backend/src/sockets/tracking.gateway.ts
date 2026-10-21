@@ -32,7 +32,10 @@ import {
 } from './socket-auth';
 
 /** Why a rider lost an order (sent with `orderUnassigned`). */
-export type RiderUnassignReason = 'admin_unassigned' | 'rider_rejected';
+export type RiderUnassignReason =
+  | 'admin_unassigned'
+  | 'rider_rejected'
+  | 'offer_expired';
 
 // setTimeout overflows above this (~24.8 days).
 const MAX_TIMER_MS = 2_147_483_647;
@@ -152,6 +155,15 @@ export class TrackingGateway
 
     if (user.role === (UserRole.RIDER as string)) {
       await client.join(this.getRiderRoomName(user.userId));
+      // A connected rider is reachable: keeps the stale-rider sweep from
+      // marking them offline while the app is open but GPS is still warming up.
+      this.ridersService
+        .touchActivity(user.userId)
+        .catch((error: Error) =>
+          this.logger.warn(
+            `Could not record activity for rider ${user.userId}: ${error.message}`,
+          ),
+        );
     }
     this.logger.log(`Client connected: ${client.id} (${user.role})`);
   }
@@ -279,6 +291,29 @@ export class TrackingGateway
         `Failed to evict stale riders from order ${orderId}: ${(error as Error).message}`,
       );
     }
+  }
+
+  /**
+   * Which of these riders have the app connected right now (any device).
+   * Works across processes through the Redis adapter. A connected rider is
+   * reachable even when they send no location (standing still: the GPS
+   * watcher only reports movement).
+   */
+  async connectedRiderIds(riderIds: string[]): Promise<Set<string>> {
+    const connected = new Set<string>();
+    if (!riderIds.length) return connected;
+    const rooms = riderIds.map((id) => this.getRiderRoomName(id));
+    const target = this.server?.in?.(rooms);
+    if (!target || typeof target.fetchSockets !== 'function') return connected;
+    const sockets = await target.fetchSockets();
+    for (const socket of sockets) {
+      const user = socket.data?.user as
+        | { userId?: string; role?: string }
+        | undefined;
+      if (user?.role === 'rider' && user.userId)
+        connected.add(String(user.userId));
+    }
+    return connected;
   }
 
   /**

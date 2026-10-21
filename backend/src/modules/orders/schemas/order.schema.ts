@@ -184,6 +184,10 @@ export class Order {
   @Prop({ type: Types.ObjectId, ref: 'Rider', index: true })
   riderId?: Types.ObjectId;
 
+  /** When the current rider was offered the order (CONFIRMED + riderId). */
+  @Prop({ type: Date })
+  riderOfferedAt?: Date;
+
   @Prop()
   deliveryInstructions?: string;
 
@@ -235,6 +239,8 @@ OrderSchema.index({ userId: 1, createdAt: -1 });
 OrderSchema.index({ createdAt: -1 });
 // Admin order filters and rider stats / active-order lookups.
 OrderSchema.index({ riderId: 1, orderStatus: 1, updatedAt: -1 });
+// Offer-expiry sweep: CONFIRMED orders waiting on a rider's answer.
+OrderSchema.index({ orderStatus: 1, riderOfferedAt: 1 });
 OrderSchema.index({ paymentStatus: 1, createdAt: -1 });
 OrderSchema.index({ paymentMethod: 1, createdAt: -1 });
 OrderSchema.index({ requiresManualReview: 1, createdAt: -1 });

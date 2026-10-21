@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, StyleSheet, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { AppText, Button, Card, IconName, Pill, tapHaptic } from './ui';
 import { elevation, radii, spacing, useTheme } from '../theme';
@@ -476,8 +476,42 @@ export const ActiveOrderCard: React.FC<{
 
 /* --------------------------------------------------------- ItemsList */
 
-export const ItemsList: React.FC<{ order: Order }> = ({ order }) => {
+/** Only real http(s) images; anything else shows the placeholder. */
+const imageUri = (value?: string | null) => (value && /^https?:\/\//i.test(value.trim()) ? value.trim() : null);
+
+/**
+ * Product photo so the rider can pick the right item at the counter. Images
+ * come from the catalogue (often other stores' CDNs), so a broken or missing
+ * one falls back to a package icon instead of an empty box.
+ */
+export const ItemThumb: React.FC<{ uri?: string | null; quantity: number; name: string }> = ({ uri, quantity, name }) => {
   const { colors: c } = useTheme();
+  const source = imageUri(uri);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [source]);
+  return (
+    <View style={[styles.thumb, { borderColor: c.border, backgroundColor: '#FFFFFF' }]}>
+      {source && !failed ? (
+        <Image
+          source={{ uri: source }}
+          style={styles.thumbImage}
+          resizeMode="contain"
+          onError={() => setFailed(true)}
+          accessibilityLabel={name}
+        />
+      ) : (
+        <MaterialCommunityIcons name="package-variant-closed" size={24} color={c.textSubtle} />
+      )}
+      <View style={[styles.thumbQty, { backgroundColor: c.brand, borderColor: c.surface }]}>
+        <AppText variant="caption" weight="bold" numeric color="#FFFFFF">
+          {quantity}×
+        </AppText>
+      </View>
+    </View>
+  );
+};
+
+export const ItemsList: React.FC<{ order: Order }> = ({ order }) => {
   if (!order.items.length) {
     return (
       <AppText variant="bodySm" tone="muted">
@@ -486,17 +520,18 @@ export const ItemsList: React.FC<{ order: Order }> = ({ order }) => {
     );
   }
   return (
-    <View style={{ gap: spacing.sm }}>
+    <View style={{ gap: spacing.md }}>
       {order.items.map((item) => (
         <View key={item.id} style={styles.itemRow}>
-          <View style={[styles.qty, { backgroundColor: c.brandSoft }]}>
-            <AppText variant="bodySm" weight="bold" tone="brand" numeric>
-              {item.quantity}×
+          <ItemThumb uri={item.image} quantity={item.quantity} name={item.name} />
+          <View style={{ flex: 1, gap: 2 }}>
+            <AppText variant="body" numberOfLines={2}>
+              {item.name}
+            </AppText>
+            <AppText variant="caption" tone="muted" numeric>
+              {item.quantity} × {formatMoney(item.price)}
             </AppText>
           </View>
-          <AppText variant="body" style={{ flex: 1 }} numberOfLines={2}>
-            {item.name}
-          </AppText>
           <AppText variant="bodySm" tone="muted" numeric>
             {formatMoney(item.price * item.quantity)}
           </AppText>
@@ -568,13 +603,26 @@ const styles = StyleSheet.create({
   offerTimerTrack: { height: 6, width: '100%' },
   offerActions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.xs },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
-  itemRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: 36 },
-  qty: {
-    minWidth: 40,
-    height: 30,
-    borderRadius: radii.sm,
+  itemRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: 56 },
+  thumb: {
+    width: 56,
+    height: 56,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 6,
+  },
+  thumbImage: { width: 48, height: 48, borderRadius: radii.sm },
+  thumbQty: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    minWidth: 24,
+    height: 20,
+    paddingHorizontal: 4,
+    borderRadius: 10,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

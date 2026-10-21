@@ -5,6 +5,7 @@ import {
   STALE_ORDER_QUEUE,
   ANOMALY_QUEUE,
   ETA_QUEUE,
+  RIDER_PRESENCE_QUEUE,
 } from './jobs.service';
 
 // One processor class per queue: stacking several @Processor decorators on a
@@ -34,6 +35,18 @@ export class AnomalyCheckProcessor extends WorkerHost {
 
 @Processor(ETA_QUEUE, { concurrency: 5 })
 export class EtaRecalculationProcessor extends WorkerHost {
+  constructor(private readonly jobsService: JobsService) {
+    super();
+  }
+
+  async process(job: Job): Promise<any> {
+    return this.jobsService.process(job);
+  }
+}
+
+// One at a time: the sweep reads then updates riders and orders.
+@Processor(RIDER_PRESENCE_QUEUE, { concurrency: 1 })
+export class RiderPresenceProcessor extends WorkerHost {
   constructor(private readonly jobsService: JobsService) {
     super();
   }

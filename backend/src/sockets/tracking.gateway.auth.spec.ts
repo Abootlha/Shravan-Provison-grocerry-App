@@ -16,7 +16,10 @@ describe('TrackingGateway connection auth and rider events', () => {
     ),
   };
   const redisService = { getClient: () => redisClient } as any;
-  const ridersService = { updateLocation: jest.fn() };
+  const ridersService = {
+    updateLocation: jest.fn(),
+    touchActivity: jest.fn().mockResolvedValue(undefined),
+  };
   const ordersService = {} as any;
 
   let gateway: TrackingGateway;
@@ -134,6 +137,8 @@ describe('TrackingGateway connection auth and rider events', () => {
       await runMiddleware(socket);
       await gateway.handleConnection(socket as any);
       expect(socket.join).toHaveBeenCalledWith('rider_r1');
+      // A connected rider counts as reachable for the stale-rider sweep.
+      expect(ridersService.touchActivity).toHaveBeenCalledWith('r1');
       gateway.handleDisconnect(socket as any);
     });
 
