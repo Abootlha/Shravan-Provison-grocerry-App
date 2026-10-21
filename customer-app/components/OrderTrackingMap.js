@@ -18,7 +18,7 @@
  * Google, `userInterfaceStyle` on iOS Apple Maps). Route, pins and rider take theme colours.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { Platform, View, StyleSheet } from 'react-native';
 import { makeStyles, useTheme } from '../theme';
 import { trackingMapStyle } from './OrderTrackingMapStyle';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -67,13 +67,21 @@ const Pin = ({ bg, fg, icon }) => {
     );
 };
 
+/**
+ * iOS (Apple Maps, New Architecture): a custom-view Marker with `flat` or `rotation` drifts off
+ * its coordinate and can vanish (react-native-maps #5918, #5911), so on iOS the rider is a plain,
+ * non-rotating marker built exactly like the pins, which render reliably. Android keeps the
+ * heading arrow.
+ */
+const ROTATE_RIDER = Platform.OS === 'android';
+
 const RiderDot = () => {
     const styles = useStyles();
     const { colors } = useTheme();
     return (
     <View style={styles.riderWrap}>
         <View style={styles.rider}>
-            <MaterialCommunityIcons name="navigation" size={16} color={colors.onBrand} />
+            <MaterialCommunityIcons name={ROTATE_RIDER ? 'navigation' : 'moped'} size={ROTATE_RIDER ? 16 : 18} color={colors.onBrand} />
         </View>
     </View>
     );
@@ -228,7 +236,12 @@ const OrderTrackingMap = ({
                     </Marker>
                 )}
                 {rider && (
-                    <Marker coordinate={rider} anchor={{ x: 0.5, y: 0.5 }} rotation={heading} flat>
+                    <Marker
+                        coordinate={rider}
+                        anchor={{ x: 0.5, y: 0.5 }}
+                        zIndex={10}
+                        {...(ROTATE_RIDER ? { rotation: heading, flat: true } : null)}
+                    >
                         <RiderDot />
                     </Marker>
                 )}

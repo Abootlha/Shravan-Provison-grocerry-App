@@ -348,7 +348,11 @@ function OrdersPage() {
             />
             </div>
 
-            <OrderDetailSheet orderId={openId} onOpenChange={(open) => !open && setOpenId(null)} />
+            <OrderDetailSheet
+                orderId={openId}
+                connection={connection}
+                onOpenChange={(open) => !open && setOpenId(null)}
+            />
         </PageContainer>
     );
 }

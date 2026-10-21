@@ -134,6 +134,9 @@ export const useRiderRuntime = () => {
     let previous = socketService.getState();
     return socketService.onStateChange((next) => {
       if (next === 'connected' && previous !== 'connected' && store.getState().auth.isAuthenticated) {
+        // The server may have set the rider offline while disconnected: show
+        // the real status instead of a stale "Online".
+        dispatch(refreshRider());
         dispatch(fetchCurrentOrder());
         catchUpOffers(dispatch);
       }

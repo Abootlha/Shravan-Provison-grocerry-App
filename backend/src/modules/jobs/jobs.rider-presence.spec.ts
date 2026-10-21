@@ -26,6 +26,9 @@ describe('JobsService rider presence sweep (MongoDB)', () => {
   let service: JobsService;
   const ordersService = { expireRiderOffer: jest.fn() };
   const riderPush = { notify: jest.fn() };
+  const trackingGateway = {
+    connectedRiderIds: jest.fn(() => Promise.resolve(new Set<string>())),
+  };
   const NOW = new Date('2026-10-21T10:00:00Z');
 
   beforeAll(async () => {
@@ -45,6 +48,7 @@ describe('JobsService rider presence sweep (MongoDB)', () => {
       {} as any,
       { get: () => undefined } as any,
       riderPush as any,
+      trackingGateway as any,
     );
   }, 180000);
 
@@ -58,6 +62,7 @@ describe('JobsService rider presence sweep (MongoDB)', () => {
     await orders.collection.deleteMany({});
     jest.clearAllMocks();
     ordersService.expireRiderOffer.mockResolvedValue({ reassigned: true });
+    trackingGateway.connectedRiderIds.mockResolvedValue(new Set<string>());
   });
 
   let seq = 0;
@@ -191,11 +196,51 @@ describe('JobsService rider presence sweep (MongoDB)', () => {
     );
   });
 
+  it('keeps a stale rider online while their app is connected', async () => {
+    // Standing still at the store: no location updates, but the app is open.
+    const waiting = await rider(
+      RiderStatus.AVAILABLE,
+      ago(RIDER_STALE_AFTER_MS + 60_000),
+    );
+    const gone = await rider(
+      RiderStatus.AVAILABLE,
+      ago(RIDER_STALE_AFTER_MS + 60_000),
+    );
+    trackingGateway.connectedRiderIds.mockResolvedValue(
+      new Set([String(waiting._id)]),
+    );
+
+    await expect(service.markStaleRidersOffline(NOW)).resolves.toBe(1);
+    const after = (await riders.findById(waiting._id).lean())!;
+    expect(after.status).toBe(RiderStatus.AVAILABLE);
+    expect(after.lastActiveAt!.getTime()).toBeGreaterThan(Date.now() - 60_000);
+    expect((await riders.findById(gone._id).lean())!.status).toBe(
+      RiderStatus.OFFLINE,
+    );
+    expect(riderPush.notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('takes nobody offline when socket state cannot be read', async () => {
+    const r = await rider(
+      RiderStatus.AVAILABLE,
+      ago(RIDER_STALE_AFTER_MS + 60_000),
+    );
+    trackingGateway.connectedRiderIds.mockRejectedValue(
+      new Error('redis down'),
+    );
+    await expect(service.markStaleRidersOffline(NOW)).resolves.toBe(0);
+    expect((await riders.findById(r._id).lean())!.status).toBe(
+      RiderStatus.AVAILABLE,
+    );
+  });
+
   it('runs every step even when one fails', async () => {
     jest
       .spyOn(service, 'expireUnansweredOffers')
       .mockRejectedValueOnce(new Error('boom'));
-    await rider(RiderStatus.BUSY, NOW);
+    // sweepRiderPresence uses the real clock, so the rider must have been
+    // heard from just now (a fixed NOW made this fail later in the day).
+    await rider(RiderStatus.BUSY, new Date());
     const result = await service.sweepRiderPresence();
     expect(result).toEqual({
       expiredOffers: 0,

@@ -61,7 +61,18 @@
           "color": "#6C3CF4"
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#6C3CF4",
+          "imageWidth": 200
+        }
+      ],
+      "expo-font",
+      "expo-status-bar"
     ],
     "extra": {
       "eas": {

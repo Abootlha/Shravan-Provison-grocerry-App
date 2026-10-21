@@ -292,9 +292,16 @@ export const OrderDetailScreen: React.FC<OrderDetailScreenProps> = ({ navigation
                 <AppText variant="bodySm" weight="semibold">
                   Expected delivery
                 </AppText>
-                <AppText variant="bodySm" weight="semibold" numeric>
-                  {formatTime(order.estimatedDeliveryTime)}
-                </AppText>
+                {/* A passed estimate is not a promise any more: say so. */}
+                {new Date(order.estimatedDeliveryTime).getTime() < Date.now() ? (
+                  <AppText variant="bodySm" weight="semibold" tone="warning">
+                    Running late
+                  </AppText>
+                ) : (
+                  <AppText variant="bodySm" weight="semibold" numeric>
+                    {formatTime(order.estimatedDeliveryTime)}
+                  </AppText>
+                )}
               </View>
             ) : null}
           </Card>
