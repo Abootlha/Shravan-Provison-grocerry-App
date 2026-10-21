@@ -48,6 +48,8 @@ export interface LocationUpdateResult {
 
 /** Minimum gap between stored rider locations. Clients send every ~5 s. */
 export const LOCATION_THROTTLE_MS = 2500;
+/** Devices per rider that receive push alerts (newest kept). */
+export const MAX_PUSH_TOKENS = 5;
 /** Minimum gap between ETA recalculations (each may call the directions API). */
 export const ETA_RECALC_INTERVAL_MS = 15000;
 
@@ -150,11 +152,15 @@ export class RidersService {
     const rider = await this.findRiderById(riderId);
 
     if (typeof presence.isOnline === 'boolean') {
+      // Going online means ready for orders unless the client explicitly says
+      // otherwise. (The rider app sends only { isOnline }; treating a missing
+      // isAvailable as "busy" left every online rider unassignable.)
       rider.status = presence.isOnline
-        ? presence.isAvailable
-          ? RiderStatus.AVAILABLE
-          : RiderStatus.BUSY
+        ? presence.isAvailable === false
+          ? RiderStatus.BUSY
+          : RiderStatus.AVAILABLE
         : RiderStatus.OFFLINE;
+      if (presence.isOnline) rider.lastActiveAt = new Date();
     }
 
     if (typeof presence.isAvailable === 'boolean') {
@@ -169,6 +175,44 @@ export class RidersService {
     await this.keepBusyWhileOnActiveOrder(rider);
     await rider.save();
     return rider;
+  }
+
+  /** Records that the rider was reachable just now (socket connect, ping). */
+  async touchActivity(riderId: string): Promise<void> {
+    if (!Types.ObjectId.isValid(riderId)) return;
+    await this.riderModel
+      .updateOne({ _id: riderId }, { $set: { lastActiveAt: new Date() } })
+      .exec();
+  }
+
+  /**
+   * Saves this device's Expo push token. A token is moved off any other
+   * rider first (a shared phone must not alert the previous rider), and only
+   * the newest MAX_PUSH_TOKENS devices are kept.
+   */
+  async registerPushToken(riderId: string, token: string): Promise<void> {
+    await this.riderModel
+      .updateMany(
+        { _id: { $ne: riderId }, pushTokens: token },
+        { $pull: { pushTokens: token } },
+      )
+      .exec();
+    await this.riderModel
+      .updateOne({ _id: riderId }, { $pull: { pushTokens: token } })
+      .exec();
+    await this.riderModel
+      .updateOne(
+        { _id: riderId },
+        { $push: { pushTokens: { $each: [token], $slice: -MAX_PUSH_TOKENS } } },
+      )
+      .exec();
+  }
+
+  /** On logout: this device stops receiving the rider's alerts. */
+  async removePushToken(riderId: string, token: string): Promise<void> {
+    await this.riderModel
+      .updateOne({ _id: riderId }, { $pull: { pushTokens: token } })
+      .exec();
   }
 
   /**

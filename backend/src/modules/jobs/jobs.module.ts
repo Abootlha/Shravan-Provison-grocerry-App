@@ -6,9 +6,11 @@ import {
   StaleOrderProcessor,
   AnomalyCheckProcessor,
   EtaRecalculationProcessor,
+  RiderPresenceProcessor,
 } from './jobs.processors';
 import { Order, OrderSchema } from '../orders/schemas/order.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
+import { Rider, RiderSchema } from '../riders/schemas/rider.schema';
 import { OrdersModule } from '../orders/orders.module';
 import { RidersModule } from '../riders/riders.module';
 
@@ -17,6 +19,7 @@ import { RidersModule } from '../riders/riders.module';
     MongooseModule.forFeature([
       { name: Order.name, schema: OrderSchema },
       { name: User.name, schema: UserSchema },
+      { name: Rider.name, schema: RiderSchema },
     ]),
     BullModule.registerQueue(
       {
@@ -28,6 +31,9 @@ import { RidersModule } from '../riders/riders.module';
       {
         name: 'eta-recalculation',
       },
+      {
+        name: 'rider-presence',
+      },
     ),
     forwardRef(() => OrdersModule),
     forwardRef(() => RidersModule),
@@ -37,6 +43,7 @@ import { RidersModule } from '../riders/riders.module';
     StaleOrderProcessor,
     AnomalyCheckProcessor,
     EtaRecalculationProcessor,
+    RiderPresenceProcessor,
   ],
   exports: [JobsService],
 })

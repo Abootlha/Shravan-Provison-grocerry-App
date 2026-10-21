@@ -14,7 +14,7 @@ let registered = false;
 const isMine = (state: RootState, orderId: string) =>
   state.orders.currentOrder?.id === orderId || state.orders.offers.some((offer) => offer.id === orderId);
 
-const offerSummary = (order: Order) => {
+export const offerSummary = (order: Order) => {
   const parts = [`${order.items.length} item${order.items.length === 1 ? '' : 's'}`];
   if (order.paymentMethod === 'COD') parts.push(`collect ${formatMoney(order.totalAmount)} cash`);
   const drop = order.delivery.address.full;
@@ -37,8 +37,8 @@ export const registerRealtimeHandlers = (store: StoreLike): void => {
     if (!payload?.order) return;
     const order = normalizeOrder(payload.order);
     dispatch(orderReceived(order));
-    // Requests are only shown (and rung) while the rider is online.
-    if (!getState().auth.user?.isOnline) return;
+    // The server only offers orders to riders it sees as online, so always
+    // ring. (The local isOnline copy can lag behind the server.)
     notificationService.alertNewOrder(order.id, order.orderNumber, offerSummary(order)).catch(() => undefined);
   });
 
@@ -172,11 +172,16 @@ export const registerRealtimeHandlers = (store: StoreLike): void => {
         })
       );
       if (known && !self) {
+        const expired = payload.reason === 'offer_expired';
         notificationService
           .notifyUpdate(
             `unassigned:${payload.orderId}`,
-            `Order ${payload.orderNumber || ''} reassigned`.replace(/\s+/g, ' ').trim(),
-            'The store has moved this order to another rider.'
+            `${expired ? 'Request' : 'Order'} ${payload.orderNumber || ''} ${expired ? 'expired' : 'reassigned'}`
+              .replace(/\s+/g, ' ')
+              .trim(),
+            expired
+              ? 'You did not answer in time, so it went to another rider.'
+              : 'The store has moved this order to another rider.'
           )
           .catch(() => undefined);
       }

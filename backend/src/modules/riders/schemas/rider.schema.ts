@@ -72,19 +72,26 @@ export class Rider {
   @Prop({ type: Date })
   lastLocationUpdate?: Date;
 
+  /** Last time the server heard from the rider (location, socket connect, going online). */
   @Prop({ type: Date })
   lastActiveAt?: Date;
+
+  /** Expo push tokens of the rider's signed-in devices (newest last). */
+  @Prop({ type: [String], default: [] })
+  pushTokens!: string[];
 }
 
 export const RiderSchema = SchemaFactory.createForClass(Rider);
 
 RiderSchema.index({ currentLocation: '2dsphere' });
 RiderSchema.index({ status: 1, isActive: 1 });
+RiderSchema.index({ pushTokens: 1 });
 
 // Never serialise the password hash (documents returned from controllers).
 RiderSchema.set('toJSON', {
   transform: (_doc, ret: Record<string, any>) => {
     delete ret.password;
+    delete ret.pushTokens;
     return ret;
   },
 });

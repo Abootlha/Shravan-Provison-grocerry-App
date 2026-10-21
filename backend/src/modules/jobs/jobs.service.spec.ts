@@ -5,6 +5,7 @@ import { Types } from 'mongoose';
 import * as fc from 'fast-check';
 import { ConfigService } from '@nestjs/config';
 import { JobsService } from './jobs.service';
+import { Rider } from '../riders/schemas/rider.schema';
 import {
   StaleOrderProcessor,
   AnomalyCheckProcessor,
@@ -19,6 +20,11 @@ import {
 import { User, UserRole } from '../users/schemas/user.schema';
 import { OrdersService } from '../orders/orders.service';
 import { ETAService } from '../orders/eta.service';
+
+const mockRiderModel = {
+  find: jest.fn(),
+  updateOne: jest.fn(),
+};
 
 describe('JobsService', () => {
   let service: JobsService;
@@ -90,6 +96,14 @@ describe('JobsService', () => {
         {
           provide: getModelToken(User.name),
           useValue: mockUserModel,
+        },
+        {
+          provide: getQueueToken('rider-presence'),
+          useValue: mockQueue,
+        },
+        {
+          provide: getModelToken(Rider.name),
+          useValue: mockRiderModel,
         },
         {
           provide: OrdersService,
