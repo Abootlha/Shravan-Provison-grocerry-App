@@ -15,6 +15,7 @@ import {
     deliveryPoint,
     formatPhone,
     itemCount,
+    LIVE_STATUSES,
     mapsLink,
     nextStep,
     ordersApi,
@@ -26,14 +27,30 @@ import { CancelOrderDialog } from './CancelOrderDialog';
 import { RiderPicker } from './RiderPicker';
 import { LiveTracking } from './LiveTracking';
 import type { AdminRider, OrderDetail, OrderItem, StatusTimelineEntry } from './types';
+import type { LiveConnection } from './useOrdersLive';
 
 export interface OrderDetailSheetProps {
     /** Mongo _id or ORD- id of the open order; null closes the sheet. */
     orderId: string | null;
     onOpenChange: (open: boolean) => void;
+    /**
+     * State of the orders socket. Socket events refresh the open order instantly; while it is
+     * down the sheet polls faster so the status, rider and history never go stale.
+     */
+    connection?: LiveConnection;
 }
 
-export function OrderDetailSheet({ orderId, onOpenChange }: OrderDetailSheetProps) {
+/** Fallback refresh of an open, in-progress order (ms). Socket events usually win. */
+export const DETAIL_POLL_LIVE_MS = 30_000;
+export const DETAIL_POLL_OFFLINE_MS = 8_000;
+
+/** How often an open order refreshes by itself: never once it is delivered or cancelled. */
+export function detailRefetchInterval(status: OrderDetail['orderStatus'] | undefined, connection: LiveConnection): number | false {
+    if (!status || !LIVE_STATUSES.includes(status)) return false;
+    return connection === 'live' ? DETAIL_POLL_LIVE_MS : DETAIL_POLL_OFFLINE_MS;
+}
+
+export function OrderDetailSheet({ orderId, onOpenChange, connection = 'live' }: OrderDetailSheetProps) {
     // Keep the last id while the sheet animates closed so the content doesn't blank out.
     const [shownId, setShownId] = React.useState(orderId);
     React.useEffect(() => {
@@ -48,17 +65,20 @@ export function OrderDetailSheet({ orderId, onOpenChange }: OrderDetailSheetProp
                 className="gap-0 p-0"
                 aria-describedby={undefined}
             >
-                {shownId ? <OrderDetailBody id={shownId} /> : null}
+                {shownId ? <OrderDetailBody id={shownId} connection={connection} /> : null}
             </SheetContent>
         </Sheet>
     );
 }
 
-function OrderDetailBody({ id }: { id: string }) {
+function OrderDetailBody({ id, connection }: { id: string; connection: LiveConnection }) {
     const query = useQuery({
         queryKey: queryKeys.orders.detail(id),
         queryFn: ({ signal }) => ordersApi.detail(id, signal),
         staleTime: 5_000,
+        // Delivered and cancelled orders do not change; in-progress ones are rider-driven.
+        refetchInterval: (q) => detailRefetchInterval(q.state.data?.orderStatus, connection),
+        refetchOnWindowFocus: 'always',
     });
 
     if (query.isPending) {
