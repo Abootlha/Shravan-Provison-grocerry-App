@@ -1,5 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { AppState, View } from 'react-native';
+import { AppState, LogBox, View } from 'react-native';
+
+LogBox.ignoreLogs([
+  'Background location is limited in Expo Go',
+  'Cannot connect to Expo CLI',
+]);
 import { StatusBar } from 'expo-status-bar';
 import { Provider } from 'react-redux';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

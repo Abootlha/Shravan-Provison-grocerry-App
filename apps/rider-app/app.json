@@ -6,11 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#6C3CF4"
-    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.shravankirana.rider",
@@ -44,6 +39,14 @@
       ]
     },
     "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#6C3CF4"
+        }
+      ],
       [
         "expo-location",
         {

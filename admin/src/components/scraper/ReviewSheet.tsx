@@ -100,7 +100,7 @@ export function ReviewSheet({
     const query = useScrapedItem(id);
     const item = query.data;
     const [form, setForm] = React.useState<FormState | null>(null);
-    const [busy, setBusy] = React.useState<null | 'save' | 'approve' | 'decline' | 'retry'>(null);
+    const [busy, setBusy] = React.useState<null | 'save' | 'approve' | 'decline' | 'retry' | 'delete'>(null);
     const [publishAs, setPublishAs] = React.useState<'active' | 'draft'>('active');
     const [declining, setDeclining] = React.useState(false);
     const [reason, setReason] = React.useState('');
@@ -160,6 +160,17 @@ export function ReviewSheet({
     const decline = () =>
         item && run('decline', () => scraperApi.decline(item._id, reason.trim() || undefined), 'Declined', true);
     const retry = () => item && run('retry', () => scraperApi.retry(item._id), 'Scraping again');
+    const deleteItem = async () => {
+        if (!item) return;
+        const ok = await confirm({
+            title: `Permanently delete "${item.name || 'this product'}"?`,
+            description: 'This declined product will be permanently removed from the scraper database. This action cannot be undone.',
+            confirmLabel: 'Delete',
+            tone: 'destructive',
+        });
+        if (!ok) return;
+        await run('delete', () => scraperApi.delete(item._id), 'Deleted product', true);
+    };
 
     const moveImage = (index: number, to: number) =>
         setForm((f) => {
@@ -424,6 +435,11 @@ export function ReviewSheet({
                         {item.status === 'ready' || item.status === 'failed' ? (
                             <Button type="button" variant="ghost" className="text-destructive" disabled={!!busy || declining} onClick={() => setDeclining(true)}>
                                 <Trash2 aria-hidden /> Decline
+                            </Button>
+                        ) : item.status === 'declined' ? (
+                            <Button type="button" variant="destructive" size="sm" disabled={!!busy} onClick={deleteItem}>
+                                {busy === 'delete' ? <Loader2 className="animate-spin" aria-hidden /> : <Trash2 aria-hidden />}
+                                Delete product
                             </Button>
                         ) : (
                             <span />

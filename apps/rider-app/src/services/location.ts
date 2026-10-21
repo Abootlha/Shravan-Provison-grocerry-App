@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { isRunningInExpoGo } from 'expo';
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import { LOCATION_UPDATE_THROTTLE, RIDER_SERVICE_URL } from '../utils/constants';
@@ -8,7 +9,20 @@ import { ensureFreshAccessToken, refreshAccessToken } from './authSession';
 
 const BACKGROUND_LOCATION_TASK = 'rider-background-location';
 
+/**
+ * Background location tasks cannot run in Expo Go (missing native background permissions on Android).
+ * In production/dev-client builds, isRunningInExpoGo() is false and background tracking runs natively.
+ */
+export const isBackgroundLocationSupported = (): boolean => {
+  if (Platform.OS === 'web') return false;
+  if (isRunningInExpoGo()) return false;
+  return true;
+};
+
 const stopBackgroundUpdatesQuietly = async (): Promise<void> => {
+  if (!isBackgroundLocationSupported()) {
+    return;
+  }
   try {
     if (await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK)) {
       await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
@@ -150,6 +164,9 @@ class LocationService {
   }
 
   async hasBackgroundPermission(): Promise<boolean> {
+    if (!isBackgroundLocationSupported()) {
+      return false;
+    }
     try {
       const { status } = await Location.getBackgroundPermissionsAsync();
       this.backgroundPermissionGranted = status === 'granted';
@@ -262,7 +279,9 @@ class LocationService {
   }
 
   async startBackgroundTracking(): Promise<boolean> {
-    if (Platform.OS === 'web') {
+    if (!isBackgroundLocationSupported()) {
+      // In Expo Go or Web, background location is not supported.
+      // Foreground tracking keeps running while the app is in view.
       return true;
     }
 
@@ -283,25 +302,30 @@ class LocationService {
       return false;
     }
 
-    const alreadyStarted = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
-    if (alreadyStarted) {
+    try {
+      const alreadyStarted = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+      if (alreadyStarted) {
+        return true;
+      }
+
+      await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+        accuracy: Location.Accuracy.Balanced,
+        timeInterval: LOCATION_UPDATE_THROTTLE,
+        distanceInterval: 10,
+        pausesUpdatesAutomatically: false,
+        showsBackgroundLocationIndicator: false,
+        foregroundService: {
+          notificationTitle: 'ShravanKirana Delivery Tracking',
+          notificationBody: 'Sharing your live location for active deliveries.',
+          notificationColor: '#6C3CF4',
+        },
+      });
+
       return true;
+    } catch (error) {
+      if (__DEV__) console.log('[LocationService] startBackgroundTracking error:', error);
+      return false;
     }
-
-    await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-      accuracy: Location.Accuracy.Balanced,
-      timeInterval: LOCATION_UPDATE_THROTTLE,
-      distanceInterval: 10,
-      pausesUpdatesAutomatically: false,
-      showsBackgroundLocationIndicator: false,
-      foregroundService: {
-        notificationTitle: 'ShravanKirana Delivery Tracking',
-        notificationBody: 'Sharing your live location for active deliveries.',
-        notificationColor: '#6C3CF4',
-      },
-    });
-
-    return true;
   }
 
   stopTracking(): void {
@@ -312,13 +336,17 @@ class LocationService {
   }
 
   async stopBackgroundTracking(): Promise<void> {
-    if (Platform.OS === 'web') {
+    if (!isBackgroundLocationSupported()) {
       return;
     }
 
-    const alreadyStarted = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
-    if (alreadyStarted) {
-      await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+    try {
+      const alreadyStarted = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+      if (alreadyStarted) {
+        await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+      }
+    } catch {
+      // Ignore cleanup error if task is already stopped
     }
   }
 

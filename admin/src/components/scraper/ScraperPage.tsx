@@ -49,7 +49,7 @@ function ScraperPage() {
     const [openId, setOpenId] = React.useState<string | null>(null);
     const [submitOpen, setSubmitOpen] = React.useState(false);
     const [importCsvOpen, setImportCsvOpen] = React.useState(false);
-    const [bulkBusy, setBulkBusy] = React.useState<null | 'approve' | 'draft' | 'decline' | 'retry'>(null);
+    const [bulkBusy, setBulkBusy] = React.useState<null | 'approve' | 'draft' | 'decline' | 'retry' | 'delete' | 'clear'>(null);
 
     const counts = useScrapeCounts();
     const status = useScraperStatus();
@@ -70,7 +70,7 @@ function ScraperPage() {
         setPage(1);
     }, [tab, q]);
 
-    const selectable = canEdit && (tab === 'ready' || tab === 'failed');
+    const selectable = canEdit && (tab === 'ready' || tab === 'failed' || tab === 'declined');
     const selectedIds = items.filter((i) => selected.has(i._id)).map((i) => i._id);
     const allSelected = items.length > 0 && selectedIds.length === items.length;
 
@@ -85,7 +85,15 @@ function ScraperPage() {
     async function bulk(kind: NonNullable<typeof bulkBusy>) {
         const ids = selectedIds;
         if (!ids.length) return;
-        if (kind === 'decline') {
+        if (kind === 'delete') {
+            const ok = await confirm({
+                title: `Permanently delete ${ids.length} ${ids.length === 1 ? 'product' : 'products'}?`,
+                description: 'These items will be permanently removed from the scraper list. This action cannot be undone.',
+                confirmLabel: 'Delete',
+                tone: 'destructive',
+            });
+            if (!ok) return;
+        } else if (kind === 'decline') {
             const ok = await confirm({
                 title: `Decline ${ids.length} ${ids.length === 1 ? 'preview' : 'previews'}?`,
                 description: 'Their photos are deleted from storage. You can submit the links again later.',
@@ -96,7 +104,10 @@ function ScraperPage() {
         }
         setBulkBusy(kind);
         try {
-            if (kind === 'retry') {
+            if (kind === 'delete') {
+                const res = await scraperApi.bulkDelete(ids);
+                toast.success(`Deleted ${res.deleted ?? 0} ${res.deleted === 1 ? 'product' : 'products'}`);
+            } else if (kind === 'retry') {
                 const results = await Promise.allSettled(ids.map((id) => scraperApi.retry(id)));
                 const ok = results.filter((r) => r.status === 'fulfilled').length;
                 toast.success(`Scraping ${ok} ${ok === 1 ? 'link' : 'links'} again`);
@@ -119,6 +130,45 @@ function ScraperPage() {
             toast.error('That did not work', { description: errorMessage(error) });
         } finally {
             setBulkBusy(null);
+        }
+    }
+
+    async function clearAllDeclined() {
+        const count = counts.data?.declined ?? items.length;
+        const ok = await confirm({
+            title: `Clear all ${count} declined ${count === 1 ? 'product' : 'products'}?`,
+            description: 'All declined scraper products will be permanently removed. This action cannot be undone.',
+            confirmLabel: 'Clear all',
+            tone: 'destructive',
+        });
+        if (!ok) return;
+        setBulkBusy('clear');
+        try {
+            const res = await scraperApi.clearDeclined();
+            toast.success(`Deleted ${res.deleted ?? 0} declined ${res.deleted === 1 ? 'product' : 'products'}`);
+            setSelected(new Set());
+            await invalidateScraper();
+        } catch (error) {
+            toast.error('Failed to clear declined products', { description: errorMessage(error) });
+        } finally {
+            setBulkBusy(null);
+        }
+    }
+
+    async function deleteSingle(item: ScrapedItem) {
+        const ok = await confirm({
+            title: `Permanently delete "${item.name || 'this product'}"?`,
+            description: 'This declined product will be permanently removed.',
+            confirmLabel: 'Delete',
+            tone: 'destructive',
+        });
+        if (!ok) return;
+        try {
+            await scraperApi.delete(item._id);
+            toast.success('Deleted product');
+            await invalidateScraper();
+        } catch (error) {
+            toast.error('Failed to delete', { description: errorMessage(error) });
         }
     }
 
@@ -209,16 +259,38 @@ function ScraperPage() {
                                             {bulkBusy === 'draft' ? <Loader2 className="animate-spin" aria-hidden /> : null}
                                             Approve as draft
                                         </Button>
+                                        <Button size="sm" variant="ghost" className="text-destructive" disabled={!!bulkBusy} onClick={() => bulk('decline')}>
+                                            <Trash2 aria-hidden /> Decline
+                                        </Button>
                                     </>
-                                ) : (
-                                    <Button size="sm" disabled={!!bulkBusy} onClick={() => bulk('retry')}>
-                                        {bulkBusy === 'retry' ? <Loader2 className="animate-spin" aria-hidden /> : <RotateCw aria-hidden />}
-                                        Try again
-                                    </Button>
-                                )}
-                                <Button size="sm" variant="ghost" className="text-destructive" disabled={!!bulkBusy} onClick={() => bulk('decline')}>
-                                    <Trash2 aria-hidden /> Decline
-                                </Button>
+                                ) : tab === 'failed' ? (
+                                    <>
+                                        <Button size="sm" disabled={!!bulkBusy} onClick={() => bulk('retry')}>
+                                            {bulkBusy === 'retry' ? <Loader2 className="animate-spin" aria-hidden /> : <RotateCw aria-hidden />}
+                                            Try again
+                                        </Button>
+                                        <Button size="sm" variant="ghost" className="text-destructive" disabled={!!bulkBusy} onClick={() => bulk('decline')}>
+                                            <Trash2 aria-hidden /> Decline
+                                        </Button>
+                                    </>
+                                ) : tab === 'declined' ? (
+                                    allSelected && !q ? (
+                                        <Button
+                                            size="sm"
+                                            variant="destructive"
+                                            disabled={!!bulkBusy}
+                                            onClick={clearAllDeclined}
+                                        >
+                                            {bulkBusy === 'clear' ? <Loader2 className="animate-spin" aria-hidden /> : <Trash2 aria-hidden />}
+                                            Clear all declined ({counts.data?.declined ?? items.length})
+                                        </Button>
+                                    ) : (
+                                        <Button size="sm" variant="destructive" disabled={!!bulkBusy} onClick={() => bulk('delete')}>
+                                            {bulkBusy === 'delete' ? <Loader2 className="animate-spin" aria-hidden /> : <Trash2 aria-hidden />}
+                                            Delete selected ({selectedIds.length})
+                                        </Button>
+                                    )
+                                ) : null}
                             </>
                         ) : null}
                     </div>
@@ -267,6 +339,7 @@ function ScraperPage() {
                                 selected={selected.has(item._id)}
                                 onSelect={(on) => toggle(item._id, on)}
                                 onOpen={() => setOpenId(item._id)}
+                                onDelete={canEdit && item.status === 'declined' ? () => deleteSingle(item) : undefined}
                             />
                         </li>
                     ))}
@@ -307,6 +380,7 @@ function ScrapeCard({
     selected,
     onSelect,
     onOpen,
+    onDelete,
 }: {
     item: ScrapedItem;
     categoryLabel: string;
@@ -314,6 +388,7 @@ function ScrapeCard({
     selected: boolean;
     onSelect: (on: boolean) => void;
     onOpen: () => void;
+    onDelete?: () => void;
 }) {
     const cover = item.images[0]?.url;
     const busy = item.status === 'queued' || item.status === 'scraping' || item.status === 'approving';
@@ -387,6 +462,28 @@ function ScrapeCard({
                                 <Badge variant="warning" title={item.warnings.join(' ')}>
                                     <AlertTriangle aria-hidden /> Check
                                 </Badge>
+                            ) : null}
+                        </div>
+                    ) : null}
+                    {item.status === 'declined' ? (
+                        <div className="mt-auto flex items-center justify-between gap-1 pt-1">
+                            <span className="line-clamp-1 text-xs text-muted-foreground" title={item.declineReason || 'Declined'}>
+                                {item.declineReason || 'Declined'}
+                            </span>
+                            {onDelete ? (
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                        onDelete();
+                                    }}
+                                    className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                                    title="Delete permanently"
+                                    aria-label={`Delete ${item.name || 'product'}`}
+                                >
+                                    <Trash2 className="size-4" aria-hidden />
+                                </button>
                             ) : null}
                         </div>
                     ) : null}

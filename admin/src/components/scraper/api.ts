@@ -77,6 +77,7 @@ export const scraperApi = {
         return result;
     },
     decline: (id: string, reason?: string) => http.post<{ item: ScrapedItem }>(`/admin/scraper/items/${id}/decline`, { reason }),
+    delete: (id: string) => http.del<{ ok: boolean; id: string }>(`/admin/scraper/items/${id}`),
     retry: (id: string) => http.post<{ item: ScrapedItem }>(`/admin/scraper/items/${id}/retry`),
     bulkApprove: async (ids: string[], publishAs: 'active' | 'draft') => {
         const result = await http.post<BulkResult>('/admin/scraper/items/bulk-approve', { ids, publishAs });
@@ -84,6 +85,8 @@ export const scraperApi = {
         return result;
     },
     bulkDecline: (ids: string[], reason?: string) => http.post<BulkResult>('/admin/scraper/items/bulk-decline', { ids, reason }),
+    bulkDelete: (ids: string[]) => http.post<{ ok: boolean; deleted: number }>('/admin/scraper/items/bulk-delete', { ids }),
+    clearDeclined: () => http.post<{ ok: boolean; deleted: number }>('/admin/scraper/items/clear-declined'),
     importCsv: (body: {
         rows: Record<string, any>[];
         categoryId?: string;

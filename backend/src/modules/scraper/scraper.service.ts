@@ -1003,6 +1003,74 @@ export class ScraperService implements OnModuleInit {
     return { results, declined: results.filter((r) => r.ok).length };
   }
 
+  async deleteItem(id: string, userId?: string) {
+    const doc = await this.scrapedModel.findOne({
+      _id: id,
+      status: { $in: [ScrapeStatus.DECLINED, ScrapeStatus.FAILED] },
+    });
+    if (!doc) {
+      const exists = await this.scrapedModel
+        .findById(id)
+        .select('status')
+        .lean();
+      if (!exists) {
+        throw new NotFoundException('Scraped item not found.');
+      }
+      throw new ConflictException(
+        'Only declined or failed products can be deleted.',
+      );
+    }
+    if (doc.images && doc.images.length > 0) {
+      const keys = doc.images.map((img) => img.key!).filter(Boolean);
+      if (keys.length > 0) {
+        await this.storage.deleteMany(keys);
+      }
+    }
+    await this.scrapedModel.deleteOne({ _id: id });
+    return { ok: true, id };
+  }
+
+  async bulkDelete(ids: string[], userId?: string) {
+    const objectIds = ids.filter(Boolean).map((i) => new Types.ObjectId(i));
+    const docs = await this.scrapedModel.find({
+      _id: { $in: objectIds },
+      status: { $in: [ScrapeStatus.DECLINED, ScrapeStatus.FAILED] },
+    });
+    const allKeys: string[] = [];
+    for (const doc of docs) {
+      if (doc.images && doc.images.length > 0) {
+        allKeys.push(...doc.images.map((img) => img.key!).filter(Boolean));
+      }
+    }
+    if (allKeys.length > 0) {
+      await this.storage.deleteMany(allKeys);
+    }
+    const docIds = docs.map((d) => d._id);
+    const res = await this.scrapedModel.deleteMany({
+      _id: { $in: docIds },
+    });
+    return { ok: true, deleted: res.deletedCount };
+  }
+
+  async clearDeclined(userId?: string) {
+    const docs = await this.scrapedModel.find({
+      status: ScrapeStatus.DECLINED,
+    });
+    const allKeys: string[] = [];
+    for (const doc of docs) {
+      if (doc.images && doc.images.length > 0) {
+        allKeys.push(...doc.images.map((img) => img.key!).filter(Boolean));
+      }
+    }
+    if (allKeys.length > 0) {
+      await this.storage.deleteMany(allKeys);
+    }
+    const res = await this.scrapedModel.deleteMany({
+      status: ScrapeStatus.DECLINED,
+    });
+    return { ok: true, deleted: res.deletedCount };
+  }
+
   /** Subcategory must sit under the category, item group under the subcategory. */
   private async assertHierarchy(
     categoryId?: string,

@@ -2,7 +2,7 @@ import Constants from 'expo-constants';
 
 const extra = Constants.expoConfig?.extra ?? {};
 const PUBLIC_NODE_ENV = extra.PUBLIC_NODE_ENV || 'development';
-const IS_PRODUCTION = PUBLIC_NODE_ENV === 'production';
+const IS_PRODUCTION = !__DEV__ && PUBLIC_NODE_ENV === 'production';
 
 const DEV_API_BASE_URL = 'http://localhost:3000/api/v1';
 const DEV_TRACKING_URL = 'http://localhost:3000/tracking';

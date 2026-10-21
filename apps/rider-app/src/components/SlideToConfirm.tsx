@@ -153,7 +153,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
   },
   labelWrap: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

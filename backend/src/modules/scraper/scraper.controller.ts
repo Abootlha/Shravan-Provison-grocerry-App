@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -78,6 +79,20 @@ export class ScraperController {
     return this.scraper.bulkDecline(body.ids, body.reason, req.user?.userId);
   }
 
+  @Post('items/bulk-delete')
+  @HttpCode(200)
+  @Roles(UserRole.ADMIN)
+  bulkDelete(@Request() req: any, @Body() body: BulkScrapeIdsDto) {
+    return this.scraper.bulkDelete(body.ids, req.user?.userId);
+  }
+
+  @Post('items/clear-declined')
+  @HttpCode(200)
+  @Roles(UserRole.ADMIN)
+  clearDeclined(@Request() req: any) {
+    return this.scraper.clearDeclined(req.user?.userId);
+  }
+
   @Get('items/:id')
   get(@Param('id', MongoIdPipe) id: string) {
     return this.scraper.get(id);
@@ -90,6 +105,13 @@ export class ScraperController {
     @Body() body: UpdateScrapedProductDto,
   ) {
     return this.scraper.update(id, body);
+  }
+
+  @Delete('items/:id')
+  @HttpCode(200)
+  @Roles(UserRole.ADMIN)
+  delete(@Request() req: any, @Param('id', MongoIdPipe) id: string) {
+    return this.scraper.deleteItem(id, req.user?.userId);
   }
 
   @Post('items/:id/approve')
