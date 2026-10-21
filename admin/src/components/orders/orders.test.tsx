@@ -219,3 +219,33 @@ describe('trackingUrlFromApiUrl', () => {
         expect(trackingUrlFromApiUrl('not a url')).toBeUndefined();
     });
 });
+
+describe('status history', () => {
+    it('lists steps oldest first and marks the latest as current', async () => {
+        api.detail.mockResolvedValue(
+            order({
+                orderStatus: 'OUT_FOR_DELIVERY',
+                riderId: { _id: 'r1', name: 'Md' },
+                statusTimeline: [
+                    // Server order; the two 10:19 entries share a timestamp.
+                    { previousStatus: null, status: 'PENDING', at: '2026-10-21T10:15:00.000Z', changedByRole: 'customer' },
+                    { previousStatus: 'PENDING', status: 'CONFIRMED', at: '2026-10-21T10:16:00.000Z', changedByRole: 'admin' },
+                    { previousStatus: 'CONFIRMED', status: 'PICKED_UP', at: '2026-10-21T10:19:00.000Z', changedByRole: 'rider' },
+                    { previousStatus: 'PICKED_UP', status: 'OUT_FOR_DELIVERY', at: '2026-10-21T10:19:00.000Z', changedByRole: 'rider' },
+                ],
+            }),
+        );
+        renderSheet();
+        const heading = await screen.findByText('Status history');
+        const list = heading.closest('section')?.querySelector('ol') ?? document.querySelector('ol');
+        const steps = within(list as HTMLElement).getAllByRole('listitem');
+        expect(steps.map((li) => li.querySelector('p')?.textContent)).toEqual([
+            'Order placed',
+            'Confirmed',
+            'Picked up',
+            'Out for delivery',
+        ]);
+        expect(steps[3]).toHaveAttribute('aria-current', 'step');
+        expect(steps[0]).not.toHaveAttribute('aria-current');
+    });
+});
