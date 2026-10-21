@@ -420,10 +420,18 @@ export class JobsService implements OnModuleInit {
     const stale = await this.riderModel
       .find({
         status: RiderStatus.AVAILABLE,
+        // Contact = lastActiveAt, else the last location report. Never
+        // updatedAt: offers and releases touch the rider document, which
+        // would keep an unreachable rider looking alive forever.
         $or: [
           { lastActiveAt: { $lt: cutoff } },
-          { lastActiveAt: { $exists: false }, updatedAt: { $lt: cutoff } },
-          { lastActiveAt: null, updatedAt: { $lt: cutoff } },
+          {
+            lastActiveAt: null,
+            $or: [
+              { lastLocationUpdate: { $lt: cutoff } },
+              { lastLocationUpdate: null, createdAt: { $lt: cutoff } },
+            ],
+          },
         ],
       })
       .select('_id')

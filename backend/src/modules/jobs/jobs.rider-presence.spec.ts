@@ -162,6 +162,35 @@ describe('JobsService rider presence sweep (MongoDB)', () => {
     );
   });
 
+  it('without lastActiveAt, uses the last location report, not offer churn', async () => {
+    // Offers keep touching updatedAt; that must not keep the rider "online".
+    const legacy = await riders.create({
+      name: 'Legacy',
+      username: 'legacy',
+      password: 'x',
+      phone: '9000000099',
+      status: RiderStatus.AVAILABLE,
+      isActive: true,
+      lastLocationUpdate: ago(RIDER_STALE_AFTER_MS + 60_000),
+    });
+    const recent = await riders.create({
+      name: 'Recent',
+      username: 'recent',
+      password: 'x',
+      phone: '9000000098',
+      status: RiderStatus.AVAILABLE,
+      isActive: true,
+      lastLocationUpdate: ago(60_000),
+    });
+    await expect(service.markStaleRidersOffline(NOW)).resolves.toBe(1);
+    expect((await riders.findById(legacy._id).lean())!.status).toBe(
+      RiderStatus.OFFLINE,
+    );
+    expect((await riders.findById(recent._id).lean())!.status).toBe(
+      RiderStatus.AVAILABLE,
+    );
+  });
+
   it('runs every step even when one fails', async () => {
     jest
       .spyOn(service, 'expireUnansweredOffers')
