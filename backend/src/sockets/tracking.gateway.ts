@@ -32,7 +32,10 @@ import {
 } from './socket-auth';
 
 /** Why a rider lost an order (sent with `orderUnassigned`). */
-export type RiderUnassignReason = 'admin_unassigned' | 'rider_rejected';
+export type RiderUnassignReason =
+  | 'admin_unassigned'
+  | 'rider_rejected'
+  | 'offer_expired';
 
 // setTimeout overflows above this (~24.8 days).
 const MAX_TIMER_MS = 2_147_483_647;
@@ -152,6 +155,15 @@ export class TrackingGateway
 
     if (user.role === (UserRole.RIDER as string)) {
       await client.join(this.getRiderRoomName(user.userId));
+      // A connected rider is reachable: keeps the stale-rider sweep from
+      // marking them offline while the app is open but GPS is still warming up.
+      this.ridersService
+        .touchActivity(user.userId)
+        .catch((error: Error) =>
+          this.logger.warn(
+            `Could not record activity for rider ${user.userId}: ${error.message}`,
+          ),
+        );
     }
     this.logger.log(`Client connected: ${client.id} (${user.role})`);
   }

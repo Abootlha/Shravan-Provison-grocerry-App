@@ -7,6 +7,7 @@ import {
   Inject,
   Logger,
   forwardRef,
+  Optional,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -37,6 +38,11 @@ import { SettingsService } from '../settings/settings.service';
 import { RedisService } from '../../common/utils/redis.service';
 import { CacheService } from '../../common/utils/cache.service';
 import { TrackingGateway } from '../../sockets/tracking.gateway';
+import {
+  RIDER_ORDER_CHANNEL,
+  RIDER_UPDATES_CHANNEL,
+  RiderPushService,
+} from './rider-push.service';
 import { ETAService } from './eta.service';
 import { calculateBill, OrderBill } from './pricing';
 import { resolveFees } from '../settings/fees';
@@ -53,7 +59,7 @@ import {
   OrderEventPayload,
   emitLocalOrderEvent,
 } from '../../sockets/order-events';
-import { RIDER_REJECTED_NOTE } from './rider-events';
+import { RIDER_OFFER_EXPIRED_NOTE, RIDER_REJECTED_NOTE } from './rider-events';
 
 export { ADMIN_ORDER_EVENTS_CHANNEL };
 
@@ -232,7 +238,66 @@ export class OrdersService {
     private trackingGateway: TrackingGateway,
     @Inject(forwardRef(() => ETAService))
     private etaService: ETAService,
+    // Optional so unit tests that build the service by hand still work.
+    @Optional() private riderPush?: RiderPushService,
   ) {}
+
+  /**
+   * Phone alert for the rider (works with the app closed). Socket events
+   * still update the open app; this covers the background / killed case.
+   */
+  private pushToRider(
+    riderId: string | undefined | null,
+    kind: 'offer' | 'packed' | 'cancelled' | 'unassigned',
+    order: any,
+    reason?: string | null,
+  ): void {
+    if (!this.riderPush || !riderId || !order) return;
+    const number = order.orderId ? `#${order.orderId}` : '';
+    const id = String(order._id ?? order.id ?? '');
+    if (kind === 'offer') {
+      const itemCount = Array.isArray(order.items) ? order.items.length : 0;
+      const parts = [`${itemCount} item${itemCount === 1 ? '' : 's'}`];
+      if (order.paymentMethod === PaymentMethod.COD && order.totalAmount) {
+        parts.push(`collect ₹${Math.round(Number(order.totalAmount))} cash`);
+      }
+      const drop = order.deliveryAddress?.address;
+      if (drop) parts.push(`to ${String(drop).slice(0, 80)}`);
+      this.riderPush.notify(riderId, {
+        title: `New order request ${number}`.trim(),
+        body: `${parts.join(' · ')}. Open the app to accept.`,
+        data: { type: 'order_offer', orderId: id, orderNumber: order.orderId },
+        channelId: RIDER_ORDER_CHANNEL,
+        ttl: 60,
+      });
+      return;
+    }
+    const copy = {
+      packed: {
+        title: `Order ${number} packed`,
+        body: 'The store has packed the order. Head to the counter for pickup.',
+      },
+      cancelled: {
+        title: `Order ${number} cancelled`,
+        body: reason
+          ? `Reason: ${reason}`
+          : 'You do not need to deliver this order.',
+      },
+      unassigned: {
+        title: `Order ${number} reassigned`,
+        body:
+          reason === 'offer_expired'
+            ? 'The request timed out and went to another rider.'
+            : 'The store has moved this order to another rider.',
+      },
+    }[kind];
+    this.riderPush.notify(riderId, {
+      title: copy.title.replace(/\s+/g, ' ').trim(),
+      body: copy.body,
+      data: { type: `order_${kind}`, orderId: id, orderNumber: order.orderId },
+      channelId: RIDER_UPDATES_CHANNEL,
+    });
+  }
 
   /**
    * Prices the requested lines against the live catalogue (or the user's
@@ -1047,6 +1112,12 @@ export class OrdersService {
         updated,
         updated.cancellationReason ?? options.reason ?? null,
       );
+      this.pushToRider(
+        updated.riderId.toString(),
+        'cancelled',
+        updated,
+        updated.cancellationReason ?? options.reason ?? null,
+      );
     }
 
     if (newStatus === OrderStatus.CONFIRMED && !updated.riderId) {
@@ -1078,6 +1149,7 @@ export class OrdersService {
         updated.riderId.toString(),
         trackingOrder,
       );
+      this.pushToRider(updated.riderId.toString(), 'packed', updated);
     }
 
     return trackingOrder as OrderDocument;
@@ -1443,6 +1515,8 @@ export class OrdersService {
       {
         $set: {
           riderId: new Types.ObjectId(riderId),
+          // Start of the rider's time to answer; see expireUnansweredOffers.
+          riderOfferedAt: assignmentTimestamp,
         },
         $push: {
           timeline: {
@@ -1492,6 +1566,7 @@ export class OrdersService {
       trackingOrder,
     );
     this.trackingGateway.notifyRiderOfAssignment(riderId, trackingOrder);
+    this.pushToRider(riderId, 'offer', updatedOrder);
 
     // Calculate initial ETA
     try {
@@ -1532,7 +1607,7 @@ export class OrdersService {
     const updated = await this.orderModel
       .findOneAndUpdate(
         { _id: order._id, orderStatus: OrderStatus.CONFIRMED },
-        { $unset: { riderId: 1 } },
+        { $unset: { riderId: 1, riderOfferedAt: 1 } },
         { new: true },
       )
       .exec();
@@ -1549,6 +1624,7 @@ export class OrdersService {
         updated,
         'admin_unassigned',
       );
+      this.pushToRider(previousRiderId, 'unassigned', updated);
     }
 
     // Invalidate cache
@@ -1584,13 +1660,49 @@ export class OrdersService {
     riderId: string,
     reason?: string,
   ): Promise<{ order: any; reassigned: boolean }> {
+    const trimmedReason = reason?.trim();
+    return this.handBackOrder(orderId, riderId, {
+      allowedStatuses: RIDER_REJECTABLE_STATUSES,
+      note: trimmedReason
+        ? `${RIDER_REJECTED_NOTE}: ${trimmedReason}`
+        : RIDER_REJECTED_NOTE,
+      unassignReason: 'rider_rejected',
+    });
+  }
+
+  /**
+   * The rider did not answer an offer within OFFER_RESPONSE_TIMEOUT_MS: the
+   * order goes back to the pool and is offered to the next rider. Same path
+   * as a rejection, so the rider is freed and not offered this order again.
+   */
+  async expireRiderOffer(
+    orderId: string,
+    riderId: string,
+  ): Promise<{ order: any; reassigned: boolean }> {
+    const result = await this.handBackOrder(orderId, riderId, {
+      allowedStatuses: [OrderStatus.CONFIRMED],
+      note: RIDER_OFFER_EXPIRED_NOTE,
+      unassignReason: 'offer_expired',
+    });
+    return result;
+  }
+
+  private async handBackOrder(
+    orderId: string,
+    riderId: string,
+    options: {
+      allowedStatuses: OrderStatus[];
+      note: string;
+      unassignReason: 'rider_rejected' | 'offer_expired';
+    },
+  ): Promise<{ order: any; reassigned: boolean }> {
     const order = await this.orderModel.findById(orderId);
     if (!order) throw new NotFoundException('Order not found');
 
     if (!order.riderId || order.riderId.toString() !== riderId) {
       throw new ForbiddenException('This order is not assigned to you');
     }
-    if (!RIDER_REJECTABLE_STATUSES.includes(order.orderStatus)) {
+    if (!options.allowedStatuses.includes(order.orderStatus)) {
       throw new BadRequestException(
         `Order is ${order.orderStatus}; it can only be rejected before the store packs it`,
       );
@@ -1598,17 +1710,14 @@ export class OrdersService {
 
     const previousStatus = order.orderStatus;
     const riderObjectId = new Types.ObjectId(riderId);
-    const trimmedReason = reason?.trim();
-    const note = trimmedReason
-      ? `${RIDER_REJECTED_NOTE}: ${trimmedReason}`
-      : RIDER_REJECTED_NOTE;
+    const note = options.note;
 
     const updated = await this.orderModel
       .findOneAndUpdate(
         { _id: order._id, orderStatus: previousStatus, riderId: riderObjectId },
         {
           $set: { orderStatus: OrderStatus.CONFIRMED },
-          $unset: { riderId: 1 },
+          $unset: { riderId: 1, riderOfferedAt: 1 },
           $push: {
             timeline: {
               status: OrderStatus.CONFIRMED,
@@ -1644,8 +1753,11 @@ export class OrdersService {
     this.trackingGateway.notifyRiderOrderUnassigned(
       riderId,
       updated,
-      'rider_rejected',
+      options.unassignReason,
     );
+    if (options.unassignReason === 'offer_expired') {
+      this.pushToRider(riderId, 'unassigned', updated, 'offer_expired');
+    }
     await this.broadcastOrderEvent(ORDER_STATUS_CHANNEL, {
       orderId: updated.orderId,
       status: OrderStatus.CONFIRMED,
@@ -1660,7 +1772,7 @@ export class OrdersService {
       );
     } catch (error) {
       this.logger.warn(
-        `Re-assignment after rider reject failed for ${updated.orderId}: ${(error as Error).message}`,
+        `Re-assignment after ${options.unassignReason} failed for ${updated.orderId}: ${(error as Error).message}`,
       );
     }
 

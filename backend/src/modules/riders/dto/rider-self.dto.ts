@@ -66,3 +66,13 @@ export class RiderLocationDto {
   @Min(-1) // -1 = unknown (iOS)
   speed?: number;
 }
+
+/** PUT / DELETE /riders/me/push-token: this device's Expo push token. */
+export class RiderPushTokenDto {
+  @IsString()
+  @MaxLength(200)
+  @Matches(/^Expo(nent)?PushToken\[[^\]]+\]$/, {
+    message: 'token must be an Expo push token',
+  })
+  token!: string;
+}

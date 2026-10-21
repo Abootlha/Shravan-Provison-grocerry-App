@@ -68,8 +68,8 @@ class ApiClient {
     return response.data;
   }
 
-  async delete<T>(url: string): Promise<T> {
-    const response = await this.client.delete<T>(url);
+  async delete<T>(url: string, config?: { data?: unknown }): Promise<T> {
+    const response = await this.client.delete<T>(url, config);
     return response.data;
   }
 }
@@ -349,8 +349,21 @@ export const riderApi = {
   },
 
   updateAvailability: async (isOnline: boolean) => {
-    const response = await riderClient.put<any>('/riders/me/availability', { isOnline });
+    // isAvailable is sent explicitly: online means ready for new requests.
+    const response = await riderClient.put<any>('/riders/me/availability', {
+      isOnline,
+      isAvailable: isOnline,
+    });
     return normalizeRider(response.rider || response);
+  },
+
+  /** Registers this phone for order alerts while the app is closed. */
+  registerPushToken: async (token: string) => {
+    await riderClient.put<any>('/riders/me/push-token', { token });
+  },
+
+  removePushToken: async (token: string) => {
+    await riderClient.delete<any>('/riders/me/push-token', { data: { token } });
   },
 
   getMetrics: async () => normalizeMetrics(await riderClient.get<any>('/riders/me/metrics')),
