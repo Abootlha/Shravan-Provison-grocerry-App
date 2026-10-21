@@ -9,6 +9,7 @@ import {
 } from './schemas/order-status-log.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
 import { Rider, RiderSchema } from '../riders/schemas/rider.schema';
+import { RiderPushService } from './rider-push.service';
 import { OrdersService } from './orders.service';
 import { OrdersController, AdminOrdersController } from './orders.controller';
 import { ETAService } from './eta.service';
@@ -35,7 +36,7 @@ import { TrackingModule } from '../../sockets/tracking.module';
     forwardRef(() => TrackingModule),
   ],
   controllers: [OrdersController, AdminOrdersController],
-  providers: [OrdersService, OrdersGateway, ETAService],
-  exports: [OrdersService, ETAService],
+  providers: [OrdersService, OrdersGateway, ETAService, RiderPushService],
+  exports: [OrdersService, ETAService, RiderPushService],
 })
 export class OrdersModule {}

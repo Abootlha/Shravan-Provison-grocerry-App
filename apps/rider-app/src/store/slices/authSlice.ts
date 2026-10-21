@@ -1,5 +1,6 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import { apiErrorMessage, authApi, riderApi } from '../../services/api';
+import { unregisterPushNotifications } from '../../services/pushRegistration';
 import { storage } from '../../services/storage';
 import { ensureFreshAccessToken } from '../../services/authSession';
 import type { Rider } from '../../types/rider';
@@ -137,6 +138,8 @@ export const logout = createAsyncThunk('auth/logout', async () => {
     await riderApi.updateAvailability(false).catch(() => undefined);
     // /auth/logout needs a live access token to end this device's session.
     await ensureFreshAccessToken();
+    // Before the session ends: this phone must stop getting the rider's alerts.
+    await unregisterPushNotifications();
     await authApi.logout();
   } catch {
     // Best effort: local tokens are cleared regardless.

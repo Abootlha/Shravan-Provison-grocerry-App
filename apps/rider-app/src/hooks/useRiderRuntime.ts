@@ -5,7 +5,9 @@ import { useAppDispatch, useAppSelector } from './useAuth';
 import { socketService } from '../services/socket';
 import { locationService, toLocationPayload } from '../services/location';
 import { settingsApi } from '../services/api';
-import { registerRealtimeHandlers } from '../services/realtime';
+import { offerSummary, registerRealtimeHandlers } from '../services/realtime';
+import { notificationService } from '../services/notifications';
+import { registerPushNotifications } from '../services/pushRegistration';
 import { store } from '../store';
 import { refreshRider } from '../store/slices/authSlice';
 import { fetchCurrentOrder, fetchOffers, offerExpired, resetOrders } from '../store/slices/orderSlice';
@@ -21,6 +23,12 @@ import { LOCATION_UPDATE_INTERVAL, OFFER_TIMEOUT_SECONDS } from '../utils/consta
 
 /** A fix older than this is not sent as the rider's live position. */
 const MAX_FIX_AGE_MS = 30_000;
+/**
+ * How often permission and GPS are re-checked while the app is open. Turning
+ * location off from the quick-settings shade does not change AppState, so
+ * without this the app would not notice until the next foreground.
+ */
+const PERMISSION_POLL_MS = 10_000;
 
 const useAppState = () => {
   const [state, setState] = useState<AppStateStatus>(AppState.currentState);
@@ -45,9 +53,29 @@ export const checkLocationPermission = async () => {
     }
     const enabled = await Location.hasServicesEnabledAsync();
     store.dispatch(permissionChanged(enabled ? 'granted' : 'services_off'));
+    // "Allow all the time" may have been granted in Settings since the warning.
+    if (enabled && store.getState().location.backgroundWarning && (await locationService.hasBackgroundPermission())) {
+      store.dispatch(backgroundWarningChanged(null));
+    }
     return enabled;
   } catch {
-    return false;
+    // Keep the last known state rather than flipping the UI on a glitch.
+    return store.getState().location.permission === 'granted';
+  }
+};
+
+/**
+ * Loads open requests and rings for any this phone has not seen yet, e.g.
+ * offers made while the socket was reconnecting or the app was closed.
+ */
+const catchUpOffers = async (dispatch: ReturnType<typeof useAppDispatch>) => {
+  const known = new Set(store.getState().orders.offers.map((offer) => offer.id));
+  const result = await dispatch(fetchOffers());
+  if (!fetchOffers.fulfilled.match(result)) return;
+  const { expiredOfferIds } = store.getState().orders;
+  for (const order of result.payload) {
+    if (known.has(order.id) || expiredOfferIds[order.id]) continue;
+    notificationService.alertNewOrder(order.id, order.orderNumber, offerSummary(order)).catch(() => undefined);
   }
 };
 
@@ -66,6 +94,7 @@ export const useRiderRuntime = () => {
   const hasActiveOrder = useAppSelector((s) => Boolean(s.orders.currentOrder));
   const offers = useAppSelector((s) => s.orders.offers);
   const offerSeenAt = useAppSelector((s) => s.orders.offerSeenAt);
+  const permission = useAppSelector((s) => s.location.permission);
   const appState = useAppState();
   const wasAuthenticated = useRef(false);
 
@@ -84,9 +113,10 @@ export const useRiderRuntime = () => {
       settingsApi.loadStore().catch(() => undefined);
       dispatch(refreshRider());
       dispatch(fetchCurrentOrder());
-      dispatch(fetchOffers());
+      catchUpOffers(dispatch);
       dispatch(fetchMetrics());
       checkLocationPermission();
+      registerPushNotifications();
     }
     if (!isAuthenticated && wasAuthenticated.current) {
       socketService.disconnect();
@@ -105,7 +135,7 @@ export const useRiderRuntime = () => {
     return socketService.onStateChange((next) => {
       if (next === 'connected' && previous !== 'connected' && store.getState().auth.isAuthenticated) {
         dispatch(fetchCurrentOrder());
-        dispatch(fetchOffers());
+        catchUpOffers(dispatch);
       }
       previous = next;
     });
@@ -119,21 +149,40 @@ export const useRiderRuntime = () => {
     if (!isAuthenticated || appState !== 'active' || was === 'active') return;
     dispatch(refreshRider());
     dispatch(fetchCurrentOrder());
-    dispatch(fetchOffers());
+    catchUpOffers(dispatch);
     dispatch(fetchMetrics());
     checkLocationPermission();
+    // Notification permission may have been turned on in Settings meanwhile.
+    registerPushNotifications();
   }, [appState, dispatch, isAuthenticated]);
 
   // Location: on while online or carrying an order. Foreground watcher while
   // the app is visible, the OS background task while it is not.
   const shouldTrack = isAuthenticated && (isOnline || hasActiveOrder);
-  const foreground = appState === 'active';
+  // iOS reports 'inactive' for Control Center, the notification shade and
+  // permission alerts: the app is still on screen, so keep the foreground watcher.
+  const foreground = appState !== 'background';
+  // Permission or GPS lost: stop the watcher; regained: this effect restarts it.
+  const locationBlocked = permission === 'denied' || permission === 'services_off';
   useEffect(() => {
     let cancelled = false;
     if (!shouldTrack) {
       locationService.stopTracking();
       locationService.stopBackgroundTracking().catch(() => undefined);
       dispatch(trackingChanged(false));
+      return undefined;
+    }
+
+    if (foreground && locationBlocked) {
+      locationService.stopTracking();
+      dispatch(trackingChanged(false));
+      dispatch(
+        locationError(
+          permission === 'denied'
+            ? 'Location permission was denied.'
+            : 'Turn on location (GPS) so the store and customers can track your trip.'
+        )
+      );
       return undefined;
     }
 
@@ -159,7 +208,16 @@ export const useRiderRuntime = () => {
     return () => {
       cancelled = true;
     };
-  }, [dispatch, shouldTrack, foreground]);
+  }, [dispatch, shouldTrack, foreground, locationBlocked, permission]);
+
+  // Live permission / GPS check while the app is open.
+  useEffect(() => {
+    if (!shouldTrack || !foreground) return undefined;
+    const timer = setInterval(() => {
+      checkLocationPermission();
+    }, PERMISSION_POLL_MS);
+    return () => clearInterval(timer);
+  }, [shouldTrack, foreground]);
 
   // Every fix goes to Redux (map, distances). One listener for the app lifetime.
   useEffect(() => locationService.subscribe((fix) => dispatch(locationUpdated(fix))), [dispatch]);
@@ -167,10 +225,27 @@ export const useRiderRuntime = () => {
   // Upload loop. Reads the service's latest fix at send time, never a captured copy.
   useEffect(() => {
     if (!shouldTrack || !foreground) return undefined;
+    let refreshing = false;
     const send = () => {
       const fix = locationService.latest;
-      if (!fix || Date.now() - fix.timestamp > MAX_FIX_AGE_MS) return;
-      socketService.emit('riderLocationUpdate', toLocationPayload(fix));
+      if (fix && Date.now() - fix.timestamp <= MAX_FIX_AGE_MS) {
+        socketService.emit('riderLocationUpdate', toLocationPayload(fix));
+        return;
+      }
+      // The watcher only reports after the rider moves 5 m, so a rider
+      // waiting at the store has no fresh fix. Ask for one: it keeps the map
+      // right and tells the server the rider is still there (riders the
+      // server stops hearing from are set offline).
+      if (refreshing) return;
+      refreshing = true;
+      locationService
+        .getCurrentLocation()
+        .then((fresh) => {
+          if (fresh) socketService.emit('riderLocationUpdate', toLocationPayload(fresh));
+        })
+        .finally(() => {
+          refreshing = false;
+        });
     };
     send();
     const timer = setInterval(send, LOCATION_UPDATE_INTERVAL);

@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
+import { Injectable, OnModuleInit, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { Queue, Job } from 'bullmq';
@@ -12,12 +12,37 @@ import {
   PaymentStatus,
 } from '../orders/schemas/order.schema';
 import { User, UserDocument, UserRole } from '../users/schemas/user.schema';
+import {
+  Rider,
+  RiderDocument,
+  RiderStatus,
+} from '../riders/schemas/rider.schema';
+import { OFFER_RESPONSE_TIMEOUT_MS } from '../orders/rider-events';
+import {
+  RIDER_UPDATES_CHANNEL,
+  RiderPushService,
+} from '../orders/rider-push.service';
 import { OrdersService } from '../orders/orders.service';
 import { ETAService } from '../orders/eta.service';
 
 export const STALE_ORDER_QUEUE = 'stale-order-check';
 export const ANOMALY_QUEUE = 'anomaly-check';
 export const ETA_QUEUE = 'eta-recalculation';
+export const RIDER_PRESENCE_QUEUE = 'rider-presence';
+
+/** An "available" rider not heard from for this long is marked offline. */
+export const RIDER_STALE_AFTER_MS = 15 * 60 * 1000;
+/** How often offers, idle "busy" riders and stale riders are checked. */
+export const RIDER_PRESENCE_INTERVAL_MS = 30_000;
+
+/** Orders a rider is holding (an open offer or a delivery in progress). */
+const RIDER_HOLDING_STATUSES = [
+  OrderStatus.CONFIRMED,
+  OrderStatus.ASSIGNED,
+  OrderStatus.PACKED,
+  OrderStatus.PICKED_UP,
+  OrderStatus.OUT_FOR_DELIVERY,
+];
 
 const DEFAULT_PAYMENT_TIMEOUT_MINUTES = 15;
 
@@ -33,11 +58,14 @@ export class JobsService implements OnModuleInit {
     @InjectQueue(STALE_ORDER_QUEUE) private staleOrderQueue: Queue,
     @InjectQueue(ANOMALY_QUEUE) private anomalyQueue: Queue,
     @InjectQueue(ETA_QUEUE) private etaQueue: Queue,
+    @InjectQueue(RIDER_PRESENCE_QUEUE) private riderPresenceQueue: Queue,
+    @InjectModel(Rider.name) private riderModel: Model<RiderDocument>,
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     private ordersService: OrdersService,
     private etaService: ETAService,
     private configService: ConfigService,
+    @Optional() private riderPush?: RiderPushService,
   ) {}
 
   async onModuleInit() {
@@ -45,6 +73,21 @@ export class JobsService implements OnModuleInit {
     await this.registerStaleOrderCheck();
     await this.registerAnomalyCheck();
     await this.registerETARecalculation();
+    await this.registerRiderPresence();
+  }
+
+  /** Rider presence sweep: every 30 seconds (see sweepRiderPresence). */
+  async registerRiderPresence(): Promise<void> {
+    await this.riderPresenceQueue.add(
+      'sweep-rider-presence',
+      {},
+      {
+        repeat: { every: RIDER_PRESENCE_INTERVAL_MS },
+        removeOnComplete: true,
+        removeOnFail: 50,
+      },
+    );
+    this.logger.log('Registered rider presence sweep (every 30 seconds)');
   }
 
   private getPaymentTimeoutMinutes(): number {
@@ -134,6 +177,8 @@ export class JobsService implements OnModuleInit {
           return await this.processAnomalies();
         case ETA_QUEUE:
           return await this.processETAUpdates();
+        case RIDER_PRESENCE_QUEUE:
+          return await this.sweepRiderPresence();
         default:
           this.logger.warn(`Unknown queue: ${queueName}`);
       }
@@ -250,6 +295,169 @@ export class JobsService implements OnModuleInit {
         );
       }
     }
+  }
+
+  /**
+   * Keeps rider status honest. Each step runs on its own so one failure does
+   * not skip the others.
+   */
+  async sweepRiderPresence(): Promise<{
+    expiredOffers: number;
+    releasedRiders: number;
+    offlineRiders: number;
+  }> {
+    const result = { expiredOffers: 0, releasedRiders: 0, offlineRiders: 0 };
+    for (const [key, step] of [
+      ['expiredOffers', () => this.expireUnansweredOffers()],
+      ['releasedRiders', () => this.releaseIdleBusyRiders()],
+      ['offlineRiders', () => this.markStaleRidersOffline()],
+    ] as const) {
+      try {
+        result[key] = await step();
+      } catch (error) {
+        this.logger.error(
+          `Rider presence step ${key} failed: ${(error as Error).message}`,
+        );
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Offers the rider did not accept or reject within
+   * OFFER_RESPONSE_TIMEOUT_MS go to the next rider. Without this the order
+   * stayed parked on a rider who never answered, and that rider stayed busy.
+   */
+  async expireUnansweredOffers(now = new Date()): Promise<number> {
+    const cutoff = new Date(now.getTime() - OFFER_RESPONSE_TIMEOUT_MS);
+    const waiting = await this.orderModel
+      .find({
+        orderStatus: OrderStatus.CONFIRMED,
+        riderId: { $ne: null },
+        $or: [
+          { riderOfferedAt: { $lt: cutoff } },
+          // Offers made before riderOfferedAt existed.
+          { riderOfferedAt: { $exists: false }, updatedAt: { $lt: cutoff } },
+        ],
+      })
+      .select('_id orderId riderId')
+      .limit(50)
+      .lean()
+      .exec();
+
+    let expired = 0;
+    for (const order of waiting) {
+      try {
+        await this.ordersService.expireRiderOffer(
+          order._id.toString(),
+          String(order.riderId),
+        );
+        expired += 1;
+        this.logger.log(
+          `Offer for order ${order.orderId} expired; moved on from rider ${String(order.riderId)}`,
+        );
+      } catch (error) {
+        // Accepted or changed meanwhile: nothing to do.
+        this.logger.debug?.(
+          `Offer expiry skipped for ${order.orderId}: ${(error as Error).message}`,
+        );
+      }
+    }
+    return expired;
+  }
+
+  /**
+   * A rider marked busy while holding no order (a lost release, or riders
+   * stuck by the old "online = busy" bug) becomes available again.
+   */
+  async releaseIdleBusyRiders(): Promise<number> {
+    const busy = await this.riderModel
+      .find({ status: RiderStatus.BUSY })
+      .select('_id')
+      .lean()
+      .exec();
+    if (!busy.length) return 0;
+
+    const holding = new Set(
+      (
+        await this.orderModel.distinct('riderId', {
+          riderId: { $in: busy.map((r) => r._id) },
+          orderStatus: { $in: RIDER_HOLDING_STATUSES },
+        })
+      ).map(String),
+    );
+
+    let released = 0;
+    for (const rider of busy) {
+      if (holding.has(String(rider._id))) continue;
+      // Re-check right before the update: assignRider claims the rider a
+      // moment before it writes riderId onto the order.
+      const nowHolding = await this.orderModel.exists({
+        riderId: rider._id,
+        orderStatus: { $in: RIDER_HOLDING_STATUSES },
+      });
+      if (nowHolding) continue;
+      const res = await this.riderModel
+        .updateOne(
+          { _id: rider._id, status: RiderStatus.BUSY },
+          { $set: { status: RiderStatus.AVAILABLE } },
+        )
+        .exec();
+      if (res.modifiedCount) released += 1;
+    }
+    if (released) this.logger.log(`Released ${released} idle busy rider(s)`);
+    return released;
+  }
+
+  /**
+   * "Available" riders the server has not heard from for
+   * RIDER_STALE_AFTER_MS (app killed, phone off, no signal) go offline so
+   * the admin sees the truth and orders are not offered to them. Busy
+   * riders are left alone: they are holding an order.
+   */
+  async markStaleRidersOffline(now = new Date()): Promise<number> {
+    const cutoff = new Date(now.getTime() - RIDER_STALE_AFTER_MS);
+    const stale = await this.riderModel
+      .find({
+        status: RiderStatus.AVAILABLE,
+        // Contact = lastActiveAt, else the last location report. Never
+        // updatedAt: offers and releases touch the rider document, which
+        // would keep an unreachable rider looking alive forever.
+        $or: [
+          { lastActiveAt: { $lt: cutoff } },
+          {
+            lastActiveAt: null,
+            $or: [
+              { lastLocationUpdate: { $lt: cutoff } },
+              { lastLocationUpdate: null, createdAt: { $lt: cutoff } },
+            ],
+          },
+        ],
+      })
+      .select('_id')
+      .lean()
+      .exec();
+
+    let marked = 0;
+    for (const rider of stale) {
+      const res = await this.riderModel
+        .updateOne(
+          { _id: rider._id, status: RiderStatus.AVAILABLE },
+          { $set: { status: RiderStatus.OFFLINE } },
+        )
+        .exec();
+      if (!res.modifiedCount) continue;
+      marked += 1;
+      this.riderPush?.notify(String(rider._id), {
+        title: 'You are offline',
+        body: 'We lost contact with your phone, so you will not get new orders. Open the app to go online again.',
+        data: { type: 'rider_offline' },
+        channelId: RIDER_UPDATES_CHANNEL,
+      });
+    }
+    if (marked)
+      this.logger.log(`Marked ${marked} unreachable rider(s) offline`);
+    return marked;
   }
 
   /**

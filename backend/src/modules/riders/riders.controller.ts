@@ -9,13 +9,19 @@ import {
   Body,
   ForbiddenException,
   Post,
+  Delete,
+  HttpCode,
 } from '@nestjs/common';
 import { RidersService } from './riders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { UserRole } from '../users/schemas/user.schema';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { RiderLocationDto, UpdateRiderProfileDto } from './dto/rider-self.dto';
+import {
+  RiderLocationDto,
+  RiderPushTokenDto,
+  UpdateRiderProfileDto,
+} from './dto/rider-self.dto';
 
 import { IsString, IsNotEmpty, Length, IsOptional } from 'class-validator';
 
@@ -94,6 +100,28 @@ export class RidersController {
     });
 
     return { rider };
+  }
+
+  /** Registers this device for new-order push alerts (Expo push token). */
+  @Put('me/push-token')
+  @HttpCode(204)
+  async registerPushToken(
+    @Request() req: any,
+    @Body() body: RiderPushTokenDto,
+  ): Promise<void> {
+    this.assertRider(req, 'Only riders can register for rider alerts');
+    await this.ridersService.registerPushToken(req.user.userId, body.token);
+  }
+
+  /** Called on logout so this device stops receiving the rider's alerts. */
+  @Delete('me/push-token')
+  @HttpCode(204)
+  async removePushToken(
+    @Request() req: any,
+    @Body() body: RiderPushTokenDto,
+  ): Promise<void> {
+    this.assertRider(req, 'Only riders can unregister rider alerts');
+    await this.ridersService.removePushToken(req.user.userId, body.token);
   }
 
   /** Today / week / month deliveries and earnings; see RidersService.getMetrics. */
