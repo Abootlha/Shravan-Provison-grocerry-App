@@ -77,6 +77,36 @@ export interface RiderMetrics {
   month: PeriodMetrics;
 }
 
+export type DeliveryPeriod = 'today' | 'week' | 'month';
+
+/** One completed delivery as the rider app shows it (GET /riders/me/deliveries). */
+export interface RiderDelivery {
+  id: string;
+  orderId: string;
+  status: OrderStatus;
+  acceptedAt: Date | null;
+  pickedUpAt: Date | null;
+  deliveredAt: Date | null;
+  /** Accepted (or picked up) to delivered, minutes. */
+  tripMinutes: number | null;
+  customerName: string;
+  address: {
+    full: string;
+    city: string;
+    pincode: string;
+    landmark?: string;
+    receiverName?: string;
+  };
+  items: { name: string; quantity: number; price: number; image?: string }[];
+  itemCount: number;
+  totalAmount: number;
+  paymentMethod: string;
+  /** Cash the rider collected at the door (COD), else 0. */
+  cashCollected: number;
+  /** Same basis as /riders/me/metrics: delivery fee + tip. */
+  earning: { deliveryFee: number; tip: number; total: number };
+}
+
 export interface UpdateRiderProfileInput {
   name?: string;
   vehicleType?: VehicleType;
@@ -249,6 +279,158 @@ export class RidersService {
    * deliveryFee + tip of each delivered order (tip counts as 0 when absent).
    * Online hours are not returned because presence history is not stored.
    */
+  /**
+   * The rider's delivered orders in a period, newest first, with the details
+   * behind the numbers in getMetrics (same period starts, timezone and
+   * earnings basis, so the list always adds up to the totals).
+   */
+  async getDeliveries(
+    riderId: string,
+    options: { period?: DeliveryPeriod; page?: number; limit?: number } = {},
+    now = new Date(),
+  ): Promise<{
+    deliveries: RiderDelivery[];
+    period: DeliveryPeriod;
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    totals: { deliveries: number; earnings: number; cashCollected: number };
+  }> {
+    const period = options.period ?? 'today';
+    const page = Math.max(1, options.page ?? 1);
+    const limit = Math.min(50, Math.max(1, options.limit ?? 20));
+    const starts = periodStarts(now, DEFAULT_TIMEZONE);
+    const since = {
+      today: starts.dayStart,
+      week: starts.weekStart,
+      month: starts.monthStart,
+    }[period];
+    const filter = {
+      riderId: new Types.ObjectId(riderId),
+      orderStatus: OrderStatus.DELIVERED,
+      actualDeliveryTime: { $gte: since },
+    };
+
+    const [orders, total, sums] = await Promise.all([
+      this.orderModel
+        .find(filter)
+        .sort({ actualDeliveryTime: -1, _id: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .populate('userId', 'name')
+        .lean()
+        .exec(),
+      this.orderModel.countDocuments(filter),
+      this.orderModel
+        .aggregate<{ earnings: number; cash: number }>([
+          { $match: filter },
+          {
+            $group: {
+              _id: null,
+              earnings: {
+                $sum: {
+                  $add: [
+                    { $ifNull: ['$deliveryFee', 0] },
+                    { $ifNull: ['$tip', 0] },
+                  ],
+                },
+              },
+              cash: {
+                $sum: {
+                  $cond: [
+                    { $eq: ['$paymentMethod', 'COD'] },
+                    { $ifNull: ['$totalAmount', 0] },
+                    0,
+                  ],
+                },
+              },
+            },
+          },
+        ])
+        .exec(),
+    ]);
+
+    const round = (n: number) => Math.round(n * 100) / 100;
+    const deliveries = orders.map((o: any): RiderDelivery => {
+      const timeline: { status: OrderStatus; timestamp: Date }[] =
+        o.timeline ?? [];
+      const at = (status: OrderStatus) => {
+        const hit = [...timeline].reverse().find((t) => t.status === status);
+        return hit?.timestamp ? new Date(hit.timestamp) : null;
+      };
+      const acceptedAt = at(OrderStatus.ASSIGNED);
+      const pickedUpAt = at(OrderStatus.PICKED_UP);
+      const deliveredAt = o.actualDeliveryTime
+        ? new Date(o.actualDeliveryTime)
+        : at(OrderStatus.DELIVERED);
+      const tripStart = acceptedAt ?? pickedUpAt;
+      const deliveryFee = Number(o.deliveryFee) || 0;
+      const tip = Number(o.tip) || 0;
+      const address = o.deliveryAddress ?? {};
+      const items = (o.items ?? []).map((i: any) => ({
+        name: i.name,
+        quantity: Number(i.quantity) || 0,
+        price: Number(i.price) || 0,
+        image: i.image || undefined,
+      }));
+      return {
+        id: String(o._id),
+        orderId: o.orderId,
+        status: o.orderStatus,
+        acceptedAt,
+        pickedUpAt,
+        deliveredAt,
+        tripMinutes:
+          tripStart && deliveredAt
+            ? Math.max(
+                0,
+                Math.round(
+                  (deliveredAt.getTime() - tripStart.getTime()) / 60000,
+                ),
+              )
+            : null,
+        customerName: address.receiverName || o.userId?.name || 'Customer',
+        address: {
+          full: address.address || '',
+          city: address.city || '',
+          pincode: address.pincode || '',
+          landmark: address.landmark || undefined,
+          receiverName: address.receiverName || undefined,
+        },
+        items,
+        itemCount: items.reduce(
+          (n: number, i: { quantity: number }) => n + i.quantity,
+          0,
+        ),
+        totalAmount: Number(o.totalAmount) || 0,
+        paymentMethod: o.paymentMethod,
+        cashCollected:
+          o.paymentMethod === 'COD' ? Number(o.totalAmount) || 0 : 0,
+        earning: {
+          deliveryFee,
+          tip,
+          total: round(deliveryFee + tip),
+        },
+      };
+    });
+
+    const s = sums[0];
+    return {
+      deliveries,
+      period,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      totals: {
+        deliveries: total,
+        earnings: round(s?.earnings ?? 0),
+        cashCollected: round(s?.cash ?? 0),
+      },
+    };
+  }
+
   async getMetrics(riderId: string, now = new Date()): Promise<RiderMetrics> {
     const rider = await this.findRiderById(riderId);
     const riderObjectId = new Types.ObjectId(riderId);

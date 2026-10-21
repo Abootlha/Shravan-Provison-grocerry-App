@@ -1,6 +1,8 @@
 import { Type } from 'class-transformer';
 import {
   IsEnum,
+  IsIn,
+  IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -65,6 +67,27 @@ export class RiderLocationDto {
   @IsNumber()
   @Min(-1) // -1 = unknown (iOS)
   speed?: number;
+}
+
+/** GET /riders/me/deliveries?period=today|week|month&page&limit */
+export class RiderDeliveriesQueryDto {
+  @IsOptional()
+  @IsIn(['today', 'week', 'month'])
+  period?: 'today' | 'week' | 'month';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  limit?: number;
 }
 
 /** PUT / DELETE /riders/me/push-token: this device's Expo push token. */

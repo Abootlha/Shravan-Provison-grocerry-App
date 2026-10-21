@@ -18,6 +18,7 @@ import { AdminGuard } from '../auth/guards/admin.guard';
 import { UserRole } from '../users/schemas/user.schema';
 import { Roles } from '../auth/decorators/roles.decorator';
 import {
+  RiderDeliveriesQueryDto,
   RiderLocationDto,
   RiderPushTokenDto,
   UpdateRiderProfileDto,
@@ -122,6 +123,20 @@ export class RidersController {
   ): Promise<void> {
     this.assertRider(req, 'Only riders can unregister rider alerts');
     await this.ridersService.removePushToken(req.user.userId, body.token);
+  }
+
+  /** The deliveries behind the metrics: who, where, what, cash and earning per order. */
+  @Get('me/deliveries')
+  async getMyDeliveries(
+    @Request() req: any,
+    @Query() query: RiderDeliveriesQueryDto,
+  ) {
+    this.assertRider(req, 'Only riders can see rider deliveries');
+    return this.ridersService.getDeliveries(req.user.userId, {
+      period: query.period,
+      page: query.page,
+      limit: query.limit,
+    });
   }
 
   /** Today / week / month deliveries and earnings; see RidersService.getMetrics. */

@@ -2,6 +2,7 @@ import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'ax
 import { AUTH_SERVICE_URL, ORDER_SERVICE_URL, RIDER_SERVICE_URL } from '../utils/constants';
 import { storage } from './storage';
 import { refreshAccessToken } from './authSession';
+import type { DeliveriesPage, DeliveryPeriod, RiderDelivery } from '../types/delivery';
 import type { Rider, RiderMetrics, RiderStatus } from '../types/rider';
 import type { Address, Coordinates, Order, OrderStatus, PaymentMethod, TimelineEntry } from '../types/order';
 
@@ -367,6 +368,54 @@ export const riderApi = {
   },
 
   getMetrics: async () => normalizeMetrics(await riderClient.get<any>('/riders/me/metrics')),
+
+  /** Completed deliveries in a period, newest first, with what the rider did on each. */
+  getDeliveries: async (period: DeliveryPeriod, page = 1, limit = 20): Promise<DeliveriesPage> => {
+    const res = await riderClient.get<any>(`/riders/me/deliveries?period=${period}&page=${page}&limit=${limit}`);
+    const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null);
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v) || 0);
+    return {
+      page: num(res?.page) || page,
+      totalPages: num(res?.totalPages),
+      totals: {
+        deliveries: num(res?.totals?.deliveries),
+        earnings: num(res?.totals?.earnings),
+        cashCollected: num(res?.totals?.cashCollected),
+      },
+      deliveries: (res?.deliveries ?? []).map(
+        (d: any): RiderDelivery => ({
+          id: String(d.id),
+          orderNumber: String(d.orderId || ''),
+          acceptedAt: iso(d.acceptedAt),
+          pickedUpAt: iso(d.pickedUpAt),
+          deliveredAt: iso(d.deliveredAt),
+          tripMinutes: typeof d.tripMinutes === 'number' ? d.tripMinutes : null,
+          customerName: d.customerName || 'Customer',
+          address: {
+            full: d.address?.full || '',
+            city: d.address?.city || '',
+            pincode: d.address?.pincode || '',
+            landmark: d.address?.landmark || undefined,
+          },
+          items: (d.items ?? []).map((i: any) => ({
+            name: i.name || 'Item',
+            quantity: num(i.quantity),
+            price: num(i.price),
+            image: i.image || undefined,
+          })),
+          itemCount: num(d.itemCount),
+          totalAmount: num(d.totalAmount),
+          paymentMethod: String(d.paymentMethod || ''),
+          cashCollected: num(d.cashCollected),
+          earning: {
+            deliveryFee: num(d.earning?.deliveryFee),
+            tip: num(d.earning?.tip),
+            total: num(d.earning?.total),
+          },
+        })
+      ),
+    };
+  },
 };
 
 export const settingsApi = {
