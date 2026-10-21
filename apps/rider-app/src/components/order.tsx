@@ -484,23 +484,35 @@ const imageUri = (value?: string | null) => (value && /^https?:\/\//i.test(value
  * come from the catalogue (often other stores' CDNs), so a broken or missing
  * one falls back to a package icon instead of an empty box.
  */
-export const ItemThumb: React.FC<{ uri?: string | null; quantity: number; name: string }> = ({ uri, quantity, name }) => {
+export const ItemThumb: React.FC<{ uri?: string | null; quantity: number; name: string; size?: 'md' | 'sm' }> = ({
+  uri,
+  quantity,
+  name,
+  size = 'md',
+}) => {
   const { colors: c } = useTheme();
   const source = imageUri(uri);
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [source]);
+  const small = size === 'sm';
   return (
-    <View style={[styles.thumb, { borderColor: c.border, backgroundColor: '#FFFFFF' }]}>
+    <View
+      style={[
+        styles.thumb,
+        small && styles.thumbSm,
+        { borderColor: c.border, backgroundColor: '#FFFFFF' },
+      ]}
+    >
       {source && !failed ? (
         <Image
           source={{ uri: source }}
-          style={styles.thumbImage}
+          style={small ? styles.thumbImageSm : styles.thumbImage}
           resizeMode="contain"
           onError={() => setFailed(true)}
           accessibilityLabel={name}
         />
       ) : (
-        <MaterialCommunityIcons name="package-variant-closed" size={24} color={c.textSubtle} />
+        <MaterialCommunityIcons name="package-variant-closed" size={small ? 18 : 24} color={c.textSubtle} />
       )}
       <View style={[styles.thumbQty, { backgroundColor: c.brand, borderColor: c.surface }]}>
         <AppText variant="caption" weight="bold" numeric color="#FFFFFF">
@@ -613,6 +625,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   thumbImage: { width: 48, height: 48, borderRadius: radii.sm },
+  thumbSm: { width: 44, height: 44, borderRadius: radii.sm },
+  thumbImageSm: { width: 38, height: 38, borderRadius: 6 },
   thumbQty: {
     position: 'absolute',
     top: -6,

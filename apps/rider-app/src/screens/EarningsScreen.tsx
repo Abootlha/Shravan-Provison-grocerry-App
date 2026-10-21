@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { AppText, Banner, Card, EmptyState, ScreenHeader, Skeleton } from '../components/ui';
+import { AppText, Banner, Button, Card, EmptyState, ScreenHeader, SectionTitle, Skeleton } from '../components/ui';
 import { StatTile } from '../components/order';
+import { DeliveryCard } from '../components/DeliveryCard';
+import { useDeliveries } from '../hooks/useDeliveries';
 import { useAppDispatch, useAppSelector } from '../hooks/useAuth';
 import { fetchMetrics } from '../store/slices/metricsSlice';
 import { radii, spacing, useTheme } from '../theme';
@@ -23,6 +25,7 @@ export const EarningsScreen: React.FC<EarningsScreenProps> = ({ navigation }) =>
   const { data, loading, error, fetchedAt } = useAppSelector((s) => s.metrics);
   const [period, setPeriod] = useState<Period>('today');
   const [refreshing, setRefreshing] = useState(false);
+  const list = useDeliveries(period);
 
   useEffect(() => {
     dispatch(fetchMetrics());
@@ -30,7 +33,7 @@ export const EarningsScreen: React.FC<EarningsScreenProps> = ({ navigation }) =>
 
   const refresh = async () => {
     setRefreshing(true);
-    await dispatch(fetchMetrics());
+    await Promise.all([dispatch(fetchMetrics()), list.refresh()]);
     setRefreshing(false);
   };
 
@@ -114,6 +117,34 @@ export const EarningsScreen: React.FC<EarningsScreenProps> = ({ navigation }) =>
                   style={{ paddingVertical: spacing.xl }}
                 />
               </Card>
+            ) : null}
+
+            {list.deliveries.length ? (
+              <View style={{ gap: spacing.md }}>
+                <SectionTitle
+                  title="Deliveries"
+                  style={{ marginBottom: 0 }}
+                  right={
+                    list.totals && list.totals.cashCollected > 0 ? (
+                      <AppText variant="caption" tone="muted" numeric>
+                        {formatMoney(list.totals.cashCollected)} cash collected
+                      </AppText>
+                    ) : undefined
+                  }
+                />
+                {list.deliveries.map((d) => (
+                  <DeliveryCard
+                    key={d.id}
+                    delivery={d}
+                    onPress={() => navigation.navigate('OrderDetail', { orderId: d.id })}
+                  />
+                ))}
+                {list.hasMore ? (
+                  <Button label="Show more" variant="secondary" loading={list.loading} onPress={list.loadMore} />
+                ) : null}
+              </View>
+            ) : list.error ? (
+              <Banner tone="warning" title="Could not load the delivery list" message={list.error} actionLabel="Retry" onAction={list.refresh} />
             ) : null}
 
             <View style={{ flexDirection: 'row', gap: spacing.md }}>

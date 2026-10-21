@@ -5,6 +5,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { AppText, Banner, Card, IconButton, SectionTitle, Skeleton } from '../components/ui';
 import { ActiveOrderCard, OfferCard, OnlineToggle, StatTile } from '../components/order';
 import { RejectSheet } from '../components/RejectSheet';
+import { DeliveryCard } from '../components/DeliveryCard';
+import { useDeliveries } from '../hooks/useDeliveries';
 import { useAppDispatch, useAppSelector } from '../hooks/useAuth';
 import { useSocketState } from '../hooks/useSocketState';
 import { checkLocationPermission } from '../hooks/useRiderRuntime';
@@ -143,6 +145,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const firstName = (user?.name || 'Rider').split(' ')[0];
   const m = metrics.data;
   const metricsLoading = metrics.loading && !m;
+  // Today's deliveries, reloaded when today's count changes (i.e. right after a delivery).
+  const today = useDeliveries('today', 3, m?.today.deliveries);
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
@@ -329,6 +333,27 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
             </View>
           )}
         </View>
+
+        {today.deliveries.length ? (
+          <View style={{ gap: spacing.md }}>
+            <SectionTitle
+              title="Today's deliveries"
+              style={{ marginBottom: 0 }}
+              right={
+                today.totals && today.totals.deliveries > today.deliveries.length ? (
+                  <Pressable accessibilityRole="button" onPress={() => navigation.navigate('Earnings')} hitSlop={10}>
+                    <AppText variant="bodySm" weight="semibold" tone="brand">
+                      See all {today.totals.deliveries} ›
+                    </AppText>
+                  </Pressable>
+                ) : undefined
+              }
+            />
+            {today.deliveries.map((d) => (
+              <DeliveryCard key={d.id} delivery={d} onPress={() => navigation.navigate('OrderDetail', { orderId: d.id })} />
+            ))}
+          </View>
+        ) : null}
       </ScrollView>
 
       <RejectSheet
