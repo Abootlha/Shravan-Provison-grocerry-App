@@ -1,10 +1,11 @@
 /**
- * OrderTrackingScreen — live order tracking.
+ * OrderTrackingScreen — live order tracking (quick-commerce layout).
  *
- * Layout: full-bleed map (~42% of the screen) with round back / help buttons (the only glass on the
- * screen) and a solid "#CODE · Live" label (MapChrome), then a r16 sheet (the one floating shadow) whose
- * surface head panel carries the "Arriving in **8 mins**" headline, the "On time" note and the 4-icon progress line,
- * followed by the stacked cards (TrackingBottomSheet). Delivered / cancelled orders drop the map.
+ * Layout: full-bleed map (~42% of the screen) with a round back button and, on the right, expand /
+ * collapse and re-centre (MapControls), then a r16 sheet (the one floating shadow) holding the
+ * StatusCard ("Arriving in / **13 mins** / Your order is on the way", "On time" tag, delivery
+ * partner with call, "2 Items · ₹78 saved / Delivering to …"), then the delivery OTP and help
+ * (TrackingBottomSheet compact). Delivered / cancelled orders drop the map and keep their hero cards.
  * Tapping the map or the "View map" button expands it to ~72% of the screen:
  * the sheet springs down and the map slides so its centre stays in view (transform only — the map
  * itself never resizes). Back / the collapse button / tapping the sheet reverses it.
@@ -32,8 +33,8 @@ import { OrderService, SettingsService } from '../services';
 import socketService from '../services/socketService';
 import OrderTrackingMap from '../components/OrderTrackingMap';
 import TrackingBottomSheet from '../components/TrackingBottomSheet';
-import { EtaHead, MapChrome, TrackingBar } from './tracking/TrackingHeader';
-import DeliveryStepper from './tracking/DeliveryStepper';
+import { MapControls, TrackingBar } from './tracking/TrackingHeader';
+import StatusCard from './tracking/StatusCard';
 import { TrackingSkeleton } from './tracking/TrackingStates';
 import { getHeaderCopy } from './tracking/trackingCopy';
 import { getRider, shortOrderCode } from './orders/orderUtils';
@@ -71,7 +72,6 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
         routeCoordinates,
         routeInfo,
         storeLocation,
-        connectionStatus,
         error,
         isLoading,
         activeLeg,
@@ -81,6 +81,8 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
     const { token } = useSelector((state) => state.auth);
     const { isHi } = useTranslation();
     const [expanded, setExpanded] = useState(false);
+    // Bumped by the re-centre button: the map re-fits store, rider and home.
+    const [recenterTick, setRecenterTick] = useState(0);
     const [storePhone, setStorePhone] = useState(null);
     const [loadError, setLoadError] = useState(null);
     const [socketOrderId, setSocketOrderId] = useState(orderId || null);
@@ -379,11 +381,6 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
     const sheetStyle = useAnimatedStyle(() => ({
         transform: [{ translateY: progress.value * diff }],
     }));
-    const collapseBtnStyle = useAnimatedStyle(() => ({
-        opacity: progress.value,
-        transform: [{ translateY: (1 - progress.value) * 12 }],
-    }));
-    const viewMapStyle = useAnimatedStyle(() => ({ opacity: 1 - progress.value }));
 
     const expand = () => {
         haptic.light();
@@ -392,7 +389,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
     const collapse = () => setExpanded(false);
     const onBack = () => (expanded ? collapse() : handleSafeBack());
 
-    // Status change → a haptic beat (the headline crossfades itself, see EtaHead). Not on first load.
+    // Status change → a haptic beat (the headline crossfades itself, see StatusCard). Not on first load.
     const liveStatus = String(currentOrder?.orderStatus || '').toUpperCase();
     const lastStatusRef = useRef(null);
     useEffect(() => {
@@ -472,25 +469,33 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
         ? { top: chromeH, bottom: radii.xl + 56 }
         : { top: diff / 2 + chromeH, bottom: diff / 2 + radii.xl };
 
+    const onViewDetails = canonicalId ? () => navigation.navigate('OrderDetails', { orderId: canonicalId }) : undefined;
     const sheetBody = (
         <>
-            {!terminal ? (
-                <View style={[styles.headPanel, showMap ? styles.headPanelSheet : styles.headPanelFlat]}>
-                    {showMap ? <View style={styles.handle} /> : null}
-                    <EtaHead copy={copy} stateKey={status} etaMinutes={etaMinutes} onTime={onTime} delayNote={delayNote} isHi={isHi} />
-                    <View style={styles.stepper}>
-                        <DeliveryStepper status={status} isHi={isHi} />
-                    </View>
-                </View>
-            ) : null}
+            {showMap ? <View style={styles.handle} /> : null}
             <View style={styles.cards}>
+                {!terminal ? (
+                    <StatusCard
+                        copy={copy}
+                        status={status}
+                        etaMinutes={etaMinutes}
+                        onTime={onTime}
+                        delayNote={delayNote}
+                        rider={rider}
+                        stale={stale && Boolean(legNow)}
+                        order={currentOrder}
+                        isHi={isHi}
+                        onViewDetails={onViewDetails}
+                    />
+                ) : null}
                 <TrackingBottomSheet
+                    compact={!terminal}
                     order={currentOrder}
                     riderLocation={riderLocation}
                     activeLeg={legNow}
                     isHi={isHi}
                     onHelp={onHelp}
-                    onViewDetails={canonicalId ? () => navigation.navigate('OrderDetails', { orderId: canonicalId }) : undefined}
+                    onViewDetails={onViewDetails}
                     onShop={() => navigation.navigate('Main', { screen: 'Home' })}
                 />
             </View>
@@ -532,7 +537,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
                         orderStatus={currentOrder.orderStatus}
                         activeLeg={legNow}
                         viewportPadding={viewportPadding}
-                        fitKey={expanded ? 'expanded' : 'collapsed'}
+                        fitKey={`${expanded ? 'expanded' : 'collapsed'}-${recenterTick}`}
                     />
                 </Animated.View>
 
@@ -542,14 +547,7 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
                         style={[styles.mapHit, { top: chromeH, height: mapCollapsed - radii.xl - chromeH }]}
                         accessibilityRole="button"
                         accessibilityLabel={isHi ? 'नक्शा बड़ा करें' : 'Expand map'}
-                    >
-                        <Animated.View style={viewMapStyle}>
-                            <View style={styles.viewMap}>
-                                <MaterialCommunityIcons name="arrow-expand" size={15} color={colors.ink} />
-                                <Text variant="label">{isHi ? 'नक्शा देखें' : 'View map'}</Text>
-                            </View>
-                        </Animated.View>
-                    </Pressable>
+                    />
                 ) : null}
 
                 {error ? (
@@ -559,27 +557,11 @@ const OrderTrackingScreen = ({ navigation, route: navRoute }) => {
                     </View>
                 ) : null}
 
-                <Animated.View
-                    style={[styles.collapseBtn, { top: expandedH - radii.xl - 60 }, collapseBtnStyle, { pointerEvents: expanded ? 'auto' : 'none' }]}
-                >
-                    <Pressable
-                        onPress={collapse}
-                        accessibilityRole="button"
-                        accessibilityLabel={isHi ? 'नक्शा छोटा करें' : 'Collapse map'}
-                    >
-                        <View style={styles.viewMap}>
-                            <MaterialCommunityIcons name="arrow-collapse" size={15} color={colors.ink} />
-                            <Text variant="label">{isHi ? 'विवरण दिखाएँ' : 'Show details'}</Text>
-                        </View>
-                    </Pressable>
-                </Animated.View>
-
-                <MapChrome
-                    orderCode={orderCode}
-                    live={connectionStatus === 'connected'}
-                    showLive={!terminal}
+                <MapControls
+                    expanded={expanded}
                     onBack={onBack}
-                    onHelp={onHelp}
+                    onToggle={expanded ? collapse : expand}
+                    onRecenter={() => setRecenterTick((n) => n + 1)}
                     topInset={insets.top}
                     isHi={isHi}
                 />
@@ -618,18 +600,6 @@ const useStyles = makeStyles((t) => ({
     body: { flex: 1, overflow: 'hidden', backgroundColor: t.colors.canvas },
     mapLayer: { position: 'absolute', top: 0, left: 0, right: 0 },
     mapHit: { position: 'absolute', left: 0, right: 0, justifyContent: 'flex-end', alignItems: 'flex-end', padding: space.md },
-    viewMap: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: space.xs + 2,
-        minHeight: 40,
-        paddingHorizontal: space.md,
-        borderRadius: radii.button,
-        borderWidth: 1,
-        borderColor: t.colors.hairline,
-        backgroundColor: t.colors.surfaceRaised,
-        ...t.shadows.floating, // a map control floating over the map
-    },
     errorPill: {
         position: 'absolute',
         left: space.lg,
@@ -642,7 +612,6 @@ const useStyles = makeStyles((t) => ({
         borderRadius: radii.chip,
         backgroundColor: t.colors.errorTint,
     },
-    collapseBtn: { position: 'absolute', right: space.md },
     sheet: {
         position: 'absolute',
         left: 0,
@@ -659,25 +628,15 @@ const useStyles = makeStyles((t) => ({
         borderTopRightRadius: radii.xl,
         overflow: 'hidden',
     },
-    headPanel: {
-        backgroundColor: t.colors.surface,
-        paddingHorizontal: space.xl,
-        paddingBottom: space.xl,
-        borderBottomWidth: 1,
-        borderBottomColor: t.colors.hairline,
-    },
-    headPanelSheet: { paddingTop: space.sm, borderTopLeftRadius: radii.xl, borderTopRightRadius: radii.xl },
-    headPanelFlat: { paddingTop: space.lg, marginHorizontal: space.lg, borderRadius: radii.card, borderWidth: 1, borderColor: t.colors.hairline },
     handle: {
         alignSelf: 'center',
         width: 40,
         height: 5,
         borderRadius: radii.pill,
         backgroundColor: t.colors.border,
-        marginBottom: space.md,
+        marginTop: space.sm,
     },
-    stepper: { marginTop: space.xl },
-    cards: { paddingHorizontal: space.lg, paddingTop: space.lg },
+    cards: { paddingHorizontal: space.lg, paddingTop: space.md, gap: space.md },
 }));
 
 export default OrderTrackingScreen;

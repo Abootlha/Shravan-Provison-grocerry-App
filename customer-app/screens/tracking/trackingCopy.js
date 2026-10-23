@@ -1,5 +1,6 @@
 /**
- * Status-specific copy for the tracking header. `eta` true means the big line is
+ * Status-specific copy for the tracking header. `headline` is the bold status sentence under the ETA
+ * ("Your order is on the way"); `sub` is the quieter detail line. `eta` true means the big line is
  * "Arriving in N minutes" (the screen's one mixed-weight Headline, number in violet); otherwise `title` is shown.
  */
 export const getHeaderCopy = (status, isHi, { activeLeg, riderName } = {}) => {
@@ -16,12 +17,14 @@ export const getHeaderCopy = (status, isHi, { activeLeg, riderName } = {}) => {
             return {
                 micro: isHi ? 'ऑर्डर कन्फर्म हुआ' : 'Order confirmed',
                 eta: true,
+                headline: isHi ? 'आपका ऑर्डर कन्फर्म हो गया' : 'Your order is confirmed',
                 sub: isHi ? 'स्टोर आपका सामान चुन रहा है' : 'The store is picking your items',
             };
         case 'ASSIGNED':
             return {
                 micro: isHi ? 'डिलीवरी पार्टनर तय' : 'Delivery partner assigned',
                 eta: true,
+                headline: isHi ? 'आपका ऑर्डर पैक हो रहा है' : 'Your order is getting packed',
                 sub: activeLeg === 'to_store'
                     ? isHi ? `${rider} स्टोर जा रहे हैं` : `${rider} is heading to the store`
                     : isHi ? 'आपका ऑर्डर पैक हो रहा है' : 'Your order is being packed',
@@ -30,18 +33,21 @@ export const getHeaderCopy = (status, isHi, { activeLeg, riderName } = {}) => {
             return {
                 micro: isHi ? 'ऑर्डर पैक हो गया' : 'Order packed',
                 eta: true,
+                headline: isHi ? 'आपका ऑर्डर पैक हो गया' : 'Your order is packed',
                 sub: isHi ? 'जल्द ही रवाना होगा' : 'Leaving the store shortly',
             };
         case 'PICKED_UP':
             return {
                 micro: isHi ? 'स्टोर से निकल गया' : 'Picked up from the store',
                 eta: true,
+                headline: isHi ? 'आपका ऑर्डर रास्ते में है' : 'Your order is on the way',
                 sub: isHi ? `${rider} आपके पास आ रहे हैं` : `${rider} is on the way to you`,
             };
         case 'OUT_FOR_DELIVERY':
             return {
                 micro: isHi ? 'ऑर्डर रास्ते में है' : 'Order is on the way',
                 eta: true,
+                headline: isHi ? 'आपका ऑर्डर रास्ते में है' : 'Your order is on the way',
                 sub: isHi ? `${rider} आपके पास आ रहे हैं` : `${rider} is on the way to you`,
             };
         case 'ARRIVED':

@@ -42,6 +42,36 @@ export function MapChrome({ orderCode, live, showLive = true, onBack, onHelp, to
     );
 }
 
+/**
+ * Map controls (quick-commerce layout): a round back button on the left; on the right a column with
+ * expand / collapse and re-centre. Solid discs with the floating shadow; no labels over the map.
+ */
+export function MapControls({ expanded, onBack, onToggle, onRecenter, topInset = 0, isHi }) {
+    const styles = useStyles();
+    const { colors } = useTheme();
+    return (
+        <View style={[styles.chrome, { top: topInset + space.sm }, { pointerEvents: 'box-none' }]}>
+            <IconButton name="arrow-left" variant="glass" accessibilityLabel={isHi ? 'वापस जाएँ' : 'Go back'} onPress={onBack} />
+            <View style={styles.mapButtons}>
+                <IconButton
+                    name={expanded ? 'arrow-collapse' : 'arrow-expand'}
+                    variant="glass"
+                    color={colors.brand}
+                    accessibilityLabel={expanded ? (isHi ? 'नक्शा छोटा करें' : 'Show order details') : isHi ? 'नक्शा बड़ा करें' : 'Expand map'}
+                    onPress={onToggle}
+                />
+                <IconButton
+                    name="crosshairs-gps"
+                    variant="glass"
+                    color={colors.brand}
+                    accessibilityLabel={isHi ? 'नक्शा बीच में लाएँ' : 'Re-centre the map'}
+                    onPress={onRecenter}
+                />
+            </View>
+        </View>
+    );
+}
+
 export function EtaHead({ copy, stateKey, etaMinutes, onTime, delayNote = null, isHi }) {
     const styles = useStyles();
     const { colors } = useTheme();
@@ -109,7 +139,7 @@ const useStyles = makeStyles((t) => ({
         left: space.lg,
         right: space.lg,
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         justifyContent: 'space-between',
         gap: space.sm,
     },
@@ -132,6 +162,7 @@ const useStyles = makeStyles((t) => ({
     onTime: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
     delay: { flexDirection: 'row', alignItems: 'flex-start', gap: space.xs, marginTop: space.xxs },
     title: { marginTop: space.xxs },
+    mapButtons: { gap: space.md, alignItems: 'center' },
     bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: space.xs, minHeight: 56 },
 }));
 

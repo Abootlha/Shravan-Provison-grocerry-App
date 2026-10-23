@@ -11,6 +11,8 @@
  *   onHelp           () => void — help row
  *   onViewDetails    () => void — "View full receipt"
  *   onShop           () => void — cancelled state CTA
+ *   compact          live order: the StatusCard above already shows the partner and the order,
+ *                    so only the delivery OTP and help are stacked here
  *
  * Motion: cards stagger in on first paint; when a card appears or goes (the OTP card at pickup, the
  * rider card at delivery) it fades and its neighbours slide (layout.list) instead of jumping.
@@ -26,7 +28,7 @@ import OrderSummaryCard from '../screens/tracking/OrderSummaryCard';
 import { CancelledHero, DeliveredHero, HelpRow } from '../screens/tracking/TrackingStates';
 import { LIVE_STATUSES, OTP_STATUSES, getRider, shortOrderCode } from '../screens/orders/orderUtils';
 
-const TrackingBottomSheet = ({ order, riderLocation, activeLeg, isHi, onHelp, onViewDetails, onShop }) => {
+const TrackingBottomSheet = ({ order, riderLocation, activeLeg, isHi, onHelp, onViewDetails, onShop, compact = false }) => {
     const status = String(order?.orderStatus || '').toUpperCase();
     const rider = getRider(order);
     const otp = order?.deliveryOtp || order?.otp || null;
@@ -48,8 +50,10 @@ const TrackingBottomSheet = ({ order, riderLocation, activeLeg, isHi, onHelp, on
         cards.push(<CancelledHero key="cancelled" isHi={isHi} onShop={onShop} />);
     }
     if (showOtp) cards.push(<DeliveryOtpCard key="otp" otp={otp} isHi={isHi} />);
-    if (showRider) cards.push(<RiderCard key="rider" rider={rider} stale={stale} activeLeg={activeLeg} deliveredAt={deliveredAt} isHi={isHi} />);
-    cards.push(<OrderSummaryCard key="summary" order={order} isHi={isHi} onViewDetails={onViewDetails} />);
+    if (!compact) {
+        if (showRider) cards.push(<RiderCard key="rider" rider={rider} stale={stale} activeLeg={activeLeg} deliveredAt={deliveredAt} isHi={isHi} />);
+        cards.push(<OrderSummaryCard key="summary" order={order} isHi={isHi} onViewDetails={onViewDetails} />);
+    }
     cards.push(<HelpRow key="help" isHi={isHi} onPress={onHelp} />);
 
     return (
