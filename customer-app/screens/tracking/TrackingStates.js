@@ -91,10 +91,12 @@ export function HelpRow({ isHi, onPress }) {
     return (
         <Card radius="lg" padding="lg" onPress={onPress} accessibilityLabel={isHi ? 'इस ऑर्डर के लिए मदद' : 'Get help with this order'}>
             <View style={styles.helpRow}>
-                <MaterialCommunityIcons name="phone-outline" size={20} color={colors.inkSecondary} />
+                <View style={styles.helpIcon}>
+                    <MaterialCommunityIcons name="message-processing-outline" size={20} color={colors.brandStrong} />
+                </View>
                 <View style={styles.flex}>
                     <Text variant="title">{isHi ? 'ऑर्डर में मदद चाहिए?' : 'Need help with this order?'}</Text>
-                    <Text variant="caption" color="muted">{isHi ? 'स्टोर को सीधे कॉल करें' : 'Call the store directly'}</Text>
+                    <Text variant="caption" color="muted">{isHi ? 'स्टोर से सीधे बात करें' : 'Talk to the store about any issue'}</Text>
                 </View>
                 <MaterialCommunityIcons name="chevron-right" size={22} color={colors.inkMuted} />
             </View>
@@ -135,6 +137,14 @@ const useStyles = makeStyles((t) => ({
     center: { alignItems: 'center', gap: space.sm },
     checkBox: { width: 120, height: 104, alignItems: 'center', justifyContent: 'center' },
     cta: { marginTop: space.sm, alignSelf: 'center' },
+    helpIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: radii.md,
+        backgroundColor: t.colors.brandTint,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     helpRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
     skSheet: {
         flex: 1,
